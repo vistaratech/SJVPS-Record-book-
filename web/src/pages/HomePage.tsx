@@ -99,6 +99,15 @@ export default function HomePage() {
     <div className="app-layout">
       {/* ── Sidebar ── */}
       <div className="sidebar">
+        {/* Brand Strip — deep green, school logo */}
+        <div className="sidebar-brand">
+          <img src="/logo-transparent.png" alt="SJVPS" className="sidebar-brand-logo" />
+          <div>
+            <div className="sidebar-brand-name">SJVPS Record Book</div>
+            <div className="sidebar-brand-sub">Learn and Grow</div>
+          </div>
+        </div>
+
         <div className="sidebar-header">
           <div className="sidebar-business">
             <div className="sidebar-avatar">{businesses?.[0]?.name?.[0] || 'B'}</div>
@@ -134,6 +143,8 @@ export default function HomePage() {
               </div>
               <button
                 className="register-item-menu"
+                title="Register options"
+                aria-label="Register options"
                 onClick={(e) => { e.stopPropagation(); setMenuId(menuId === reg.id ? null : reg.id); }}
               >
                 <MoreVertical size={14} />
@@ -141,13 +152,19 @@ export default function HomePage() {
             </div>
           ))}
         </div>
+
+        {/* Sidebar Footer */}
+        <div className="sidebar-footer">
+          <img src="/logo-transparent.png" alt="SJVPS" className="sidebar-footer-logo" />
+          <span className="sidebar-footer-text">SJVPS · CBSE Affiliated</span>
+        </div>
       </div>
 
       {/* ── Content ── */}
       <div className="content-area">
         {!filtered || filtered.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon"><BookOpen size={36} /></div>
+            <img src="/logo-transparent.png" alt="SJVPS" className="empty-logo" />
             <h2 className="empty-title">Welcome to SJVPS Record Book</h2>
             <p className="empty-sub">Create your first register by selecting a template or start from scratch.</p>
             <button className="empty-btn" onClick={() => navigate('/templates')}>
@@ -155,23 +172,23 @@ export default function HomePage() {
             </button>
           </div>
         ) : (
-          <div style={{ padding: 40 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Your Registers</h2>
-            <p style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 24 }}>
-              {filtered.length} register{filtered.length !== 1 ? 's' : ''} • Click to open
+          <div className="registers-content">
+            <h2 className="registers-heading">Your Registers</h2>
+            <p className="registers-subheading">
+              {filtered.length} register{filtered.length !== 1 ? 's' : ''} &bull; Click to open
             </p>
-            <div className="categories-grid" style={{ padding: 0 }}>
+            <div className="categories-grid categories-grid--no-pad">
               {filtered.map((reg) => (
                 <div key={reg.id} className="category-card" onClick={() => navigate(`/register/${reg.id}`)}>
                   <div className="category-icon" style={{ background: reg.iconColor || 'var(--navy)' }}>
                     <FileText size={24} />
                   </div>
                   <div className="category-name">{reg.name}</div>
-                  <div className="category-count">{reg.entryCount} entries • {reg.category}</div>
+                  <div className="category-count">{reg.entryCount} entries &bull; {reg.category}</div>
                 </div>
               ))}
-              <div className="category-card" onClick={() => navigate('/templates')} style={{ borderStyle: 'dashed' }}>
-                <div className="category-icon" style={{ background: 'var(--muted-light)' }}>
+              <div className="category-card category-card--dashed" onClick={() => navigate('/templates')}>
+                <div className="category-icon category-icon--muted">
                   <Plus size={24} />
                 </div>
                 <div className="category-name">Add New</div>
@@ -234,7 +251,7 @@ export default function HomePage() {
       {/* ── Template Category Modal ── */}
       {selectedCategory && (
         <div className="modal-overlay" onClick={() => setSelectedCategory(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520, maxHeight: '85vh' }}>
+          <div className="modal-content modal-content--wide" onClick={(e) => e.stopPropagation()}>
             <div className="template-modal-header" style={{ background: categoryData?.color || 'var(--navy)' }}>
               <div className="template-modal-header-icon">
                 {(() => { const Icon = ICON_MAP[categoryData?.icon || ''] || FileText; return <Icon size={24} />; })()}
@@ -243,7 +260,12 @@ export default function HomePage() {
                 <div className="template-modal-header-title">{categoryData?.name} Templates</div>
                 <div className="template-modal-header-sub">Choose a layout to get started</div>
               </div>
-              <button className="template-modal-close" onClick={() => setSelectedCategory(null)}>
+              <button
+                className="template-modal-close"
+                title="Close"
+                aria-label="Close template picker"
+                onClick={() => setSelectedCategory(null)}
+              >
                 <X size={20} />
               </button>
             </div>

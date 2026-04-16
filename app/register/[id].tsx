@@ -546,7 +546,7 @@ export default function RegisterScreen() {
                 }}
               >
                 <Text style={[styles.tabBtnText, idx === activePageIndex && styles.activeTabText]}>
-                  📄 {page.name}
+                  {page.name}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -564,18 +564,27 @@ export default function RegisterScreen() {
           </ScrollView>
         </View>
 
-        {/* ─── Toolbar ───────────────────────────────────── */}
+        {/* ─── Toolbar ─── matches web: Search | Filter | +Add Row | +Add Column ── */}
         <View style={styles.toolbar}>
-          <View style={styles.toolbarLeft}>
-            <TouchableOpacity
-              style={styles.toolbarBtn}
-              onPress={() => addEntryMutation.mutate()}
-              disabled={addEntryMutation.isPending}
-            >
-              <Ionicons name="add" size={16} color={Colors.navy} />
-              <Text style={styles.toolbarBtnPrimary}>Add entry</Text>
-            </TouchableOpacity>
+          {/* Left: Search */}
+          <View style={styles.searchBox}>
+            <Ionicons name="search" size={14} color={Colors.muted} />
+            <TextInput
+              style={styles.searchBoxInput}
+              placeholder="Search rows..."
+              placeholderTextColor={Colors.placeholder}
+              value={search}
+              onChangeText={setSearch}
+            />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch('')}>
+                <Ionicons name="close-circle" size={16} color={Colors.mutedLight} />
+              </TouchableOpacity>
+            )}
+          </View>
 
+          {/* Right: Filter + Add Row (primary) + Add Column */}
+          <View style={styles.toolbarRight}>
             <TouchableOpacity
               style={[styles.toolbarBtn, activeFilters.length > 0 && styles.toolbarBtnHighlight]}
               onPress={() => {
@@ -588,31 +597,21 @@ export default function RegisterScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.toolbarBtn, bulkMode && styles.toolbarBtnHighlight]}
-              onPress={() => {
-                setBulkMode(!bulkMode);
-                setSelectedRows(new Set());
-              }}
+              style={styles.toolbarBtnPrimary}
+              onPress={() => addEntryMutation.mutate()}
+              disabled={addEntryMutation.isPending}
             >
-              <Ionicons name="checkbox" size={14} color={bulkMode ? Colors.white : Colors.muted} />
-              <Text style={[styles.toolbarBtnMuted, bulkMode && styles.toolbarBtnHighlightText]}>Select</Text>
+              <Ionicons name="add" size={15} color={Colors.white} />
+              <Text style={styles.toolbarBtnPrimaryText}>Add Row</Text>
             </TouchableOpacity>
-          </View>
 
-          <View style={styles.searchBox}>
-            <Ionicons name="search" size={14} color={Colors.muted} />
-            <TextInput
-              style={styles.searchBoxInput}
-              placeholder="Search..."
-              placeholderTextColor={Colors.placeholder}
-              value={search}
-              onChangeText={setSearch}
-            />
-            {search.length > 0 && (
-              <TouchableOpacity onPress={() => setSearch('')}>
-                <Ionicons name="close-circle" size={16} color={Colors.mutedLight} />
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              style={styles.toolbarBtn}
+              onPress={() => setNewColumnModal(true)}
+            >
+              <Ionicons name="add" size={14} color={Colors.muted} />
+              <Text style={styles.toolbarBtnMuted}>Add Column</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -1722,28 +1721,34 @@ const styles = StyleSheet.create({
 
   // ── Tabs Row ──────────────────────────────────────
   tabsRow: {
-    height: 44, backgroundColor: Colors.white, borderBottomWidth: 1,
+    height: 40, backgroundColor: Colors.borderLight, borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  tabsScroll: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.xs },
+  tabsScroll: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm },
   tabBtn: {
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
-    borderBottomWidth: 2, borderBottomColor: 'transparent',
+    paddingHorizontal: Spacing.lg, paddingVertical: 7,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1, borderColor: 'transparent',
+    marginHorizontal: 2,
   },
-  tabBtnText: { color: Colors.muted, fontWeight: FontWeight.medium, fontSize: FontSize.sm },
+  tabBtnText: { color: Colors.muted, fontWeight: FontWeight.semibold, fontSize: FontSize.xs },
   activeTab: {
-    borderBottomColor: Colors.navy,
-    backgroundColor: 'rgba(0,75,143,0.04)',
+    backgroundColor: Colors.white,
+    borderColor: Colors.border,
   },
   activeTabText: { color: Colors.navy, fontWeight: FontWeight.bold },
-  addTabBtn: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
+  addTabBtn: { paddingHorizontal: Spacing.md, paddingVertical: 7,
+    borderWidth: 1, borderColor: Colors.mutedLight, borderRadius: BorderRadius.sm,
+    borderStyle: 'dashed', marginLeft: 4,
+  },
 
   // ── Toolbar ───────────────────────────────────────
   toolbar: {
-    height: 52, backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.border,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.md,
+    backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, gap: Spacing.sm,
   },
-  toolbarLeft: { flexDirection: 'row', gap: Spacing.xs },
+  toolbarRight: { flexDirection: 'row', gap: Spacing.xs, alignItems: 'center' },
   toolbarBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 3,
     borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.sm,
@@ -1753,14 +1758,21 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.navy, borderColor: Colors.navy,
   },
   toolbarBtnHighlightText: { color: Colors.white },
-  toolbarBtnPrimary: { fontSize: 11, fontWeight: FontWeight.semibold, color: Colors.navy },
+  /* Primary (Add Row) pill — solid green like web */
+  toolbarBtnPrimary: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: Colors.navy, borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.md, paddingVertical: 6,
+    ...Shadows.button,
+  },
+  toolbarBtnPrimaryText: { fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white },
   toolbarBtnMuted: { fontSize: 11, fontWeight: FontWeight.semibold, color: Colors.muted },
   searchBox: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
-    backgroundColor: 'rgba(0,0,0,0.03)', borderWidth: 1, borderColor: Colors.border,
-    borderRadius: BorderRadius.sm, paddingHorizontal: Spacing.sm, height: 34, width: 120,
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+    backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: BorderRadius.sm, paddingHorizontal: Spacing.sm, height: 34,
   },
-  searchBoxInput: { flex: 1, fontSize: 11, color: Colors.foreground },
+  searchBoxInput: { flex: 1, fontSize: 12, color: Colors.foreground },
 
   // ── Bulk Actions Bar ──────────────────────────────
   bulkBar: {
@@ -1788,7 +1800,7 @@ const styles = StyleSheet.create({
   },
   serialHeader: {
     width: SERIAL_COL_WIDTH, paddingVertical: Spacing.md, justifyContent: 'center', alignItems: 'center',
-    borderRightWidth: 1, borderRightColor: Colors.border, backgroundColor: '#F8FAFC',
+    borderRightWidth: 1, borderRightColor: Colors.border, backgroundColor: Colors.borderLight,
   },
   serialHeaderText: { fontSize: FontSize.xs, fontWeight: FontWeight.semibold, color: Colors.muted },
   colHeader: {
@@ -1800,19 +1812,19 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.borderLight, paddingHorizontal: 5, paddingVertical: 4,
     borderRadius: 4, justifyContent: 'center', alignItems: 'center',
   },
-  colHeaderText: { fontSize: FontSize.xs, fontWeight: FontWeight.bold, color: Colors.foreground, flex: 1 },
+  colHeaderText: { fontSize: FontSize.xs, fontWeight: FontWeight.bold, color: Colors.navy, flex: 1, textTransform: 'uppercase', letterSpacing: 0.3 },
   addColBtn: { width: 44, justifyContent: 'center', alignItems: 'center' },
 
   dataRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: Colors.border, minHeight: 44 },
   dataRowReal: { backgroundColor: Colors.white },
-  dataRowSelected: { backgroundColor: '#EBF5FF' },
+  dataRowSelected: { backgroundColor: 'rgba(20,83,45,0.06)' },
   checkboxCell: {
     width: CHECKBOX_COL_WIDTH, justifyContent: 'center', alignItems: 'center',
     borderRightWidth: 1, borderRightColor: Colors.border,
   },
   serialCell: {
     width: SERIAL_COL_WIDTH, justifyContent: 'center', alignItems: 'center',
-    borderRightWidth: 1, borderRightColor: Colors.border, backgroundColor: '#F8FAFC',
+    borderRightWidth: 1, borderRightColor: Colors.border, backgroundColor: Colors.borderLight,
   },
   serialText: { fontSize: FontSize.xs, color: Colors.muted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   dataCell: { width: COL_WIDTH, borderRightWidth: 1, borderRightColor: Colors.border },
@@ -1878,7 +1890,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 2, borderTopColor: Colors.border, minHeight: 52,
   },
   calcSerial: {
-    width: SERIAL_COL_WIDTH, backgroundColor: '#F0F4F8', borderRightWidth: 1,
+    width: SERIAL_COL_WIDTH, backgroundColor: Colors.borderLight, borderRightWidth: 1,
     borderRightColor: Colors.border, justifyContent: 'center', alignItems: 'center',
   },
   calcSerialText: { fontSize: 9, fontWeight: FontWeight.bold, color: Colors.navy },
@@ -2005,7 +2017,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md, paddingHorizontal: Spacing.lg, borderRadius: BorderRadius.md,
     marginBottom: 2,
   },
-  dropdownOptionSelected: { backgroundColor: '#EBF5FF' },
+  dropdownOptionSelected: { backgroundColor: 'rgba(20,83,45,0.06)' },
   dropdownOptionText: { fontSize: FontSize.md, color: Colors.foreground },
   dropdownOptionTextSelected: { fontWeight: FontWeight.bold, color: Colors.navy },
 

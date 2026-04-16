@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useAuth } from '../lib/auth';
 import { sendOtp, verifyOtp } from '../lib/api';
-import { BookOpen, ArrowRight, KeyRound } from 'lucide-react';
+import { ArrowRight, KeyRound } from 'lucide-react';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -50,14 +50,26 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <div className="login-logo"><BookOpen size={32} /></div>
+
+        {/* School Logo + Badge */}
+        <div className="login-logo-wrap">
+          <img
+            src="/logo-transparent.png"
+            alt="SJVPS School Seal"
+            className="login-logo-img"
+          />
+          <span className="login-logo-badge">CBSE Affiliated</span>
+        </div>
+
         <h1 className="login-title">SJVPS Record Book</h1>
         <p className="login-sub">
-          {step === 'phone' ? 'Enter your phone number to get started' : `Enter the OTP sent to +91 ${phone}`}
+          {step === 'phone'
+            ? 'Enter your phone number to get started'
+            : `Enter the OTP sent to +91 ${phone}`}
         </p>
 
         {error && (
-          <div style={{ padding: '10px 14px', background: '#FEF2F2', color: '#EF4444', borderRadius: 8, fontSize: 13, marginBottom: 16, fontWeight: 500 }}>
+          <div className="login-error">
             {error}
           </div>
         )}
@@ -94,6 +106,8 @@ export default function LoginPage() {
                   inputMode="numeric"
                   maxLength={1}
                   value={digit}
+                  title={`OTP digit ${i + 1}`}
+                  aria-label={`OTP digit ${i + 1} of 6`}
                   ref={(el) => { otpRefs.current[i] = el; }}
                   onChange={(e) => handleOtpChange(i, e.target.value)}
                   onKeyDown={(e) => handleOtpKeyDown(i, e)}
@@ -105,12 +119,12 @@ export default function LoginPage() {
               Didn't receive? <button onClick={() => sendOtp(phone)}>Resend OTP</button>
             </p>
             <button className="login-btn" onClick={handleVerifyOtp} disabled={loading}>
-              {loading ? <div className="spinner" /> : <><KeyRound size={16} /><span>Verify & Login</span></>}
+              {loading ? <div className="spinner" /> : <><KeyRound size={16} /><span>Verify &amp; Login</span></>}
             </button>
           </>
         )}
 
-        <p style={{ fontSize: 11, color: '#94A3B8', textAlign: 'center', marginTop: 24 }}>
+        <p className="login-devnote">
           Dev mode: any OTP works
         </p>
       </div>
