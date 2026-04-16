@@ -18,12 +18,12 @@ export interface User {
 export interface SendOtpResponse { message: string; devOtp?: string; }
 export interface VerifyOtpResponse { token: string; user: User; }
 
-export async function sendOtp(phone: string): Promise<SendOtpResponse> {
+export async function sendOtp(_phone: string): Promise<SendOtpResponse> {
   await delay(500);
   return { message: 'OTP sent', devOtp: '123456' };
 }
 
-export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpResponse> {
+export async function verifyOtp(phone: string, _otp: string): Promise<VerifyOtpResponse> {
   await delay(500);
   return {
     token: 'mock-token',

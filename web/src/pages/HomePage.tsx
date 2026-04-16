@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   listBusinesses, createBusiness, listRegisters, deleteRegister,
-  renameRegister, duplicateRegister, type RegisterSummary,
+  renameRegister, duplicateRegister,
 } from '../lib/api';
 import { CATEGORIES, TEMPLATES, type Template } from '../lib/templates';
 import {
-  Search, Plus, BookOpen, MoreVertical, FileText, Pencil, Copy, Trash2, ExternalLink, X,
+  Search, Plus, MoreVertical, FileText, Pencil, Copy, Trash2, ExternalLink, X,
   Eye, Hash, Calendar, ChevronDown, FlaskConical, Type,
   Building, GraduationCap, Store, Bus, Warehouse, Package, CalendarIcon, HeartPulse,
   Utensils, Dumbbell, Building2, User, ShieldCheck, Leaf, Plane,

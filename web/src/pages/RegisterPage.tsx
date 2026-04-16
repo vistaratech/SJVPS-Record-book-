@@ -7,12 +7,12 @@ import {
   addPage, renamePage, deletePage,
   evaluateFormula, calculateColumnStats, generateCSV,
   generateShareLink, addSharedUser, removeSharedUser,
-  type RegisterDetail, type Column, type Entry, type Page,
+  type Entry,
 } from '../lib/api';
 import {
   ArrowLeft, Plus, Search, Filter, Download, Share2, MoreVertical,
   Pencil, Trash2, Copy, ChevronDown, Calendar, X, Check, SortAsc, SortDesc,
-  Hash, FlaskConical, Type as TypeIcon, Eye, AlertCircle, FileText, UserX,
+  Hash, FlaskConical, Type as TypeIcon, AlertCircle, FileText, UserX,
   ChevronRight, Link2, UserPlus,
 } from 'lucide-react';
 
