@@ -155,6 +155,50 @@ export async function duplicateRegister(registerId: number): Promise<RegisterSum
   return duplicated;
 }
 
+export const importExcelData = async (businessId: number, name: string, data: Record<string, any>[]): Promise<RegisterSummary> => {
+  await delay(500);
+  if (!data || data.length === 0) throw new Error("No data found in the spreadsheet");
+
+  const headers = Object.keys(data[0]);
+  const columns = headers.map((h, i) => ({
+    name: h || `Column ${i + 1}`,
+    type: 'text'
+  }));
+
+  const createdReg = await createRegister({
+    businessId,
+    name: name,
+    columns
+  });
+
+  const reg = DB.registers.find(r => r.id === createdReg.id);
+  if (!reg) throw new Error("Failed to initialize register");
+
+  reg.entries = [];
+
+  data.forEach((row, rowIndex) => {
+    const cells: Record<string, string> = {};
+    headers.forEach((h, colIndex) => {
+      const val = row[h];
+      if (val !== undefined && val !== null && val !== '') {
+        cells[reg.columns[colIndex].id.toString()] = String(val);
+      }
+    });
+
+    reg.entries.push({
+      id: Date.now() + rowIndex * 10,
+      registerId: reg.id,
+      rowNumber: rowIndex + 1,
+      cells,
+      createdAt: new Date().toISOString(),
+      pageIndex: 0,
+    });
+  });
+
+  reg.entryCount = reg.entries.length;
+  return reg;
+};
+
 export function evaluateFormula(formula: string, entry: Entry, columns: Column[]): string {
   if (!formula) return '';
   try {
@@ -211,6 +255,97 @@ export async function updateColumnDropdownOptions(registerId: number, columnId: 
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
   col.dropdownOptions = options;
+  return col;
+}
+
+export async function duplicateColumn(registerId: number, columnId: number): Promise<Column> {
+  await delay(300);
+  const reg = DB.registers.find((r) => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+  const original = reg.columns.find((c) => c.id === columnId);
+  if (!original) throw new Error('Column not found');
+  const newCol: Column = {
+    id: Date.now(), registerId, name: `${original.name} (Copy)`, type: original.type,
+    position: reg.columns.length, dropdownOptions: original.dropdownOptions ? [...original.dropdownOptions] : undefined,
+    formula: original.formula,
+  };
+  reg.columns.push(newCol);
+  // Copy cell data from original column to new column
+  reg.entries.forEach((entry) => {
+    const val = entry.cells?.[columnId.toString()];
+    if (val) entry.cells[newCol.id.toString()] = val;
+  });
+  return newCol;
+}
+
+export async function moveColumn(registerId: number, columnId: number, direction: 'left' | 'right'): Promise<void> {
+  await delay(200);
+  const reg = DB.registers.find((r) => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+  const idx = reg.columns.findIndex((c) => c.id === columnId);
+  if (idx === -1) throw new Error('Column not found');
+  const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+  if (targetIdx < 0 || targetIdx >= reg.columns.length) return;
+  // Swap
+  [reg.columns[idx], reg.columns[targetIdx]] = [reg.columns[targetIdx], reg.columns[idx]];
+  // Update positions
+  reg.columns.forEach((c, i) => c.position = i);
+}
+
+export async function changeColumnType(registerId: number, columnId: number, newType: string): Promise<Column> {
+  await delay(200);
+  const reg = DB.registers.find((r) => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+  const col = reg.columns.find((c) => c.id === columnId);
+  if (!col) throw new Error('Column not found');
+  col.type = newType;
+  if (newType !== 'dropdown') col.dropdownOptions = undefined;
+  if (newType !== 'formula') col.formula = undefined;
+  return col;
+}
+
+export async function clearColumnData(registerId: number, columnId: number): Promise<void> {
+  await delay(200);
+  const reg = DB.registers.find((r) => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+  const colIdStr = columnId.toString();
+  reg.entries.forEach((entry) => {
+    if (entry.cells && entry.cells[colIdStr] !== undefined) {
+      delete entry.cells[colIdStr];
+    }
+  });
+}
+
+export async function insertColumn(registerId: number, data: { name: string; type: string; dropdownOptions?: string[]; formula?: string }, position: number): Promise<Column> {
+  await delay(300);
+  const reg = DB.registers.find((r) => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+  const col: Column = {
+    id: Date.now(), registerId, name: data.name, type: data.type,
+    position, dropdownOptions: data.dropdownOptions, formula: data.formula,
+  };
+  reg.columns.splice(position, 0, col);
+  reg.columns.forEach((c, i) => c.position = i);
+  return col;
+}
+
+export async function freezeColumn(registerId: number, columnId: number, frozen: boolean): Promise<Column> {
+  await delay(100);
+  const reg = DB.registers.find((r) => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+  const col = reg.columns.find((c) => c.id === columnId);
+  if (!col) throw new Error('Column not found');
+  (col as any).frozen = frozen;
+  return col;
+}
+
+export async function hideColumn(registerId: number, columnId: number, hidden: boolean): Promise<Column> {
+  await delay(100);
+  const reg = DB.registers.find((r) => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+  const col = reg.columns.find((c) => c.id === columnId);
+  if (!col) throw new Error('Column not found');
+  (col as any).hidden = hidden;
   return col;
 }
 

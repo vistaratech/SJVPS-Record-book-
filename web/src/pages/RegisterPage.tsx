@@ -3,17 +3,21 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getRegister, addColumn, deleteColumn, renameColumn, updateColumnDropdownOptions,
+  duplicateColumn, moveColumn, changeColumnType, clearColumnData, insertColumn,
+  freezeColumn, hideColumn,
   addEntry, updateEntry, deleteEntry, duplicateEntry, bulkDeleteEntries,
   addPage, renamePage, deletePage,
-  evaluateFormula, calculateColumnStats, generateCSV,
+  evaluateFormula, calculateColumnStats,
   generateShareLink, addSharedUser, removeSharedUser,
   type Entry,
 } from '../lib/api';
+import * as XLSX from 'xlsx';
 import {
   ArrowLeft, Plus, Search, Filter, Download, Share2, MoreVertical,
   Pencil, Trash2, Copy, ChevronDown, Calendar, X, Check, SortAsc, SortDesc,
   Hash, FlaskConical, Type as TypeIcon, AlertCircle, FileText, UserX,
-  ChevronRight, Link2, UserPlus,
+  ChevronRight, Link2, UserPlus, ArrowLeftRight, ArrowRight, ChevronsLeftRight,
+  Pin, EyeOff, Eye, Eraser,
 } from 'lucide-react';
 
 type CalcType = 'sum' | 'average' | 'count' | 'min' | 'max';
@@ -48,18 +52,25 @@ export default function RegisterPage() {
   const [rowMenuId, setRowMenuId] = useState<number | null>(null);
   const [renameColModal, setRenameColModal] = useState(false);
   const [dropdownConfigModal, setDropdownConfigModal] = useState(false);
+  const [changeTypeModal, setChangeTypeModal] = useState(false);
+  const [insertColModal, setInsertColModal] = useState<'left' | 'right' | null>(null);
   const [filterModal, setFilterModal] = useState(false);
   const [dateModal, setDateModal] = useState(false);
   const [dropdownModal, setDropdownModal] = useState(false);
   const [shareModal, setShareModal] = useState(false);
   const [renamePageModal, setRenamePageModal] = useState(false);
   const [calcModal, setCalcModal] = useState(false);
+  const [hiddenColumns, setHiddenColumns] = useState<Set<number>>(new Set());
+  const [frozenColumns, setFrozenColumns] = useState<Set<number>>(new Set());
 
-  // New column form
+  // New column form (shared by Add Column and Insert Column)
   const [newColName, setNewColName] = useState('');
   const [newColType, setNewColType] = useState('text');
   const [newColDropdownOpts, setNewColDropdownOpts] = useState('');
   const [newColFormula, setNewColFormula] = useState('');
+
+  // Change column type
+  const [changeTypeValue, setChangeTypeValue] = useState('text');
 
   // Rename column
   const [renameColValue, setRenameColValue] = useState('');
@@ -182,6 +193,43 @@ export default function RegisterPage() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setDropdownConfigModal(false); },
   });
 
+  const duplicateColumnMutation = useMutation({
+    mutationFn: (colId: number) => duplicateColumn(registerId, colId),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setColMenuId(null); },
+  });
+
+  const moveColumnMutation = useMutation({
+    mutationFn: ({ colId, dir }: { colId: number; dir: 'left' | 'right' }) => moveColumn(registerId, colId, dir),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setColMenuId(null); },
+  });
+
+  const changeColumnTypeMutation = useMutation({
+    mutationFn: () => changeColumnType(registerId, colMenuId!, changeTypeValue),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setChangeTypeModal(false); setColMenuId(null); },
+  });
+
+  const clearColumnDataMutation = useMutation({
+    mutationFn: (colId: number) => clearColumnData(registerId, colId),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setColMenuId(null); },
+  });
+
+  const insertColumnMutation = useMutation({
+    mutationFn: () => {
+      const col = columns.find((c) => c.id === colMenuId);
+      const pos = col ? (insertColModal === 'left' ? col.position : col.position + 1) : columns.length;
+      return insertColumn(registerId, {
+        name: newColName, type: newColType,
+        dropdownOptions: newColType === 'dropdown' ? newColDropdownOpts.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+        formula: newColType === 'formula' ? newColFormula : undefined,
+      }, pos);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+      setInsertColModal(null); setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
+      setColMenuId(null);
+    },
+  });
+
   const addEntryMutation = useMutation({
     mutationFn: () => addEntry(registerId, {}, currentPageIndex),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['register', registerId] }),
@@ -272,14 +320,33 @@ export default function RegisterPage() {
     setDropdownModal(true);
   };
 
-  const handleExportCSV = () => {
+  const handleExportExcel = () => {
     if (!register) return;
-    const csv = generateCSV(register, currentPageIndex);
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `${register.name}.csv`; a.click();
-    URL.revokeObjectURL(url);
+
+    const visibleColumns = columns.filter((col) => !hiddenColumns.has(col.id));
+    const headerRow = visibleColumns.map(c => c.name);
+
+    if (headerRow.length === 0) return;
+    
+    // Build rows from entries based on visibleColumns and evaluating formulas
+    const rows = displayEntries.map(entry => {
+      const rowObj: Record<string, string> = {};
+      visibleColumns.forEach(c => {
+         const cellValue = c.type === 'formula' ? evaluateFormula(c.formula || '', entry, columns) : (entry.cells?.[c.id.toString()] || '');
+         rowObj[c.name] = cellValue;
+      });
+      return rowObj;
+    });
+
+    try {
+      const ws = XLSX.utils.json_to_sheet(rows, { header: headerRow });
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+      XLSX.writeFile(wb, `${register.name || 'Export'}.xlsx`);
+    } catch (err) {
+      console.error("Export Error: ", err);
+      alert("Failed to export Excel file.");
+    }
   };
 
   const toggleSelectAll = () => {
@@ -307,25 +374,27 @@ export default function RegisterPage() {
   };
 
   if (isLoading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-      <div className="spinner dark" style={{ width: 32, height: 32 }} />
+    <div className="center-loader">
+      <div className="spinner dark spinner-large" />
     </div>
   );
   if (!register) return <div className="empty-state"><p>Register not found</p></div>;
 
+  const visibleColumns = columns.filter((col) => !hiddenColumns.has(col.id));
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div className="register-layout">
       {/* ── Header ── */}
       <div className="register-header">
-        <button className="register-header-btn" onClick={() => navigate('/')}>
+        <button className="register-header-btn" aria-label="Go Back" title="Go Back" onClick={() => navigate('/')}>
           <ArrowLeft size={14} />
         </button>
         <h1 className="register-header-title">{register.name}</h1>
         <button className="register-header-btn" onClick={() => setShareModal(true)}>
           <Share2 size={14} /> Share
         </button>
-        <button className="register-header-btn" onClick={handleExportCSV}>
-          <Download size={14} /> Export
+        <button className="register-header-btn" onClick={handleExportExcel}>
+          <Download size={14} /> Export (Excel)
         </button>
       </div>
 
@@ -344,6 +413,14 @@ export default function RegisterPage() {
         <button className="toolbar-btn" onClick={() => { setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula(''); setNewColumnModal(true); }}>
           <Plus size={13} /> Add Column
         </button>
+        {hiddenColumns.size > 0 && (
+          <button className="hidden-cols-btn" onClick={() => {
+            setHiddenColumns(new Set());
+            hiddenColumns.forEach((colId) => hideColumn(registerId, colId, false));
+          }}>
+            <Eye size={13} /> Show {hiddenColumns.size} Hidden
+          </button>
+        )}
         {selectedRows.size > 0 && (
           <button className="toolbar-btn danger" onClick={() => { if (confirm(`Delete ${selectedRows.size} selected rows?`)) bulkDeleteMutation.mutate(); }}>
             <Trash2 size={13} /> Delete ({selectedRows.size})
@@ -391,18 +468,21 @@ export default function RegisterPage() {
         <table className="spreadsheet">
           <thead>
             <tr>
-              <th className="serial" style={{ width: 40 }}>
-                <input type="checkbox" checked={selectedRows.size === displayEntries.length && displayEntries.length > 0} onChange={toggleSelectAll} />
+              <th className="serial serial-header-checkbox">
+                <input type="checkbox" title="Select All" aria-label="Select All" checked={selectedRows.size === displayEntries.length && displayEntries.length > 0} onChange={toggleSelectAll} />
               </th>
               <th className="serial">S.No.</th>
-              {columns.map((col) => (
-                <th key={col.id} onClick={() => handleSort(col.id)} style={{ minWidth: 140 }}>
+              {visibleColumns.map((col) => (
+                <th key={col.id} onClick={() => handleSort(col.id)} className="col-header-cell">
                   <div className="col-header-inner">
                     {col.type === 'number' ? <Hash size={12} /> : col.type === 'date' ? <Calendar size={12} /> : col.type === 'dropdown' ? <ChevronDown size={12} /> : col.type === 'formula' ? <FlaskConical size={12} /> : <TypeIcon size={12} />}
                     <span>{col.name}</span>
                     {sortCol === col.id && (sortDir === 'asc' ? <SortAsc size={12} /> : <SortDesc size={12} />)}
+                    {frozenColumns.has(col.id) && <Pin size={10} color="var(--muted)" className="frozen-pin" />}
                     <button
-                      style={{ marginLeft: 'auto', background: 'none', border: 'none', padding: 2, cursor: 'pointer', color: 'var(--muted)' }}
+                      className="col-menu-btn"
+                      aria-label="Column Options"
+                      title="Column Options"
                       onClick={(e) => { e.stopPropagation(); setColMenuId(colMenuId === col.id ? null : col.id); }}
                     >
                       <MoreVertical size={12} />
@@ -417,10 +497,10 @@ export default function RegisterPage() {
             {displayEntries.map((entry, idx) => (
               <tr key={entry.id}>
                 <td className="serial">
-                  <input type="checkbox" checked={selectedRows.has(entry.id)} onChange={() => toggleSelectRow(entry.id)} />
+                  <input type="checkbox" title="Select Row" aria-label="Select Row" checked={selectedRows.has(entry.id)} onChange={() => toggleSelectRow(entry.id)} />
                 </td>
                 <td className="serial">{idx + 1}</td>
-                {columns.map((col) => (
+                {visibleColumns.map((col) => (
                   <td key={col.id}>
                     {col.type === 'formula' ? (
                       <div className={`cell-formula ${evaluateFormula(col.formula || '', entry, columns) === 'ERR' ? 'error' : ''}`}>
@@ -446,7 +526,7 @@ export default function RegisterPage() {
                   </td>
                 ))}
                 <td className="actions">
-                  <button className="row-menu-btn" onClick={() => setRowMenuId(rowMenuId === entry.id ? null : entry.id)}>
+                  <button className="row-menu-btn" aria-label="Row Options" title="Row Options" onClick={() => setRowMenuId(rowMenuId === entry.id ? null : entry.id)}>
                     <MoreVertical size={14} />
                   </button>
                 </td>
@@ -458,8 +538,8 @@ export default function RegisterPage() {
               <tr key={`mock-${n}`} className="mock" onClick={() => addEntryMutation.mutate()}>
                 <td className="serial" />
                 <td className="serial">{n}</td>
-                {columns.map((col) => (
-                  <td key={col.id}><div style={{ padding: '0 12px', color: 'var(--placeholder)', fontSize: 13 }}>{col.name}...</div></td>
+                {visibleColumns.map((col) => (
+                  <td key={col.id}><div className="mock-cell-content">{col.name}...</div></td>
                 ))}
                 <td className="actions" />
               </tr>
@@ -469,17 +549,16 @@ export default function RegisterPage() {
       </div>
 
       {/* ── Calc Bar ── */}
-      {columns.some((c) => c.type === 'number' || c.type === 'formula') && displayEntries.length > 0 && (
+      {visibleColumns.some((c) => c.type === 'number' || c.type === 'formula') && displayEntries.length > 0 && (
         <div className="calc-bar">
-          <div className="calc-cell" style={{ width: 40 }} />
-          <div className="calc-cell" style={{ width: 50, cursor: 'default' }}>
+          <div className="calc-cell calc-cell-sm" />
+          <div className="calc-cell calc-cell-md">
             <span className="calc-label">Σ</span>
           </div>
-          {columns.map((col) => (
+          {visibleColumns.map((col) => (
             <div
               key={col.id}
-              className="calc-cell"
-              style={{ minWidth: 140, flex: 1 }}
+              className="calc-cell calc-cell-flex"
               onClick={() => {
                 if (col.type === 'number' || col.type === 'formula') {
                   setCalcColId(col.id);
@@ -492,7 +571,7 @@ export default function RegisterPage() {
               ) : ''}
             </div>
           ))}
-          <div className="calc-cell" style={{ width: 44 }} />
+          <div className="calc-cell calc-cell-lg" />
         </div>
       )}
 
@@ -541,16 +620,50 @@ export default function RegisterPage() {
         </div>
       )}
 
-      {/* ── Column Context Menu ── */}
+      {/* ── Column Context Menu (full Record Book options) ── */}
       {colMenuId !== null && (
         <div className="modal-overlay" onClick={() => setColMenuId(null)}>
-          <div className="context-menu" onClick={(e) => e.stopPropagation()}>
-            <div className="context-title">{columns.find((c) => c.id === colMenuId)?.name || 'Column'}</div>
+          <div className="context-menu context-menu-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="context-title">
+              {columns.find((c) => c.id === colMenuId)?.type === 'number' ? <Hash size={14} /> :
+               columns.find((c) => c.id === colMenuId)?.type === 'date' ? <Calendar size={14} /> :
+               columns.find((c) => c.id === colMenuId)?.type === 'dropdown' ? <ChevronDown size={14} /> :
+               columns.find((c) => c.id === colMenuId)?.type === 'formula' ? <FlaskConical size={14} /> :
+               <TypeIcon size={14} />}
+              {columns.find((c) => c.id === colMenuId)?.name || 'Column'}
+              <span className="context-type-badge">{columns.find((c) => c.id === colMenuId)?.type}</span>
+            </div>
+
+            {/* ── Sort ── */}
+            <div className="context-section-label">Sort</div>
+            <button className="context-item" onClick={() => {
+              setSortCol(colMenuId); setSortDir('asc'); setColMenuId(null);
+            }}>
+              <SortAsc size={16} /> Sort A → Z
+              {sortCol === colMenuId && sortDir === 'asc' && <Check size={14} className="context-check" />}
+            </button>
+            <button className="context-item" onClick={() => {
+              setSortCol(colMenuId); setSortDir('desc'); setColMenuId(null);
+            }}>
+              <SortDesc size={16} /> Sort Z → A
+              {sortCol === colMenuId && sortDir === 'desc' && <Check size={14} className="context-check" />}
+            </button>
+
+            <div className="context-divider" />
+
+            {/* ── Edit ── */}
+            <div className="context-section-label">Edit</div>
             <button className="context-item" onClick={() => {
               setRenameColValue(columns.find((c) => c.id === colMenuId)?.name || '');
               setRenameColModal(true);
             }}>
               <Pencil size={16} /> Rename Column
+            </button>
+            <button className="context-item" onClick={() => {
+              setChangeTypeValue(columns.find((c) => c.id === colMenuId)?.type || 'text');
+              setChangeTypeModal(true);
+            }}>
+              <ArrowLeftRight size={16} /> Change Column Type
             </button>
             {columns.find((c) => c.id === colMenuId)?.type === 'dropdown' && (
               <button className="context-item" onClick={() => {
@@ -561,9 +674,73 @@ export default function RegisterPage() {
                 <ChevronDown size={16} /> Edit Dropdown Options
               </button>
             )}
-            <button className="context-item" onClick={() => handleSort(colMenuId)}><SortAsc size={16} /> Sort</button>
+
+            <div className="context-divider" />
+
+            {/* ── Insert & Duplicate ── */}
+            <div className="context-section-label">Insert & Copy</div>
+            <button className="context-item" onClick={() => duplicateColumnMutation.mutate(colMenuId)}>
+              <Copy size={16} /> Duplicate Column
+            </button>
+            <button className="context-item" onClick={() => {
+              setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
+              setInsertColModal('left');
+            }}>
+              <Plus size={16} /> Insert Column Left
+            </button>
+            <button className="context-item" onClick={() => {
+              setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
+              setInsertColModal('right');
+            }}>
+              <ArrowRight size={16} /> Insert Column Right
+            </button>
+
+            <div className="context-divider" />
+
+            {/* ── Arrange ── */}
+            <div className="context-section-label">Arrange</div>
+            <button className="context-item"
+              disabled={columns.findIndex((c) => c.id === colMenuId) === 0}
+              onClick={() => moveColumnMutation.mutate({ colId: colMenuId, dir: 'left' })}
+            >
+              <ChevronsLeftRight size={16} /> Move Left
+            </button>
+            <button className="context-item"
+              disabled={columns.findIndex((c) => c.id === colMenuId) === columns.length - 1}
+              onClick={() => moveColumnMutation.mutate({ colId: colMenuId, dir: 'right' })}
+            >
+              <ChevronsLeftRight size={16} /> Move Right
+            </button>
+            <button className="context-item" onClick={() => {
+              const newFrozen = new Set(frozenColumns);
+              if (newFrozen.has(colMenuId)) newFrozen.delete(colMenuId);
+              else newFrozen.add(colMenuId);
+              setFrozenColumns(newFrozen);
+              freezeColumn(registerId, colMenuId, !frozenColumns.has(colMenuId));
+              setColMenuId(null);
+            }}>
+              <Pin size={16} /> {frozenColumns.has(colMenuId) ? 'Unfreeze Column' : 'Freeze / Pin Column'}
+            </button>
+            <button className="context-item" onClick={() => {
+              const newHidden = new Set(hiddenColumns);
+              newHidden.add(colMenuId);
+              setHiddenColumns(newHidden);
+              hideColumn(registerId, colMenuId, true);
+              setColMenuId(null);
+            }}>
+              <EyeOff size={16} /> Hide Column
+            </button>
+
+            <div className="context-divider" />
+
+            {/* ── Destructive ── */}
             <button className="context-item danger" onClick={() => {
-              if (confirm('Delete this column?')) deleteColumnMutation.mutate(colMenuId);
+              if (confirm('Clear all data in this column? This cannot be undone.')) clearColumnDataMutation.mutate(colMenuId);
+            }}>
+              <Eraser size={16} /> Clear Column Data
+            </button>
+            <button className="context-item danger" onClick={() => {
+              if (confirm('Delete this column and all its data?')) deleteColumnMutation.mutate(colMenuId);
             }}>
               <Trash2 size={16} /> Delete Column
             </button>
@@ -617,22 +794,84 @@ export default function RegisterPage() {
         </div>
       )}
 
+      {/* ── Change Column Type Modal ── */}
+      {changeTypeModal && (
+        <div className="modal-overlay" onClick={() => setChangeTypeModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Change Column Type</h3>
+            <p className="modal-p-text">
+              Changing the type may affect existing data in this column.
+            </p>
+            <div className="type-chips">
+              {COL_TYPES.map((t) => (
+                <button key={t.id} className={`type-chip ${changeTypeValue === t.id ? 'active' : ''}`} onClick={() => setChangeTypeValue(t.id)}>
+                  {t.icon} {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button className="modal-cancel-btn" onClick={() => setChangeTypeModal(false)}>Cancel</button>
+              <button className="modal-confirm-btn" onClick={() => changeColumnTypeMutation.mutate()}>
+                Change Type
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Insert Column (Left / Right) Modal ── */}
+      {insertColModal !== null && (
+        <div className="modal-overlay" onClick={() => setInsertColModal(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Insert Column {insertColModal === 'left' ? 'Left' : 'Right'}</h3>
+            <label className="modal-label">Column Name</label>
+            <input className="modal-input" value={newColName} onChange={(e) => setNewColName(e.target.value)} placeholder="e.g. Amount" autoFocus />
+            <label className="modal-label">Column Type</label>
+            <div className="type-chips">
+              {COL_TYPES.map((t) => (
+                <button key={t.id} className={`type-chip ${newColType === t.id ? 'active' : ''}`} onClick={() => setNewColType(t.id)}>
+                  {t.icon} {t.label}
+                </button>
+              ))}
+            </div>
+            {newColType === 'dropdown' && (
+              <>
+                <label className="modal-label">Options (comma-separated)</label>
+                <input className="modal-input" value={newColDropdownOpts} onChange={(e) => setNewColDropdownOpts(e.target.value)} placeholder="e.g. Active, Inactive, Pending" />
+              </>
+            )}
+            {newColType === 'formula' && (
+              <>
+                <label className="modal-label">Formula</label>
+                <input className="modal-input" value={newColFormula} onChange={(e) => setNewColFormula(e.target.value)} placeholder="e.g. {Marks}/{Full Marks}*100" />
+              </>
+            )}
+            <div className="modal-actions">
+              <button className="modal-cancel-btn" onClick={() => setInsertColModal(null)}>Cancel</button>
+              <button className="modal-confirm-btn" disabled={!newColName.trim()} onClick={() => insertColumnMutation.mutate()}>
+                Insert Column
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Filter Modal ── */}
       {filterModal && (
         <div className="modal-overlay" onClick={() => setFilterModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '70vh' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 className="modal-title" style={{ margin: 0 }}>Filter Data</h3>
+          <div className="modal-content modal-max-70" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-flex">
+               <h3 className="modal-title modal-title-no-margin">Filter Data</h3>
               {filters.length > 0 && (
-                <button style={{ background: 'none', border: 'none', color: 'var(--destructive)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }} onClick={() => setFilters([])}>Clear All</button>
+                <button className="clear-all-btn" onClick={() => setFilters([])}>Clear All</button>
               )}
             </div>
             {filters.map((f, idx) => (
-              <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                <select className="modal-input" style={{ flex: 1, marginBottom: 0 }} value={f.columnId} onChange={(e) => { const newF = [...filters]; newF[idx].columnId = Number(e.target.value); setFilters(newF); }}>
+              <div key={idx} className="filter-row">
+                <select className="modal-input filter-select" aria-label="Filter Column" title="Filter Column" value={f.columnId} onChange={(e) => { const newF = [...filters]; newF[idx].columnId = Number(e.target.value); setFilters(newF); }}>
                   {columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
-                <select className="modal-input" style={{ width: 120, marginBottom: 0 }} value={f.operator} onChange={(e) => { const newF = [...filters]; newF[idx].operator = e.target.value; setFilters(newF); }}>
+                <select className="modal-input filter-operator" aria-label="Filter Operator" title="Filter Operator" value={f.operator} onChange={(e) => { const newF = [...filters]; newF[idx].operator = e.target.value; setFilters(newF); }}>
                   <option value="contains">Contains</option>
                   <option value="equals">Equals</option>
                   <option value="gt">Greater than</option>
@@ -641,14 +880,14 @@ export default function RegisterPage() {
                   <option value="not_empty">Not empty</option>
                 </select>
                 {!['empty', 'not_empty'].includes(f.operator) && (
-                  <input className="modal-input" style={{ width: 100, marginBottom: 0 }} value={f.value} onChange={(e) => { const newF = [...filters]; newF[idx].value = e.target.value; setFilters(newF); }} placeholder="Value" />
+                  <input className="modal-input filter-value" value={f.value} onChange={(e) => { const newF = [...filters]; newF[idx].value = e.target.value; setFilters(newF); }} placeholder="Value" />
                 )}
-                <button style={{ background: 'none', border: 'none', color: 'var(--destructive)', cursor: 'pointer' }} onClick={() => setFilters(filters.filter((_, i) => i !== idx))}>
+                <button className="remove-filter-btn" aria-label="Remove Filter" title="Remove Filter" onClick={() => setFilters(filters.filter((_, i) => i !== idx))}>
                   <X size={16} />
                 </button>
               </div>
             ))}
-            <button className="toolbar-btn" style={{ marginBottom: 16 }} onClick={() => setFilters([...filters, { columnId: columns[0]?.id || 0, operator: 'contains', value: '' }])}>
+            <button className="toolbar-btn add-filter-btn" onClick={() => setFilters([...filters, { columnId: columns[0]?.id || 0, operator: 'contains', value: '' }])}>
               <Plus size={13} /> Add Filter
             </button>
             <div className="modal-actions">
@@ -667,8 +906,7 @@ export default function RegisterPage() {
             {(['sum', 'average', 'count', 'min', 'max'] as CalcType[]).map((type) => (
               <button
                 key={type}
-                className={`context-item ${calcTypes[calcColId!] === type || (!calcTypes[calcColId!] && type === 'sum') ? 'active' : ''}`}
-                style={calcTypes[calcColId!] === type || (!calcTypes[calcColId!] && type === 'sum') ? { background: 'rgba(27,42,74,0.08)', fontWeight: 700 } : {}}
+                className={`context-item ${calcTypes[calcColId!] === type || (!calcTypes[calcColId!] && type === 'sum') ? 'active-calc' : ''}`}
                 onClick={() => {
                   if (calcColId !== null) setCalcTypes({ ...calcTypes, [calcColId]: type });
                   setCalcModal(false);
@@ -685,18 +923,18 @@ export default function RegisterPage() {
       {/* ── Date Picker Modal ── */}
       {dateModal && (
         <div className="modal-overlay" onClick={() => setDateModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 360 }}>
+          <div className="modal-content modal-max-360" onClick={(e) => e.stopPropagation()}>
             <h3 className="modal-title">Select Date</h3>
-            <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-              <div style={{ flex: 1 }}>
+            <div className="date-picker-flex">
+              <div className="date-picker-flex-1">
                 <label className="modal-label">Day</label>
                 <input className="modal-input" value={dateDay} onChange={(e) => setDateDay(e.target.value)} type="number" maxLength={2} placeholder="DD" />
               </div>
-              <div style={{ flex: 1 }}>
+              <div className="date-picker-flex-1">
                 <label className="modal-label">Month</label>
                 <input className="modal-input" value={dateMonth} onChange={(e) => setDateMonth(e.target.value)} type="number" maxLength={2} placeholder="MM" />
               </div>
-              <div style={{ flex: 1.5 }}>
+              <div className="date-picker-flex-1-5">
                 <label className="modal-label">Year</label>
                 <input className="modal-input" value={dateYear} onChange={(e) => setDateYear(e.target.value)} type="number" maxLength={4} placeholder="YYYY" />
               </div>
@@ -712,9 +950,9 @@ export default function RegisterPage() {
       {/* ── Dropdown Cell Modal ── */}
       {dropdownModal && (
         <div className="modal-overlay" onClick={() => setDropdownModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 380 }}>
+          <div className="modal-content modal-max-380" onClick={(e) => e.stopPropagation()}>
             <h3 className="modal-title">Select Option</h3>
-            <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+            <div className="dropdown-options-container">
               {dropdownOptions.map((opt, idx) => {
                 const currentVal = dropdownEntryId ? localEntries.find((e) => e.id === dropdownEntryId)?.cells?.[dropdownColumnId?.toString() || ''] : '';
                 const isSelected = currentVal === opt;
@@ -733,7 +971,7 @@ export default function RegisterPage() {
                 );
               })}
             </div>
-            <button className="modal-cancel-btn" style={{ width: '100%', marginTop: 12 }} onClick={() => {
+            <button className="modal-cancel-btn dropdown-clear-btn" onClick={() => {
               if (dropdownEntryId && dropdownColumnId) handleCellChange(dropdownEntryId, dropdownColumnId.toString(), '');
               setDropdownModal(false);
             }}>Clear Selection</button>
@@ -744,14 +982,14 @@ export default function RegisterPage() {
       {/* ── Share Modal ── */}
       {shareModal && (
         <div className="modal-overlay" onClick={() => setShareModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+          <div className="modal-content modal-max-480" onClick={(e) => e.stopPropagation()}>
             <h3 className="modal-title">Share Register</h3>
 
             {/* Share Link */}
             <div className="share-link-row">
               <div className="share-link-box">
                 <Link2 size={14} />
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span className="share-link-text">
                   {register.shareLink || 'Generate a share link'}
                 </span>
               </div>
@@ -769,12 +1007,12 @@ export default function RegisterPage() {
             {/* Add user */}
             <label className="modal-label">Add Person</label>
             <div className="share-add-row">
-              <input className="modal-input" style={{ flex: 1, marginBottom: 0 }} value={sharePhone} onChange={(e) => setSharePhone(e.target.value)} placeholder="Phone number" />
-              <select className="modal-input" style={{ width: 100, marginBottom: 0 }} value={sharePermission} onChange={(e) => setSharePermission(e.target.value as 'view' | 'edit')}>
+              <input className="modal-input share-phone-input" aria-label="Phone number" title="Phone number" value={sharePhone} onChange={(e) => setSharePhone(e.target.value)} placeholder="Phone number" />
+              <select className="modal-input share-perm-select" aria-label="Permission Level" title="Permission Level" value={sharePermission} onChange={(e) => setSharePermission(e.target.value as 'view' | 'edit')}>
                 <option value="view">View</option>
                 <option value="edit">Edit</option>
               </select>
-              <button className="modal-confirm-btn" onClick={() => sharePhone.trim() && addSharedUserMutation.mutate()}>
+              <button className="modal-confirm-btn" aria-label="Add User" title="Add User" onClick={() => sharePhone.trim() && addSharedUserMutation.mutate()}>
                 <UserPlus size={14} />
               </button>
             </div>
@@ -782,15 +1020,15 @@ export default function RegisterPage() {
             {/* Shared users */}
             {register.sharedWith && register.sharedWith.length > 0 && (
               <>
-                <label className="modal-label" style={{ marginTop: 16 }}>Shared With</label>
+                <label className="modal-label shared-user-label">Shared With</label>
                 {register.sharedWith.map((u) => (
                   <div key={u.id} className="shared-user-row">
                     <div className="shared-user-avatar">{u.name[0]}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{u.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{u.phone} • {u.permission}</div>
+                    <div className="shared-user-info-wrapper">
+                      <div className="shared-user-name">{u.name}</div>
+                      <div className="shared-user-phone">{u.phone} • {u.permission}</div>
                     </div>
-                    <button style={{ background: 'none', border: 'none', color: 'var(--destructive)', cursor: 'pointer' }} onClick={() => removeSharedUserMutation.mutate(u.id)}>
+                    <button className="share-remove-btn" aria-label="Remove User" title="Remove User" onClick={() => removeSharedUserMutation.mutate(u.id)}>
                       <UserX size={16} />
                     </button>
                   </div>
@@ -798,7 +1036,7 @@ export default function RegisterPage() {
               </>
             )}
 
-            <button className="modal-cancel-btn" style={{ width: '100%', marginTop: 20 }} onClick={() => setShareModal(false)}>Close</button>
+            <button className="modal-cancel-btn modal-close-btn" onClick={() => setShareModal(false)}>Close</button>
           </div>
         </div>
       )}
@@ -811,8 +1049,7 @@ export default function RegisterPage() {
             <input className="modal-input" value={renamePageValue} onChange={(e) => setRenamePageValue(e.target.value)} placeholder="Page name" autoFocus />
             <div className="modal-actions">
               <button
-                className={`modal-cancel-btn ${pages.length > 1 ? '' : ''}`}
-                style={pages.length > 1 ? { color: 'var(--destructive)' } : {}}
+                className={`modal-cancel-btn ${pages.length > 1 ? 'modal-delete-page-btn' : ''}`}
                 onClick={() => {
                   if (pages.length > 1 && renamePageId !== null) {
                     if (confirm('Delete this page and its entries?')) {

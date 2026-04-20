@@ -22,6 +22,9 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as XLSX from 'xlsx';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getRegister,
@@ -29,6 +32,13 @@ import {
   deleteColumn,
   renameColumn,
   updateColumnDropdownOptions,
+  duplicateColumn,
+  moveColumn,
+  changeColumnType,
+  clearColumnData,
+  insertColumn,
+  freezeColumn,
+  hideColumn,
   addEntry,
   updateEntry,
   deleteEntry,
@@ -96,6 +106,17 @@ export default function RegisterScreen() {
   const [renameColumnModal, setRenameColumnModal] = useState(false);
   const [renameColumnId, setRenameColumnId] = useState<number | null>(null);
   const [renameColumnValue, setRenameColumnValue] = useState('');
+
+  // Change type
+  const [changeTypeModal, setChangeTypeModal] = useState(false);
+  const [changeTypeValue, setChangeTypeValue] = useState('text');
+
+  // Insert column
+  const [insertColModal, setInsertColModal] = useState<'left' | 'right' | null>(null);
+
+  // Layout features
+  const [hiddenColumns, setHiddenColumns] = useState<Set<number>>(new Set());
+  const [frozenColumns, setFrozenColumns] = useState<Set<number>>(new Set());
 
   // Sort state
   const [sortColumnId, setSortColumnId] = useState<number | null>(null);
@@ -216,6 +237,44 @@ export default function RegisterScreen() {
     },
   });
 
+  const duplicateColumnMutation = useMutation({
+    mutationFn: (colId: number) => duplicateColumn(registerId, colId),
+    onSuccess: () => { invalidate(); setColumnMenuId(null); },
+  });
+
+  const moveColumnMutation = useMutation({
+    mutationFn: ({ colId, dir }: { colId: number; dir: 'left' | 'right' }) => moveColumn(registerId, colId, dir),
+    onSuccess: () => { invalidate(); setColumnMenuId(null); },
+  });
+
+  const changeColumnTypeMutation = useMutation({
+    mutationFn: () => changeColumnType(registerId, columnMenuId!, changeTypeValue),
+    onSuccess: () => { invalidate(); setChangeTypeModal(false); setColumnMenuId(null); },
+  });
+
+  const clearColumnDataMutation = useMutation({
+    mutationFn: (colId: number) => clearColumnData(registerId, colId),
+    onSuccess: () => { invalidate(); setColumnMenuId(null); },
+  });
+
+  const insertColumnMutation = useMutation({
+    mutationFn: () => {
+      const col = register?.columns?.find((c) => c.id === columnMenuId);
+      const pos = col ? (insertColModal === 'left' ? col.position : col.position + 1) : (register?.columns?.length || 0);
+      return insertColumn(registerId, {
+        name: newColumnName, type: newColumnType,
+        dropdownOptions: newColumnType === 'dropdown' ? newColumnDropdownOptions.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+        formula: newColumnType === 'formula' ? newColumnFormula : undefined,
+      }, pos);
+    },
+    onSuccess: () => {
+      invalidate();
+      setInsertColModal(null); setNewColumnName(''); setNewColumnType('text'); setNewColumnDropdownOptions(''); setNewColumnFormula('');
+      setColumnMenuId(null);
+    },
+    onError: (err: any) => Alert.alert('Error', err.message),
+  });
+
   const addEntryMutation = useMutation({
     mutationFn: () => addEntry(registerId, {}, activePageIndex),
     onSuccess: invalidate,
@@ -326,31 +385,56 @@ export default function RegisterScreen() {
       const csv = generateCSV(register, activePageIndex);
       await Share.share({
         title: register.name,
-        message: `${register.name}\n\nShared from SJVPS Record Book\n\n${shareLink || 'Open SJVPS Record Book to view'}`,
+        message: `${register.name}\n\nShared from AG Trust\n\n${shareLink || 'Open AG Trust to view'}`,
       });
     } catch (err) {
       // User cancelled
     }
   };
 
-  const handleDownloadCSV = () => {
+  const handleDownloadExcel = async () => {
     if (!register) return;
-    const csv = generateCSV(register, activePageIndex);
-    if (Platform.OS === 'web') {
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${register.name.replace(/\s+/g, '_')}.csv`;
-      link.click();
-      URL.revokeObjectURL(url);
-    } else {
-      Share.share({
-        title: `${register.name}.csv`,
-        message: csv,
+
+    const visibleCols = columns.filter((col) => !hiddenColumns.has(col.id));
+    const headerRow = visibleCols.map(c => c.name);
+
+    if (headerRow.length === 0) return;
+    
+    // Build rows from entries
+    const rows = displayEntries.map(entry => {
+      const rowObj: any = {};
+      visibleCols.forEach(c => {
+         const cellValue = c.type === 'formula' ? evaluateFormula(c.formula || '', entry as any, columns) : (entry.cells?.[c.id.toString()] || '');
+         rowObj[c.name] = cellValue;
       });
+      return rowObj;
+    });
+
+    try {
+      const ws = XLSX.utils.json_to_sheet(rows, { header: headerRow });
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+      
+      const fileName = `${register.name.replace(/\s+/g, '_')}.xlsx`;
+
+      if (Platform.OS === 'web') {
+        XLSX.writeFile(wb, fileName);
+      } else {
+        const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+        const filePath = `${(FileSystem as any).cacheDirectory || 'file:///tmp/'}${fileName}`;
+        await FileSystem.writeAsStringAsync(filePath, base64, { encoding: 'base64' as any });
+        
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) {
+          await Sharing.shareAsync(filePath, { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Export Excel' });
+        } else {
+          Alert.alert('Sharing Unavailable', 'Sharing is not available on this device');
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Export Error', 'Failed to export Excel file.');
     }
-    Alert.alert('Export', 'Register exported as CSV!');
   };
 
   // ─── Date handler ─────────────────────────────────────────
@@ -451,6 +535,8 @@ export default function RegisterScreen() {
   // Track if we have no entries yet (for first-time guidance banner)
   const hasNoEntries = totalEntries === 0;
 
+  const visibleColumns = columns.filter((col) => !hiddenColumns.has(col.id));
+
   // ════════════════════════════════════════════════════════════
   return (
     <>
@@ -476,9 +562,9 @@ export default function RegisterScreen() {
             <Text style={styles.topHeaderTitle} numberOfLines={1}>{register.name}</Text>
           </View>
           <View style={styles.topHeaderRight}>
-            <TouchableOpacity style={styles.topHeaderBtn} onPress={handleDownloadCSV}>
+            <TouchableOpacity style={styles.topHeaderBtn} onPress={handleDownloadExcel}>
               <Ionicons name="download-outline" size={16} color={Colors.white} />
-              <Text style={styles.topHeaderBtnText}>Download</Text>
+              <Text style={styles.topHeaderBtnText}>Export (Excel)</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.topHeaderBtn}
@@ -612,6 +698,19 @@ export default function RegisterScreen() {
               <Ionicons name="add" size={14} color={Colors.muted} />
               <Text style={styles.toolbarBtnMuted}>Add Column</Text>
             </TouchableOpacity>
+            
+            {hiddenColumns.size > 0 && (
+              <TouchableOpacity
+                style={styles.toolbarBtn}
+                onPress={() => {
+                  setHiddenColumns(new Set());
+                  hiddenColumns.forEach((colId) => hideColumn(registerId, colId, false));
+                }}
+              >
+                <Ionicons name="eye" size={14} color={Colors.navy} />
+                <Text style={[styles.toolbarBtnMuted, { color: Colors.navy }]}>Show {hiddenColumns.size} Hidden</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
@@ -706,7 +805,7 @@ export default function RegisterScreen() {
                   <View style={styles.serialHeader}>
                     <Text style={styles.serialHeaderText}>S No.</Text>
                   </View>
-                  {columns.map((col) => (
+                  {visibleColumns.map((col) => (
                     <TouchableOpacity
                       key={col.id}
                       style={styles.colHeader}
@@ -777,7 +876,7 @@ export default function RegisterScreen() {
                         <View style={styles.serialCell}>
                           <Text style={styles.serialText}>{index + 1}</Text>
                         </View>
-                        {columns.map((col) => {
+                        {visibleColumns.map((col) => {
                           if (isMock) {
                             // Mock rows: tapping auto-creates a real entry
                             return (
@@ -905,7 +1004,7 @@ export default function RegisterScreen() {
                   <View style={[styles.calcSerial, bulkMode && { marginLeft: CHECKBOX_COL_WIDTH }]}>
                     <Text style={styles.calcSerialText}>⊞ Calc</Text>
                   </View>
-                  {columns.map((col) => {
+                  {visibleColumns.map((col) => {
                     const colIdStr = col.id.toString();
                     const calcType = selectedCalcType[colIdStr] || (col.type === 'number' ? 'sum' : 'count');
                     const realEntries = pageEntries.filter((e) => !(e as any)._mock);
@@ -1062,92 +1161,250 @@ export default function RegisterScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ─── Column Context Menu ─────────────────────────── */}
+      {/* ─── Column Context Menu (Enhanced) ──────────────────────── */}
       <Modal visible={columnMenuId !== null} transparent animationType="fade" onRequestClose={() => setColumnMenuId(null)}>
         <TouchableOpacity style={styles.contextOverlay} onPress={() => setColumnMenuId(null)} activeOpacity={1}>
-          <View style={styles.contextMenu}>
-            <Text style={styles.contextTitle}>
-              {columns.find((c) => c.id === columnMenuId)?.name}
-            </Text>
-            {/* Sort Ascending */}
-            <TouchableOpacity
-              style={styles.contextItem}
-              onPress={() => {
-                if (columnMenuId) {
-                  setSortColumnId(columnMenuId);
-                  setSortDirection('asc');
-                  setColumnMenuId(null);
-                }
-              }}
-            >
-              <Ionicons name="arrow-up" size={18} color={Colors.navy} />
+          <ScrollView
+            style={[styles.contextMenu, { maxHeight: '80%' }]}
+            contentContainerStyle={{ paddingBottom: Spacing.xl }}
+            bounces={false}
+          >
+            <View style={styles.contextTitleContainer}>
+              <Text style={styles.contextTitleMain}>
+                {columns.find((c) => c.id === columnMenuId)?.name}
+              </Text>
+              <View style={styles.contextTypeBadge}>
+                <Text style={styles.contextTypeBadgeText}>
+                  {columns.find((c) => c.id === columnMenuId)?.type.toUpperCase()}
+                </Text>
+              </View>
+            </View>
+
+            {/* Section: Sort */}
+            <Text style={styles.contextSectionLabel}>SORT</Text>
+            <TouchableOpacity style={styles.contextItem} onPress={() => { setSortColumnId(columnMenuId!); setSortDirection('asc'); setColumnMenuId(null); }}>
+              <Ionicons name="arrow-up" size={16} color={Colors.navy} />
               <Text style={styles.contextItemText}>Sort A → Z</Text>
             </TouchableOpacity>
-            {/* Sort Descending */}
-            <TouchableOpacity
-              style={styles.contextItem}
-              onPress={() => {
-                if (columnMenuId) {
-                  setSortColumnId(columnMenuId);
-                  setSortDirection('desc');
-                  setColumnMenuId(null);
-                }
-              }}
-            >
-              <Ionicons name="arrow-down" size={18} color={Colors.navy} />
+            <TouchableOpacity style={styles.contextItem} onPress={() => { setSortColumnId(columnMenuId!); setSortDirection('desc'); setColumnMenuId(null); }}>
+              <Ionicons name="arrow-down" size={16} color={Colors.navy} />
               <Text style={styles.contextItemText}>Sort Z → A</Text>
             </TouchableOpacity>
-            {/* Rename */}
-            <TouchableOpacity
-              style={styles.contextItem}
-              onPress={() => {
-                if (columnMenuId) {
-                  setRenameColumnId(columnMenuId);
-                  setRenameColumnValue(columns.find((c) => c.id === columnMenuId)?.name || '');
-                  setRenameColumnModal(true);
-                  setColumnMenuId(null);
-                }
-              }}
-            >
-              <Ionicons name="pencil" size={18} color={Colors.navy} />
+
+            <View style={styles.contextDivider} />
+
+            {/* Section: Edit */}
+            <Text style={styles.contextSectionLabel}>EDIT</Text>
+            <TouchableOpacity style={styles.contextItem} onPress={() => {
+              setRenameColumnId(columnMenuId!); setRenameColumnValue(columns.find((c) => c.id === columnMenuId)?.name || '');
+              setRenameColumnModal(true); setColumnMenuId(null);
+            }}>
+              <Ionicons name="pencil" size={16} color={Colors.navy} />
               <Text style={styles.contextItemText}>Rename Column</Text>
             </TouchableOpacity>
-            {/* Configure Dropdown (only for dropdown columns) */}
+            <TouchableOpacity style={styles.contextItem} onPress={() => {
+              setChangeTypeValue(columns.find((c) => c.id === columnMenuId)?.type || 'text');
+              setChangeTypeModal(true); setColumnMenuId(null);
+            }}>
+              <Ionicons name="swap-horizontal" size={16} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Change Column Type</Text>
+            </TouchableOpacity>
+
             {columns.find((c) => c.id === columnMenuId)?.type === 'dropdown' && (
-              <TouchableOpacity
-                style={styles.contextItem}
-                onPress={() => {
-                  if (columnMenuId) {
-                    setDropdownConfigColumnId(columnMenuId);
-                    const col = columns.find((c) => c.id === columnMenuId);
-                    setDropdownConfigOptions(col?.dropdownOptions?.join(', ') || '');
-                    setDropdownConfigModal(true);
-                    setColumnMenuId(null);
-                  }
-                }}
-              >
-                <Ionicons name="list" size={18} color={Colors.navy} />
-                <Text style={styles.contextItemText}>Edit Options</Text>
+              <TouchableOpacity style={styles.contextItem} onPress={() => {
+                setDropdownConfigColumnId(columnMenuId!);
+                setDropdownConfigOptions(columns.find((c) => c.id === columnMenuId)?.dropdownOptions?.join(', ') || '');
+                setDropdownConfigModal(true); setColumnMenuId(null);
+              }}>
+                <Ionicons name="list" size={16} color={Colors.navy} />
+                <Text style={styles.contextItemText}>Edit Dropdown Options</Text>
               </TouchableOpacity>
             )}
-            {/* Delete */}
-            <TouchableOpacity
-              style={styles.contextItem}
-              onPress={() => {
-                if (columnMenuId) {
-                  Alert.alert('Delete Column', 'Are you sure?', [
-                    { text: 'Cancel', style: 'cancel', onPress: () => setColumnMenuId(null) },
-                    { text: 'Delete', style: 'destructive', onPress: () => deleteColumnMutation.mutate(columnMenuId) },
-                  ]);
-                }
-              }}
-            >
-              <Ionicons name="trash-outline" size={18} color={Colors.destructive} />
+
+            <View style={styles.contextDivider} />
+
+            {/* Section: Insert / Copy */}
+            <Text style={styles.contextSectionLabel}>INSERT & COPY</Text>
+            <TouchableOpacity style={styles.contextItem} onPress={() => {
+              setInsertColModal('left'); setColumnMenuId(null);
+            }}>
+              <Ionicons name="add-circle-outline" size={16} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Insert Column Left</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.contextItem} onPress={() => {
+              setInsertColModal('right'); setColumnMenuId(null);
+            }}>
+              <Ionicons name="add-circle-outline" size={16} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Insert Column Right</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.contextItem} onPress={() => duplicateColumnMutation.mutate(columnMenuId!)}>
+              <Ionicons name="copy-outline" size={16} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Duplicate Column</Text>
+            </TouchableOpacity>
+
+            <View style={styles.contextDivider} />
+
+            {/* Section: Arrange */}
+            <Text style={styles.contextSectionLabel}>ARRANGE</Text>
+            <TouchableOpacity style={styles.contextItem} onPress={() => moveColumnMutation.mutate({ colId: columnMenuId!, dir: 'left' })}>
+              <Ionicons name="chevron-back" size={16} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Move Column Left</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.contextItem} onPress={() => moveColumnMutation.mutate({ colId: columnMenuId!, dir: 'right' })}>
+              <Ionicons name="chevron-forward" size={16} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Move Column Right</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.contextItem} onPress={() => {
+              const frozen = frozenColumns.has(columnMenuId!);
+              const newSet = new Set(frozenColumns);
+              if (frozen) newSet.delete(columnMenuId!); else newSet.add(columnMenuId!);
+              setFrozenColumns(newSet);
+              freezeColumn(registerId, columnMenuId!, !frozen);
+              setColumnMenuId(null);
+            }}>
+              <Ionicons name={frozenColumns.has(columnMenuId!) ? "pin-outline" : "pin"} size={16} color={Colors.navy} />
+              <Text style={styles.contextItemText}>{frozenColumns.has(columnMenuId!) ? 'Unfreeze' : 'Freeze'} Column</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.contextItem} onPress={() => {
+              const newSet = new Set(hiddenColumns);
+              newSet.add(columnMenuId!);
+              setHiddenColumns(newSet);
+              hideColumn(registerId, columnMenuId!, true);
+              setColumnMenuId(null);
+            }}>
+              <Ionicons name="eye-off-outline" size={16} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Hide Column</Text>
+            </TouchableOpacity>
+
+            <View style={styles.contextDivider} />
+
+            {/* Section: Destructive */}
+            <Text style={styles.contextSectionLabel}>DANGER</Text>
+            <TouchableOpacity style={styles.contextItem} onPress={() => {
+              Alert.alert('Clear Data', 'Clear all data from this column?', [
+                { text: 'Cancel', style: 'cancel', onPress: () => setColumnMenuId(null) },
+                { text: 'Clear', style: 'destructive', onPress: () => clearColumnDataMutation.mutate(columnMenuId!) },
+              ]);
+            }}>
+              <Ionicons name="backspace-outline" size={16} color={Colors.destructive} />
+              <Text style={styles.contextItemDanger}>Clear Column Data</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.contextItem} onPress={() => {
+              Alert.alert('Delete Column', 'Are you sure? This cannot be undone.', [
+                { text: 'Cancel', style: 'cancel', onPress: () => setColumnMenuId(null) },
+                { text: 'Delete', style: 'destructive', onPress: () => deleteColumnMutation.mutate(columnMenuId!) },
+              ]);
+            }}>
+              <Ionicons name="trash-outline" size={16} color={Colors.destructive} />
               <Text style={styles.contextItemDanger}>Delete Column</Text>
             </TouchableOpacity>
-          </View>
+
+          </ScrollView>
         </TouchableOpacity>
       </Modal>
+
+      {/* ─── Change Column Type Modal ──────────────────────── */}
+      <Modal visible={changeTypeModal} transparent animationType="slide" onRequestClose={() => setChangeTypeModal(false)}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Change Column Type</Text>
+            <Text style={styles.modalSub}>Select a new type for this column. Note: Converting types may cause some formatting to change.</Text>
+            <View style={styles.typeSelectorRow}>
+              {[
+                { val: 'text', icon: 'text', label: 'Text' },
+                { val: 'number', icon: 'calculator', label: 'Number' },
+                { val: 'date', icon: 'calendar', label: 'Date' },
+                { val: 'dropdown', icon: 'list', label: 'Dropdown' },
+                { val: 'formula', icon: 'flask', label: 'Formula' },
+              ].map((t) => (
+                <TouchableOpacity
+                  key={t.val}
+                  style={[styles.typeOption, changeTypeValue === t.val && styles.typeOptionSelected]}
+                  onPress={() => setChangeTypeValue(t.val)}
+                >
+                  <Ionicons name={t.icon as any} size={24} color={changeTypeValue === t.val ? Colors.navy : Colors.muted} />
+                  <Text style={[styles.typeOptionText, changeTypeValue === t.val && styles.typeOptionSelectedText]}>
+                    {t.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setChangeTypeModal(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalConfirmBtn, changeColumnTypeMutation.isPending && { opacity: 0.7 }]}
+                onPress={() => changeColumnTypeMutation.mutate()}
+                disabled={changeColumnTypeMutation.isPending}
+              >
+                {changeColumnTypeMutation.isPending ? <ActivityIndicator size="small" color={Colors.white} /> : <Text style={styles.modalConfirmText}>Save Type</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ─── Insert Column Modal ─────────────────────────── */}
+      <Modal visible={insertColModal !== null} transparent animationType="slide" onRequestClose={() => setInsertColModal(null)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setInsertColModal(null)}>
+          <KeyboardAvoidingView style={{ width: '100%', alignItems: 'center' }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <TouchableOpacity style={styles.modalContent} activeOpacity={1}>
+              <Text style={styles.modalTitle}>Insert Column {insertColModal === 'left' ? 'Left' : 'Right'}</Text>
+              
+              <Text style={styles.modalLabel}>Column Name</Text>
+              <TextInput style={styles.modalInput} value={newColumnName} onChangeText={setNewColumnName} placeholder="e.g. Price" placeholderTextColor={Colors.placeholder} />
+              
+              <Text style={styles.modalLabel}>Column Type</Text>
+              <View style={styles.typeSelectorRow}>
+              {[
+                { val: 'text', icon: 'text', label: 'Text' },
+                { val: 'number', icon: 'calculator', label: 'Number' },
+                { val: 'date', icon: 'calendar', label: 'Date' },
+                { val: 'dropdown', icon: 'list', label: 'Dropdown' },
+                { val: 'formula', icon: 'flask', label: 'Formula' },
+              ].map((t) => (
+                <TouchableOpacity
+                  key={t.val}
+                  style={[styles.typeOption, newColumnType === t.val && styles.typeOptionSelected]}
+                  onPress={() => setNewColumnType(t.val)}
+                >
+                  <Ionicons name={t.icon as any} size={24} color={newColumnType === t.val ? Colors.navy : Colors.muted} />
+                  <Text style={[styles.typeOptionText, newColumnType === t.val && styles.typeOptionSelectedText]}>{t.label}</Text>
+                </TouchableOpacity>
+              ))}
+              </View>
+
+              {newColumnType === 'dropdown' && (
+                <>
+                  <Text style={styles.modalLabel}>Dropdown Options (comma separated)</Text>
+                  <TextInput style={styles.modalInput} value={newColumnDropdownOptions} onChangeText={setNewColumnDropdownOptions} placeholder="Option 1, Option 2" placeholderTextColor={Colors.placeholder} />
+                </>
+              )}
+              {newColumnType === 'formula' && (
+                <>
+                  <Text style={styles.modalLabel}>Formula Expression</Text>
+                  <TextInput style={styles.modalInput} value={newColumnFormula} onChangeText={setNewColumnFormula} placeholder="e.g., {Rate}*{Qty}" placeholderTextColor={Colors.placeholder} autoCapitalize="none" />
+                </>
+              )}
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setInsertColModal(null)}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalConfirmBtn, insertColumnMutation.isPending && { opacity: 0.7 }]}
+                  onPress={() => insertColumnMutation.mutate()}
+                  disabled={insertColumnMutation.isPending || !newColumnName.trim()}
+                >
+                  {insertColumnMutation.isPending ? <ActivityIndicator size="small" color={Colors.white} /> : <Text style={styles.modalConfirmText}>Insert</Text>}
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </Modal>
+
 
       {/* ─── Row Context Menu ────────────────────────────── */}
       <Modal visible={rowMenuId !== null} transparent animationType="fade" onRequestClose={() => setRowMenuId(null)}>
@@ -1931,6 +2188,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: BorderRadius.xl, padding: Spacing.xxl, paddingBottom: Spacing.huge,
   },
   modalTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.foreground, marginBottom: Spacing.xl },
+  modalSub: { fontSize: FontSize.sm, color: Colors.muted, marginBottom: Spacing.lg },
   modalLabel: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold, color: Colors.foreground, marginBottom: Spacing.sm },
   modalInput: {
     borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md,
@@ -1946,6 +2204,16 @@ const styles = StyleSheet.create({
   typeChipActive: { backgroundColor: Colors.navy, borderColor: Colors.navy },
   typeChipText: { fontSize: FontSize.xs, fontWeight: FontWeight.semibold, color: Colors.foreground, textTransform: 'capitalize' },
   typeChipTextActive: { color: Colors.white },
+  typeSelectorRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.xl, flexWrap: 'wrap', justifyContent: 'space-between' },
+  typeOption: {
+    width: '31%', paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md, borderWidth: 1, borderColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center', gap: Spacing.xs,
+    marginBottom: Spacing.sm,
+  },
+  typeOptionSelected: { backgroundColor: 'rgba(20,83,45,0.06)', borderColor: Colors.navy },
+  typeOptionText: { fontSize: 11, fontWeight: FontWeight.semibold, color: Colors.muted },
+  typeOptionSelectedText: { color: Colors.navy },
   modalActions: { flexDirection: 'row', gap: Spacing.md },
   modalCancelBtn: {
     flex: 1, paddingVertical: Spacing.md, borderRadius: BorderRadius.md, borderWidth: 1,
@@ -1962,9 +2230,15 @@ const styles = StyleSheet.create({
   contextOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
   contextMenu: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.lg,
-    width: 280, ...Shadows.elevated,
+    width: 320, ...Shadows.elevated,
   },
+  contextTitleContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.md },
+  contextTitleMain: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.foreground, flex: 1 },
+  contextTypeBadge: { backgroundColor: Colors.borderLight, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  contextTypeBadgeText: { fontSize: 10, fontWeight: FontWeight.bold, color: Colors.muted, letterSpacing: 0.5 },
   contextTitle: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.foreground, marginBottom: Spacing.md },
+  contextSectionLabel: { fontSize: 10, fontWeight: FontWeight.bold, color: Colors.muted, letterSpacing: 0.5, marginTop: Spacing.md, marginBottom: Spacing.xs },
+  contextDivider: { height: 1, backgroundColor: Colors.border, marginVertical: Spacing.xs },
   contextItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingVertical: Spacing.md },
   contextItemSelected: { backgroundColor: Colors.surface, borderRadius: BorderRadius.sm, paddingHorizontal: Spacing.sm },
   contextItemText: { fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.foreground },

@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   listBusinesses, createBusiness, listRegisters, deleteRegister,
-  renameRegister, duplicateRegister,
+  renameRegister, duplicateRegister, importExcelData
 } from '../lib/api';
+import * as XLSX from 'xlsx';
 import { CATEGORIES, TEMPLATES, type Template } from '../lib/templates';
 import {
   Search, Plus, MoreVertical, FileText, Pencil, Copy, Trash2, ExternalLink, X,
-  Eye, Hash, Calendar, ChevronDown, FlaskConical, Type,
+  Eye, Hash, Calendar, ChevronDown, FlaskConical, Type, Upload,
   Building, GraduationCap, Store, Bus, Warehouse, Package, CalendarIcon, HeartPulse,
   Utensils, Dumbbell, Building2, User, ShieldCheck, Leaf, Plane,
 } from 'lucide-react';
@@ -73,6 +74,39 @@ export default function HomePage() {
     onSuccess: (newReg) => { queryClient.invalidateQueries({ queryKey: ['registers'] }); setMenuId(null); navigate(`/register/${newReg.id}`); },
   });
 
+  const excelMutation = useMutation({
+    mutationFn: async ({ name, data }: { name: string; data: any[] }) => {
+      const reg = await importExcelData(businessId!, name, data);
+      return reg;
+    },
+    onSuccess: (newReg) => {
+      queryClient.invalidateQueries({ queryKey: ['registers'] });
+      navigate(`/register/${newReg.id}`);
+    },
+    onError: (err: any) => alert(err.message),
+  });
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        const name = file.name.replace(/\.[^/.]+$/, "");
+        excelMutation.mutate({ name, data });
+      } catch (err) {
+        alert("Failed to parse Excel file.");
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
   const createMutation = useMutation({
     mutationFn: (template: Template) => {
       const categoryData = CATEGORIES.find((c) => c.id === selectedCategory);
@@ -101,10 +135,10 @@ export default function HomePage() {
       <div className="sidebar">
         {/* Brand Strip — deep green, school logo */}
         <div className="sidebar-brand">
-          <img src="/logo-transparent.png" alt="SJVPS" className="sidebar-brand-logo" />
+          <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-brand-logo" />
           <div>
-            <div className="sidebar-brand-name">SJVPS Record Book</div>
-            <div className="sidebar-brand-sub">Learn and Grow</div>
+            <div className="sidebar-brand-name">AG Trust</div>
+            <div className="sidebar-brand-sub">Trusted Partners</div>
           </div>
         </div>
 
@@ -133,7 +167,7 @@ export default function HomePage() {
             >
               <div
                 className="register-icon-bg"
-                style={{ backgroundColor: reg.iconColor ? `${reg.iconColor}20` : 'rgba(27,42,74,0.08)' }}
+                {...{ style: { '--dyn-bg': reg.iconColor ? `${reg.iconColor}20` : 'rgba(27,42,74,0.08)' } as React.CSSProperties }}
               >
                 <FileText size={16} color={reg.iconColor || 'var(--navy)'} />
               </div>
@@ -155,8 +189,8 @@ export default function HomePage() {
 
         {/* Sidebar Footer */}
         <div className="sidebar-footer">
-          <img src="/logo-transparent.png" alt="SJVPS" className="sidebar-footer-logo" />
-          <span className="sidebar-footer-text">SJVPS · CBSE Affiliated</span>
+          <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-footer-logo" />
+          <span className="sidebar-footer-text">AG Trust · Record Book</span>
         </div>
       </div>
 
@@ -164,12 +198,18 @@ export default function HomePage() {
       <div className="content-area">
         {!filtered || filtered.length === 0 ? (
           <div className="empty-state">
-            <img src="/logo-transparent.png" alt="SJVPS" className="empty-logo" />
-            <h2 className="empty-title">Welcome to SJVPS Record Book</h2>
-            <p className="empty-sub">Create your first register by selecting a template or start from scratch.</p>
-            <button className="empty-btn" onClick={() => navigate('/templates')}>
-              <Plus size={16} />Add New Register
-            </button>
+            <img src="/logo-transparent.png" alt="AG Trust" className="empty-logo" />
+            <h2 className="empty-title">Welcome to AG Trust</h2>
+            <p className="empty-sub">Create your first register by selecting a template, starting from scratch, or uploading Excel data.</p>
+            <div className="empty-actions">
+              <button className="empty-btn" onClick={() => navigate('/templates')}>
+                <Plus size={16} />Add New Register
+              </button>
+              <label htmlFor="excel-upload-empty" className="empty-btn empty-btn-secondary">
+                <Upload size={16} />{excelMutation.isPending ? 'Importing...' : 'Import Excel'}
+              </label>
+              <input id="excel-upload-empty" type="file" accept=".xlsx, .xls, .csv" className="hidden-input" title="Upload Excel File" aria-label="Upload Excel File" onChange={handleFileUpload} />
+            </div>
           </div>
         ) : (
           <div className="registers-content">
@@ -180,7 +220,7 @@ export default function HomePage() {
             <div className="categories-grid categories-grid--no-pad">
               {filtered.map((reg) => (
                 <div key={reg.id} className="category-card" onClick={() => navigate(`/register/${reg.id}`)}>
-                  <div className="category-icon" style={{ background: reg.iconColor || 'var(--navy)' }}>
+                  <div className="category-icon" {...{ style: { '--dyn-bg': reg.iconColor || 'var(--navy)' } as React.CSSProperties }}>
                     <FileText size={24} />
                   </div>
                   <div className="category-name">{reg.name}</div>
@@ -194,6 +234,14 @@ export default function HomePage() {
                 <div className="category-name">Add New</div>
                 <div className="category-count">Create from template</div>
               </div>
+              <label htmlFor="excel-upload" className={`category-card category-card--dashed ${excelMutation.isPending ? 'uploading' : ''}`}>
+                <div className="category-icon category-icon--muted">
+                  <Upload size={24} />
+                </div>
+                <div className="category-name">{excelMutation.isPending ? 'Importing...' : 'Import Excel'}</div>
+                <div className="category-count">Upload .xlsx or .csv</div>
+                <input id="excel-upload" type="file" accept=".xlsx, .xls, .csv" className="hidden-input" title="Upload Excel File" aria-label="Upload Excel File" onChange={handleFileUpload} disabled={excelMutation.isPending} />
+              </label>
             </div>
           </div>
         )}
@@ -252,7 +300,7 @@ export default function HomePage() {
       {selectedCategory && (
         <div className="modal-overlay" onClick={() => setSelectedCategory(null)}>
           <div className="modal-content modal-content--wide" onClick={(e) => e.stopPropagation()}>
-            <div className="template-modal-header" style={{ background: categoryData?.color || 'var(--navy)' }}>
+            <div className="template-modal-header" {...{ style: { '--dyn-bg': categoryData?.color || 'var(--navy)' } as React.CSSProperties }}>
               <div className="template-modal-header-icon">
                 {(() => { const Icon = ICON_MAP[categoryData?.icon || ''] || FileText; return <Icon size={24} />; })()}
               </div>

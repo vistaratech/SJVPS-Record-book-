@@ -55,13 +55,13 @@ export default function LoginPage() {
         <div className="login-logo-wrap">
           <img
             src="/logo-transparent.png"
-            alt="SJVPS School Seal"
+            alt="AG Trust Logo"
             className="login-logo-img"
           />
-          <span className="login-logo-badge">CBSE Affiliated</span>
+          <span className="login-logo-badge">Trusted Partner</span>
         </div>
 
-        <h1 className="login-title">SJVPS Record Book</h1>
+        <h1 className="login-title">AG Trust</h1>
         <p className="login-sub">
           {step === 'phone'
             ? 'Enter your phone number to get started'

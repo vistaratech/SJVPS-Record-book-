@@ -152,7 +152,7 @@ export default function AuthScreen() {
               style={styles.logoCircle}
               resizeMode="contain"
             />
-            <Text style={styles.appName}>SJVPS Record Book</Text>
+            <Text style={styles.appName}>AG Trust</Text>
             <Text style={styles.tagline}>
               Your Digital Register, Simplified
             </Text>

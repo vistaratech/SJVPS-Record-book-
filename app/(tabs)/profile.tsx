@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,11 +9,35 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../lib/auth';
+import { listBusinesses, importData } from '../../lib/api';
 import { Colors, Spacing, BorderRadius, FontSize, FontWeight, Shadows } from '../../constants/theme';
+import { TextInput, Modal, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
+  const queryClient = useQueryClient();
+
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [importDataString, setImportDataString] = useState('');
+
+  const { data: businesses } = useQuery({
+    queryKey: ['businesses'],
+    queryFn: listBusinesses,
+  });
+  const businessId = businesses?.[0]?.id;
+
+  const importMutation = useMutation({
+    mutationFn: (jsonData: string) => importData(businessId!, jsonData),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['registers'] });
+      setImportModalVisible(false);
+      setImportDataString('');
+      Alert.alert('Success', `Successfully imported ${res.importedCount} registers!`);
+    },
+    onError: (err: any) => Alert.alert('Error', err.message || 'Failed to import data'),
+  });
 
   const handleLogout = () => {
     Alert.alert('Log Out', 'Are you sure you want to log out?', [
@@ -70,6 +94,14 @@ export default function ProfileScreen() {
           <Ionicons name="chevron-forward" size={18} color={Colors.mutedLight} />
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => setImportModalVisible(true)}>
+          <View style={[styles.menuIcon, { backgroundColor: '#F0F9FF' }]}>
+            <Ionicons name="cloud-upload-outline" size={20} color={Colors.navy} />
+          </View>
+          <Text style={styles.menuLabel}>Import Data</Text>
+          <Ionicons name="chevron-forward" size={18} color={Colors.mutedLight} />
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.menuItem} activeOpacity={0.7}>
           <View style={[styles.menuIcon, { backgroundColor: '#F5F3FF' }]}>
             <Ionicons name="help-circle-outline" size={20} color="#8B5CF6" />
@@ -89,7 +121,48 @@ export default function ProfileScreen() {
         <Text style={styles.logoutText}>Log Out</Text>
       </TouchableOpacity>
 
-      <Text style={styles.version}>SJVPS Record Book v1.0.0</Text>
+      <Text style={styles.version}>AG Trust v1.0.0</Text>
+
+      {/* ─── Import JSON Modal ─────────────────────────────── */}
+      <Modal visible={importModalVisible} transparent animationType="slide" onRequestClose={() => setImportModalVisible(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setImportModalVisible(false)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} style={{ width: '100%', alignItems: 'center' }}>
+            <TouchableOpacity activeOpacity={1} style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Import Data</Text>
+              <Text style={{ fontSize: FontSize.sm, color: Colors.muted, marginBottom: Spacing.sm }}>Paste Record Book JSON data here</Text>
+              <TextInput
+                style={[styles.modalInput, { height: 120, textAlignVertical: 'top' }]}
+                value={importDataString}
+                onChangeText={setImportDataString}
+                placeholder="[{...}]"
+                placeholderTextColor={Colors.placeholder}
+                multiline
+              />
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setImportModalVisible(false)}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalConfirmBtn, importMutation.isPending && { opacity: 0.7 }]}
+                  onPress={() => {
+                    if (importDataString.trim()) {
+                      importMutation.mutate(importDataString.trim());
+                    }
+                  }}
+                  disabled={importMutation.isPending || !importDataString.trim()}
+                >
+                  {importMutation.isPending ? (
+                    <ActivityIndicator size="small" color={Colors.white} />
+                  ) : (
+                    <Text style={styles.modalConfirmText}>Import</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </Modal>
+
     </ScrollView>
   );
 }

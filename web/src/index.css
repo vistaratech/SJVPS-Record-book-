@@ -1,56 +1,60 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 /* ═══════════════════════════════════════════════════════════
-   SJVPS RECORD BOOK — Design Tokens (matches mobile theme.ts)
-   Primary: Deep Forest Green  |  Accent: Signature Yellow
+   AG TRUST RECORD BOOK — Design Tokens
+   Primary: Navy Blue #1E2D78  |  Accent: Red #E63012  |  Green #4CAF1A
 ═══════════════════════════════════════════════════════════ */
 :root {
-  /* Primary palette — Logo Deep Green */
-  --navy:          #14532D;   /* Deep forest green (hands/base)       */
-  --navy-light:    #166534;   /* Lighter forest green                  */
-  --navy-dark:     #064E3B;   /* Darkest green                         */
+  /* Primary palette — AG Trust Navy Blue */
+  --navy:          #1E2D78;   /* Deep navy blue (from AG Trust text)    */
+  --navy-light:    #2B3D9A;   /* Lighter navy                            */
+  --navy-dark:     #141E55;   /* Darkest navy                            */
 
-  /* Accent — Bright signature Yellow from logo center */
-  --accent:        #EAB308;
-  --accent-dark:   #CA8A04;
+  /* Accent — Brand Red from right figure/leaf */
+  --accent:        #E63012;
+  --accent-dark:   #C0250E;
 
-  /* Destructive — Red from "SJVPS - CBSE" typography */
-  --destructive:   #DC2626;
+  /* Brand Green — from left figure/leaf */
+  --brand-green:   #4CAF1A;
+  --brand-green-dark: #3A8A12;
+
+  /* Destructive */
+  --destructive:   #E63012;
   --destructive-bg:#FEF2F2;
 
   /* Status */
-  --success:       #16A34A;
+  --success:       #4CAF1A;
   --warning:       #F59E0B;
 
-  /* Backgrounds — Creamy off-white (mimics logo outer border) */
-  --background:    #FDFCF6;
+  /* Backgrounds — clean blue-tinted white */
+  --background:    #F8F9FF;
   --surface:       #FFFFFF;
-  --border-light:  #F3F3E8;
-  --border:        #EBEBDE;
+  --border-light:  #EEF0F8;
+  --border:        #E2E5F0;
 
   /* Text */
-  --foreground:    #1F2925;   /* Dark greenish-black */
-  --muted:         #6B726C;
-  --muted-light:   #9CA39E;
-  --placeholder:   #A8B0AB;
+  --foreground:    #1A1F3A;   /* Dark navy-tinted black */
+  --muted:         #6B7280;
+  --muted-light:   #9CA3AF;
+  --placeholder:   #A5B0C3;
 
   /* Sidebar / Surface */
   --sidebar-bg:    #FFFFFF;
-  --surface-hover: #EBEBDE;
+  --surface-hover: #E8ECF8;
 
   /* Border radius (matches BorderRadius constants) */
   --radius-sm: 6px;
-  --radius-md: 8px;   /* was 10, now matches app md:8 */
+  --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-xxl: 20px;
 
-  /* Shadows (green-tinted like in Shadows.card) */
-  --shadow-sm:     0 1px 2px rgba(20,83,45,0.04);
-  --shadow-md:     0 4px 12px rgba(20,83,45,0.08);
-  --shadow-lg:     0 8px 30px rgba(20,83,45,0.12);
-  --shadow-button: 0 2px 8px rgba(20,83,45,0.20);
-  --shadow-elevated:0 4px 16px rgba(20,83,45,0.12);
+  /* Shadows (navy-tinted like AG Trust brand) */
+  --shadow-sm:     0 1px 2px rgba(30,45,120,0.04);
+  --shadow-md:     0 4px 12px rgba(30,45,120,0.08);
+  --shadow-lg:     0 8px 30px rgba(30,45,120,0.12);
+  --shadow-button: 0 2px 8px rgba(30,45,120,0.20);
+  --shadow-elevated:0 4px 16px rgba(30,45,120,0.12);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -74,7 +78,7 @@ a { text-decoration: none; color: inherit; }
 
 /* ═══════════════════════════════════════════════════════════
    LOGIN PAGE
-   Green gradient background with creamy card, school logo
+   Navy blue gradient background with clean card, AG Trust logo
 ═══════════════════════════════════════════════════════════ */
 .login-page {
   min-height: 100vh;
@@ -85,7 +89,7 @@ a { text-decoration: none; color: inherit; }
   position: relative;
   overflow: hidden;
 }
-/* Decorative radial glow — carries yellow accent */
+/* Decorative radial glow — carries red accent */
 .login-page::before {
   content: '';
   position: absolute;
@@ -93,7 +97,7 @@ a { text-decoration: none; color: inherit; }
   right: -20%;
   width: 500px;
   height: 500px;
-  background: radial-gradient(circle, rgba(234,179,8,0.18) 0%, transparent 65%);
+  background: radial-gradient(circle, rgba(230,48,18,0.15) 0%, transparent 65%);
   border-radius: 50%;
   pointer-events: none;
 }
@@ -104,7 +108,7 @@ a { text-decoration: none; color: inherit; }
   left: -15%;
   width: 400px;
   height: 400px;
-  background: radial-gradient(circle, rgba(234,179,8,0.10) 0%, transparent 65%);
+  background: radial-gradient(circle, rgba(76,175,26,0.10) 0%, transparent 65%);
   border-radius: 50%;
   pointer-events: none;
 }
@@ -121,7 +125,7 @@ a { text-decoration: none; color: inherit; }
   border: 1px solid var(--border);
 }
 
-/* School logo in login */
+/* AG Trust logo in login */
 .login-logo-wrap {
   display: flex;
   flex-direction: column;
@@ -133,16 +137,18 @@ a { text-decoration: none; color: inherit; }
   width: 96px;
   height: 96px;
   object-fit: contain;
-  /* transparent PNG — no crop needed */
-  filter: drop-shadow(0 4px 12px rgba(20,83,45,0.15));
+  border-radius: 50%;
+  background: #FFFFFF;
+  padding: 4px;
+  filter: drop-shadow(0 4px 12px rgba(30,45,120,0.20));
 }
 .login-logo-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 12px;
-  background: rgba(20,83,45,0.08);
-  border: 1px solid rgba(20,83,45,0.15);
+  background: rgba(30,45,120,0.08);
+  border: 1px solid rgba(30,45,120,0.15);
   border-radius: var(--radius-xxl);
   font-size: 11px;
   font-weight: 700;
@@ -278,6 +284,9 @@ a { text-decoration: none; color: inherit; }
   height: 40px;
   object-fit: contain;
   flex-shrink: 0;
+  border-radius: 50%;
+  background: #FFFFFF;
+  padding: 2px;
   filter: drop-shadow(0 1px 3px rgba(0,0,0,0.25));
 }
 .sidebar-brand-name {
@@ -442,7 +451,10 @@ a { text-decoration: none; color: inherit; }
   width: 28px;
   height: 28px;
   object-fit: contain;
-  opacity: 0.75;
+  opacity: 0.85;
+  border-radius: 50%;
+  background: #FFFFFF;
+  padding: 1.5px;
 }
 .sidebar-footer-text {
   font-size: 11px;
@@ -751,6 +763,9 @@ a { text-decoration: none; color: inherit; }
   height: 100px;
   object-fit: contain;
   margin-bottom: 20px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  padding: 4px;
   filter: drop-shadow(0 4px 16px rgba(20,83,45,0.15));
   animation: float 3s ease-in-out infinite;
 }
@@ -881,6 +896,11 @@ a { text-decoration: none; color: inherit; }
   border: 1px solid var(--border);
   animation: slideUp 0.15s ease;
 }
+.context-menu-wide {
+  min-width: 260px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
 .context-title {
   padding: 8px 12px;
   font-size: 13px;
@@ -888,6 +908,33 @@ a { text-decoration: none; color: inherit; }
   color: var(--foreground);
   border-bottom: 1px solid var(--border-light);
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.context-type-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: var(--border-light);
+  color: var(--muted);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+.context-section-label {
+  padding: 4px 12px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--muted-light);
+}
+.context-divider {
+  height: 1px;
+  background: var(--border-light);
+  margin: 4px 8px;
 }
 .context-item {
   display: flex;
@@ -906,8 +953,27 @@ a { text-decoration: none; color: inherit; }
   border: none;
 }
 .context-item:hover { background: var(--border-light); }
+.context-item:disabled { opacity: 0.35; cursor: not-allowed; }
+.context-item:disabled:hover { background: none; }
 .context-item.danger { color: var(--destructive); }
 .context-item.danger:hover { background: var(--destructive-bg); }
+.context-check { margin-left: auto; color: var(--navy); }
+.hidden-cols-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  background: rgba(230,48,18,0.08);
+  border: 1px solid rgba(230,48,18,0.20);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.hidden-cols-btn:hover { background: rgba(230,48,18,0.14); }
 
 /* ═══════════════════════════════════════════════════════════
    TEMPLATE PICKER
@@ -1289,3 +1355,63 @@ a { text-decoration: none; color: inherit; }
   max-height: 85vh;
 }
 
+/* ─── New helper classes ─── */
+.empty-actions {
+  display: flex;
+  gap: 12px;
+}
+.empty-btn-secondary {
+  background: var(--surface);
+  color: var(--navy);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.hidden-input {
+  display: none;
+}
+.uploading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ─── new utility classes extracted from RegisterPage ─── */
+.center-loader { display: flex; align-items: center; justify-content: center; height: 100vh; }
+.spinner-large { width: 32px; height: 32px; }
+.register-layout { display: flex; flex-direction: column; height: 100vh; }
+.col-header-cell { min-width: 140px; }
+.mock-cell-content { padding: 0 12px; color: var(--placeholder); font-size: 13px; }
+.calc-cell-sm { width: 40px; }
+.calc-cell-md { width: 50px; cursor: default; }
+.calc-cell-flex { min-width: 140px; flex: 1; }
+.calc-cell-lg { width: 44px; }
+.modal-p-text { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+.modal-header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.modal-title-no-margin { margin: 0; }
+.clear-all-btn { background: none; border: none; color: var(--destructive); font-size: 13px; font-weight: 600; cursor: pointer; }
+.filter-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+.filter-select { flex: 1; margin-bottom: 0px; }
+.filter-operator { width: 120px; margin-bottom: 0px; }
+.filter-value { width: 100px; margin-bottom: 0px; }
+.remove-filter-btn { background: none; border: none; color: var(--destructive); cursor: pointer; }
+.add-filter-btn { margin-bottom: 16px; }
+.modal-max-70 { max-height: 70vh; }
+.modal-max-360 { max-width: 360px; }
+.modal-max-380 { max-width: 380px; }
+.modal-max-480 { max-width: 480px; }
+.dropdown-options-container { max-height: 300px; overflow-y: auto; }
+.dropdown-clear-btn { width: 100%; margin-top: 12px; }
+.share-link-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-phone-input { flex: 1; margin-bottom: 0; }
+.share-perm-select { width: 100px; margin-bottom: 0; }
+.shared-user-label { margin-top: 16px; }
+.shared-user-info-wrapper { flex: 1; }
+.shared-user-name { font-size: 13px; font-weight: 600; }
+.shared-user-phone { font-size: 11px; color: var(--muted); }
+.modal-close-btn { width: 100%; margin-top: 20px; }
+.date-picker-flex { display: flex; gap: 12px; margin-bottom: 20px; }
+.date-picker-flex-1 { flex: 1; }
+.date-picker-flex-1-5 { flex: 1.5; }
+.active-calc { background: rgba(27,42,74,0.08); font-weight: 700; }
+.modal-delete-page-btn { color: var(--destructive); }
+.frozen-pin { margin-left: 4px; }
+.serial-header-checkbox { width: 40px; }

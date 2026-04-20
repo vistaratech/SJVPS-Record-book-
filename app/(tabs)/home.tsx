@@ -20,6 +20,9 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import * as XLSX from 'xlsx';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   listBusinesses,
@@ -29,6 +32,8 @@ import {
   renameRegister,
   duplicateRegister,
   createRegister,
+  importExcelData,
+  importData,
   type RegisterSummary,
 } from '../../lib/api';
 import { CATEGORIES, TEMPLATES, type Template } from '../../lib/templates';
@@ -47,6 +52,10 @@ export default function HomeScreen() {
   const [renameRegisterModal, setRenameRegisterModal] = useState(false);
   const [renameRegisterId, setRenameRegisterId] = useState<number | null>(null);
   const [renameRegisterValue, setRenameRegisterValue] = useState('');
+
+  // Import JSON modal
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [importDataString, setImportDataString] = useState('');
 
   // ─── Business ─────────────────────────────────────────────
   const { data: businesses, isLoading: isBusinessesLoading } = useQuery({
@@ -157,6 +166,59 @@ export default function HomeScreen() {
     onError: (err: any) => Alert.alert('Error', err.message || 'Failed to duplicate register'),
   });
 
+  // ─── Import Excel ──────────────────────────────────────────
+  const excelMutation = useMutation({
+    mutationFn: async ({ name, data }: { name: string; data: any[] }) => {
+      const reg = await importExcelData(businessId!, name, data);
+      return reg;
+    },
+    onSuccess: (newReg) => {
+      queryClient.invalidateQueries({ queryKey: ['registers'] });
+      router.push(`/register/${newReg.id}`);
+    },
+    onError: (err: any) => Alert.alert('Error', err.message || 'Failed to import Excel data'),
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (jsonData: string) => importData(businessId!, jsonData),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['registers'] });
+      setImportModalVisible(false);
+      setImportDataString('');
+      Alert.alert('Success', 'Data imported successfully');
+    },
+    onError: (err: any) => Alert.alert('Error', err.message || 'Failed to import JSON data'),
+  });
+
+  const handlePickExcel = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'text/csv',
+          'text/comma-separated-values'
+        ],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+
+      const file = result.assets[0];
+      const bstr = await (FileSystem as any).readAsStringAsync(file.uri, { encoding: 'base64' });
+      
+      const wb = XLSX.read(bstr, { type: 'base64' });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      
+      const name = file.name.replace(/\.[^/.]+$/, "");
+      excelMutation.mutate({ name, data });
+    } catch (err: any) {
+      Alert.alert('Import Error', 'Failed to read or parse the selected file.');
+    }
+  };
+
   // ─── Category / Template data ─────────────────────────────
   const categoryData = CATEGORIES.find((c) => c.id === selectedCategory);
   const subTemplates = selectedCategory ? TEMPLATES[selectedCategory] || [] : [];
@@ -224,15 +286,31 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* + Add New Register — matches web sidebar button */}
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => router.push('/templates')}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="add" size={18} color={Colors.white} />
-          <Text style={styles.addButtonText}>Add New Register</Text>
-        </TouchableOpacity>
+        {/* + Add New Register & Options */}
+        <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+          <TouchableOpacity
+            style={[styles.addButton, { flex: 1 }]}
+            onPress={() => router.push('/templates')}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="add" size={18} color={Colors.white} />
+            <Text style={styles.addButtonText}>Add New</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.importTopButton}
+            onPress={handlePickExcel}
+            activeOpacity={0.85}
+          >
+            {excelMutation.isPending ? (
+              <ActivityIndicator size="small" color={Colors.navy} />
+            ) : (
+              <>
+                <Ionicons name="cloud-upload-outline" size={18} color={Colors.navy} />
+                <Text style={styles.importTopButtonText}>Import Excel</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* ─── Main Content ─────────────────────────────────── */}
@@ -247,16 +325,23 @@ export default function HomeScreen() {
               <Ionicons name="book" size={44} color={Colors.navy} />
             </View>
 
-            <Text style={styles.welcomeTitle}>Welcome to SJVPS Record Book</Text>
+            <Text style={styles.welcomeTitle}>Welcome to AG Trust</Text>
             <Text style={styles.welcomeSub}>Tap on your register to start:</Text>
 
             <TouchableOpacity
               style={styles.emptyAddBtn}
               onPress={() => router.push('/templates')}
-              activeOpacity={0.85}
             >
-              <Ionicons name="add" size={18} color={Colors.white} />
               <Text style={styles.emptyAddBtnText}>Add New Register</Text>
+              <Ionicons name="arrow-forward" size={16} color={Colors.white} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.emptyAddBtn, { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, marginTop: 12, shadowOpacity: 0 }]}
+              onPress={handlePickExcel}
+            >
+              <Text style={[styles.emptyAddBtnText, { color: Colors.navy }]}>{excelMutation.isPending ? 'Importing...' : 'Upload Excel / CSV'}</Text>
+              <Ionicons name="arrow-up-circle-outline" size={16} color={Colors.navy} />
             </TouchableOpacity>
           </Animated.View>
         </View>
@@ -498,6 +583,47 @@ export default function HomeScreen() {
           </KeyboardAvoidingView>
         </TouchableOpacity>
       </Modal>
+
+      {/* ─── Import JSON Modal ─────────────────────────────── */}
+      <Modal visible={importModalVisible} transparent animationType="slide" onRequestClose={() => setImportModalVisible(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setImportModalVisible(false)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} style={{ width: '100%', alignItems: 'center' }}>
+            <TouchableOpacity activeOpacity={1} style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Import Data</Text>
+              <Text style={{ fontSize: FontSize.sm, color: Colors.muted, marginBottom: Spacing.sm }}>Paste Record Book JSON data here</Text>
+              <TextInput
+                style={[styles.modalInput, { height: 120, textAlignVertical: 'top' }]}
+                value={importDataString}
+                onChangeText={setImportDataString}
+                placeholder="[{...}]"
+                placeholderTextColor={Colors.placeholder}
+                multiline
+              />
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setImportModalVisible(false)}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalConfirmBtn, importMutation.isPending && { opacity: 0.7 }]}
+                  onPress={() => {
+                    if (importDataString.trim()) {
+                      importMutation.mutate(importDataString.trim());
+                    }
+                  }}
+                  disabled={importMutation.isPending || !importDataString.trim()}
+                >
+                  {importMutation.isPending ? (
+                    <ActivityIndicator size="small" color={Colors.white} />
+                  ) : (
+                    <Text style={styles.modalConfirmText}>Import</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </Modal>
+
       </View>
     </TouchableWithoutFeedback>
   );
@@ -816,4 +942,23 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.navy, alignItems: 'center', ...Shadows.button,
   } as any,
   modalConfirmText: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.white },
+
+  // ── Import Button ─────────────────────────────────────────
+  importTopButton: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+  },
+  importTopButtonText: {
+    color: Colors.navy,
+    fontWeight: FontWeight.bold,
+    fontSize: FontSize.sm,
+  },
 });
