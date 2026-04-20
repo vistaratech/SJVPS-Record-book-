@@ -14,8 +14,13 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  // Restore token from localStorage so sessions survive page refreshes
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem(TOKEN_KEY);
+    // If a token exists, hydrate a minimal user so PrivateRoute lets us through
+    return saved ? { id: 1, phone: '', name: 'User', createdAt: '' } : null;
+  });
   const [isLoading] = useState(false);
 
   const login = useCallback((newToken: string, newUser: User) => {

@@ -412,6 +412,44 @@ export default function RegisterScreen() {
 
     try {
       const ws = XLSX.utils.json_to_sheet(rows, { header: headerRow });
+      
+      const getColLetter = (n: number) => {
+        let s = '';
+        while (n >= 0) {
+          s = String.fromCharCode(n % 26 + 65) + s;
+          n = Math.floor(n / 26) - 1;
+        }
+        return s;
+      };
+
+      ws['!dataValidation'] = [];
+
+      visibleCols.forEach((c, cIdx) => {
+        const colLetter = getColLetter(cIdx);
+
+        if (c.type === 'dropdown' && c.dropdownOptions && c.dropdownOptions.length > 0) {
+          ws['!dataValidation'].push({
+            sqref: `${colLetter}2:${colLetter}1000`,
+            type: 'list',
+            allowBlank: true,
+            showDropDown: true,
+            formula1: `"${c.dropdownOptions.join(',')}"`
+          });
+        }
+
+        if (c.type === 'formula' && c.formula) {
+          rows.forEach((row, rIdx) => {
+            let excelF = c.formula || '';
+            visibleCols.forEach((col, refIdx) => {
+              const refLetter = getColLetter(refIdx);
+              excelF = excelF.replace(new RegExp(`\\{${col.name}\\}`, 'g'), `${refLetter}${rIdx + 2}`);
+            });
+            const cellRef = `${colLetter}${rIdx + 2}`;
+            ws[cellRef] = { t: 'n', f: excelF, v: row[c.name] === 'ERR' ? '' : row[c.name] };
+          });
+        }
+      });
+
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
       

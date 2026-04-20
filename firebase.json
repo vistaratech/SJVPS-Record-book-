@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "sjvps-record-book",
+    "site": "ag-trust-record-book",
     "public": "web/dist",
     "ignore": [
       "firebase.json",

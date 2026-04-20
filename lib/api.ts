@@ -1,5 +1,6 @@
 // Mock API client for RecordBook frontend testing
 // Using in-memory storage to bypass need for a backend
+import { TEMPLATES } from './templates';
 
 let authTokenGetter: (() => Promise<string | null>) | null = null;
 
@@ -93,6 +94,7 @@ export interface RegisterSummary {
   createdAt: string;
   updatedAt: string;
   entryCount: number;
+  lastActivity?: string;
 }
 
 export interface Column {
@@ -148,6 +150,7 @@ export async function listRegisters(businessId: number): Promise<RegisterSummary
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     entryCount: r.entries.length,
+    lastActivity: r.entries.length > 0 ? (r.entries[r.entries.length - 1].cells ? Object.values(r.entries[r.entries.length - 1].cells).filter(Boolean).slice(0, 2).join(', ') : '') : '',
   }));
 }
 
@@ -348,10 +351,28 @@ export const importExcelData = async (businessId: number, name: string, data: Re
 
   // Extract columns from the first row's keys
   const headers = Object.keys(data[0]);
-  const columns = headers.map((h, i) => ({
-    name: h || `Column ${i + 1}`,
-    type: 'text'
-  }));
+  
+  let bestTemplate: any = null;
+  let maxMatches = 0;
+  for (const cat in TEMPLATES) {
+    for (const tpl of TEMPLATES[cat]) {
+      const matchCount = tpl.columns.filter(c => headers.includes(c.name)).length;
+      if (matchCount > maxMatches && matchCount >= 2) {
+         maxMatches = matchCount;
+         bestTemplate = tpl;
+      }
+    }
+  }
+
+  const columns = headers.map((h, i) => {
+    const tplCol = bestTemplate?.columns.find((c: any) => c.name === h);
+    return {
+      name: h || `Column ${i + 1}`,
+      type: tplCol?.type || 'text',
+      dropdownOptions: tplCol?.dropdownOptions,
+      formula: tplCol?.formula,
+    };
+  });
 
   const createdReg = await createRegister({
     businessId,
@@ -390,26 +411,127 @@ export const importExcelData = async (businessId: number, name: string, data: Re
 };
 
 // ==================== COLUMNS ====================
+// ─── Formula Engine ──────────────────────────────────────────────────────────
+// Supports: {Column Name} references, + - * / () ^ Math functions
+// Handles: spaces in names, case-insensitive match, chained formulas,
+//          longer-name-first replacement, division-by-zero guard
+
+function parseAndEval(expr: string): number {
+  expr = expr.trim();
+  let pos = 0;
+
+  function peek(): string { return expr[pos] || ''; }
+  function consume(): string { return expr[pos++] || ''; }
+  function skipWS() { while (pos < expr.length && expr[pos] === ' ') pos++; }
+  function parseExpr(): number { return parseAddSub(); }
+
+  function parseAddSub(): number {
+    let left = parseMulDiv(); skipWS();
+    while (peek() === '+' || peek() === '-') {
+      const op = consume(); skipWS();
+      const right = parseMulDiv();
+      left = op === '+' ? left + right : left - right;
+      skipWS();
+    }
+    return left;
+  }
+
+  function parseMulDiv(): number {
+    let left = parsePow(); skipWS();
+    while (peek() === '*' || peek() === '/') {
+      const op = consume(); skipWS();
+      const right = parsePow();
+      if (op === '/' && right === 0) return NaN;
+      left = op === '*' ? left * right : left / right;
+      skipWS();
+    }
+    return left;
+  }
+
+  function parsePow(): number {
+    const base = parseUnary(); skipWS();
+    if (peek() === '^') { consume(); skipWS(); return Math.pow(base, parseUnary()); }
+    return base;
+  }
+
+  function parseUnary(): number {
+    skipWS();
+    if (peek() === '-') { consume(); return -parsePrimary(); }
+    if (peek() === '+') { consume(); return parsePrimary(); }
+    return parsePrimary();
+  }
+
+  function parseNumber(): number {
+    let num = '';
+    while (pos < expr.length && /[0-9.]/.test(expr[pos])) num += consume();
+    return parseFloat(num) || 0;
+  }
+
+  const MATH_FNS: Record<string, (a: number) => number> = {
+    abs: Math.abs, sqrt: Math.sqrt, ceil: Math.ceil, floor: Math.floor,
+    round: Math.round, log: Math.log, sin: Math.sin, cos: Math.cos, tan: Math.tan,
+  };
+
+  function parsePrimary(): number {
+    skipWS();
+    if (peek() === '(') {
+      consume();
+      const val = parseExpr();
+      skipWS(); if (peek() === ')') consume();
+      return val;
+    }
+    if (/[a-zA-Z]/.test(peek())) {
+      let name = '';
+      while (pos < expr.length && /[a-zA-Z0-9_]/.test(expr[pos])) name += consume();
+      skipWS();
+      if (peek() === '(') {
+        consume();
+        const arg = parseExpr();
+        skipWS(); if (peek() === ')') consume();
+        const fn = MATH_FNS[name.toLowerCase()];
+        return fn ? fn(arg) : 0;
+      }
+      return 0;
+    }
+    return parseNumber();
+  }
+
+  return parseExpr();
+}
+
 export function evaluateFormula(formula: string, entry: Entry, columns: Column[]): string {
-  if (!formula) return '';
+  if (!formula || formula.trim() === '') return '';
   try {
-    // Replace column references like {Column Name} with actual values
+    // Replace {Column Name} longest-first to avoid partial matches
+    const sorted = [...columns].sort((a, b) => b.name.length - a.name.length);
     let expression = formula;
-    for (const col of columns) {
-      const placeholder = `{${col.name}}`;
-      const value = entry.cells?.[col.id.toString()] || '0';
-      const numValue = parseFloat(value) || 0;
-      expression = expression.replaceAll(placeholder, numValue.toString());
+
+    for (const col of sorted) {
+      const escaped = col.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp('\\{' + escaped + '\\}', 'gi');
+      const rawVal = entry.cells?.[col.id.toString()] ?? '';
+
+      let numStr: string;
+      if (col.type === 'formula' && col.formula) {
+        const nested = evaluateFormula(col.formula, entry, columns);
+        numStr = (nested === 'ERR' || nested === '') ? '0' : nested;
+      } else {
+        const parsed = parseFloat(rawVal);
+        numStr = isNaN(parsed) ? '0' : parsed.toString();
+      }
+      expression = expression.replace(regex, numStr);
     }
-    // Safely evaluate simple math expressions
-    // Only allow numbers, operators, parentheses, and decimal points
-    const sanitized = expression.replace(/[^0-9+\-*/().\s]/g, '');
-    if (!sanitized) return '';
-    const result = Function('"use strict"; return (' + sanitized + ')')();
+
+    // Replace any unresolved {…} references with 0
+    expression = expression.replace(/\{[^}]*\}/g, '0').trim();
+    if (expression === '') return '';
+
+    const result = parseAndEval(expression);
     if (typeof result === 'number' && !isNaN(result) && isFinite(result)) {
-      return Number.isInteger(result) ? result.toString() : result.toFixed(2);
+      if (Number.isInteger(result)) return result.toString();
+      return parseFloat(result.toFixed(2)).toString();
     }
-    return '';
+    return 'ERR';
   } catch {
     return 'ERR';
   }
@@ -592,6 +714,7 @@ export async function addEntry(registerId: number, cells: Record<string, string>
   };
   reg.entries.push(entry);
   reg.entryCount = reg.entries.length;
+  reg.updatedAt = new Date().toISOString();
   return entry;
 }
 
@@ -608,6 +731,7 @@ export async function updateEntry(
   if (!entry) throw new Error('Entry not found');
   
   entry.cells = { ...entry.cells, ...cells };
+  reg.updatedAt = new Date().toISOString();
   return entry;
 }
 

@@ -8,12 +8,14 @@ import {
 import * as XLSX from 'xlsx';
 import { CATEGORIES, TEMPLATES, type Template } from '../lib/templates';
 import {
-  Search, Plus, MoreVertical, FileText, Pencil, Copy, Trash2, ExternalLink, X,
-  Eye, Hash, Calendar, ChevronDown, FlaskConical, Type, Upload,
+  Search, Plus, MoreVertical, FileText, Pencil, Copy, Trash2, X,
+  Eye, Hash, Calendar, ChevronDown, FlaskConical, Type, Upload, Menu,
   Building, GraduationCap, Store, Bus, Warehouse, Package, CalendarIcon, HeartPulse,
   Utensils, Dumbbell, Building2, User, ShieldCheck, Leaf, Plane,
 } from 'lucide-react';
 import { createRegister } from '../lib/api';
+import { Sidebar } from '../components/home/Sidebar';
+import { DashboardContent } from '../components/home/DashboardContent';
 
 const ICON_MAP: Record<string, any> = {
   'building': Building, 'graduation-cap': GraduationCap, 'store': Store, 'bus': Bus,
@@ -42,6 +44,7 @@ export default function HomePage() {
   const [renameValue, setRenameValue] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [creatingTemplate, setCreatingTemplate] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const { data: businesses } = useQuery({ queryKey: ['businesses'], queryFn: listBusinesses });
   const businessId = businesses?.[0]?.id;
@@ -57,21 +60,23 @@ export default function HomePage() {
     queryKey: ['registers', businessId],
     queryFn: () => listRegisters(businessId!),
     enabled: !!businessId,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
   const deleteMutation = useMutation({
     mutationFn: deleteRegister,
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['registers'] }); setMenuId(null); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['registers', businessId] }); setMenuId(null); },
   });
 
   const renameMutation = useMutation({
     mutationFn: ({ id, name }: { id: number; name: string }) => renameRegister(id, name),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['registers'] }); setRenameModal(false); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['registers', businessId] }); setRenameModal(false); },
   });
 
   const duplicateMutation = useMutation({
     mutationFn: duplicateRegister,
-    onSuccess: (newReg) => { queryClient.invalidateQueries({ queryKey: ['registers'] }); setMenuId(null); navigate(`/register/${newReg.id}`); },
+    onSuccess: (newReg) => { queryClient.invalidateQueries({ queryKey: ['registers', businessId] }); setMenuId(null); navigate(`/register/${newReg.id}`); },
   });
 
   const excelMutation = useMutation({
@@ -80,7 +85,14 @@ export default function HomePage() {
       return reg;
     },
     onSuccess: (newReg) => {
-      queryClient.invalidateQueries({ queryKey: ['registers'] });
+      // Immediately update the cache with the new register so home page shows it right away
+      queryClient.setQueryData(['registers', businessId], (old: any[]) => {
+        const existing = old || [];
+        const alreadyExists = existing.find((r: any) => r.id === newReg.id);
+        if (alreadyExists) return existing;
+        return [...existing, { ...newReg, entryCount: newReg.entryCount || 0 }];
+      });
+      queryClient.invalidateQueries({ queryKey: ['registers', businessId] });
       navigate(`/register/${newReg.id}`);
     },
     onError: (err: any) => alert(err.message),
@@ -118,7 +130,13 @@ export default function HomePage() {
       });
     },
     onSuccess: (newReg) => {
-      queryClient.invalidateQueries({ queryKey: ['registers'] });
+      queryClient.setQueryData(['registers', businessId], (old: any[]) => {
+        const existing = old || [];
+        const alreadyExists = existing.find((r: any) => r.id === newReg.id);
+        if (alreadyExists) return existing;
+        return [...existing, { ...newReg, entryCount: newReg.entryCount || 0 }];
+      });
+      queryClient.invalidateQueries({ queryKey: ['registers', businessId] });
       setCreatingTemplate(null); setSelectedCategory(null);
       navigate(`/register/${newReg.id}`);
     },
@@ -131,121 +149,22 @@ export default function HomePage() {
 
   return (
     <div className="app-layout">
-      {/* ── Sidebar ── */}
-      <div className="sidebar">
-        {/* Brand Strip — deep green, school logo */}
-        <div className="sidebar-brand">
-          <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-brand-logo" />
-          <div>
-            <div className="sidebar-brand-name">AG Trust</div>
-            <div className="sidebar-brand-sub">Trusted Partners</div>
-          </div>
-        </div>
+      <Sidebar 
+        businesses={businesses}
+        filtered={filtered}
+        search={search}
+        setSearch={setSearch}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        menuId={menuId}
+        setMenuId={setMenuId}
+      />
 
-        <div className="sidebar-header">
-          <div className="sidebar-business">
-            <div className="sidebar-avatar">{businesses?.[0]?.name?.[0] || 'B'}</div>
-            <span className="sidebar-bname">{businesses?.[0]?.name || 'My Business'}</span>
-          </div>
-        </div>
-
-        <div className="sidebar-search">
-          <Search size={14} color="var(--muted)" />
-          <input placeholder="Search register" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-
-        <button className="sidebar-add-btn" onClick={() => navigate('/templates')}>
-          <Plus size={14} />Add New Register
-        </button>
-
-        <div className="sidebar-list">
-          {filtered?.map((reg) => (
-            <div
-              key={reg.id}
-              className="register-item"
-              onClick={() => navigate(`/register/${reg.id}`)}
-            >
-              <div
-                className="register-icon-bg"
-                {...{ style: { '--dyn-bg': reg.iconColor ? `${reg.iconColor}20` : 'rgba(27,42,74,0.08)' } as React.CSSProperties }}
-              >
-                <FileText size={16} color={reg.iconColor || 'var(--navy)'} />
-              </div>
-              <div className="register-item-info">
-                <div className="register-item-name">{reg.name}</div>
-                <div className="register-item-meta">{reg.entryCount} entries • {reg.category}</div>
-              </div>
-              <button
-                className="register-item-menu"
-                title="Register options"
-                aria-label="Register options"
-                onClick={(e) => { e.stopPropagation(); setMenuId(menuId === reg.id ? null : reg.id); }}
-              >
-                <MoreVertical size={14} />
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {/* Sidebar Footer */}
-        <div className="sidebar-footer">
-          <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-footer-logo" />
-          <span className="sidebar-footer-text">AG Trust · Record Book</span>
-        </div>
-      </div>
-
-      {/* ── Content ── */}
-      <div className="content-area">
-        {!filtered || filtered.length === 0 ? (
-          <div className="empty-state">
-            <img src="/logo-transparent.png" alt="AG Trust" className="empty-logo" />
-            <h2 className="empty-title">Welcome to AG Trust</h2>
-            <p className="empty-sub">Create your first register by selecting a template, starting from scratch, or uploading Excel data.</p>
-            <div className="empty-actions">
-              <button className="empty-btn" onClick={() => navigate('/templates')}>
-                <Plus size={16} />Add New Register
-              </button>
-              <label htmlFor="excel-upload-empty" className="empty-btn empty-btn-secondary">
-                <Upload size={16} />{excelMutation.isPending ? 'Importing...' : 'Import Excel'}
-              </label>
-              <input id="excel-upload-empty" type="file" accept=".xlsx, .xls, .csv" className="hidden-input" title="Upload Excel File" aria-label="Upload Excel File" onChange={handleFileUpload} />
-            </div>
-          </div>
-        ) : (
-          <div className="registers-content">
-            <h2 className="registers-heading">Your Registers</h2>
-            <p className="registers-subheading">
-              {filtered.length} register{filtered.length !== 1 ? 's' : ''} &bull; Click to open
-            </p>
-            <div className="categories-grid categories-grid--no-pad">
-              {filtered.map((reg) => (
-                <div key={reg.id} className="category-card" onClick={() => navigate(`/register/${reg.id}`)}>
-                  <div className="category-icon" {...{ style: { '--dyn-bg': reg.iconColor || 'var(--navy)' } as React.CSSProperties }}>
-                    <FileText size={24} />
-                  </div>
-                  <div className="category-name">{reg.name}</div>
-                  <div className="category-count">{reg.entryCount} entries &bull; {reg.category}</div>
-                </div>
-              ))}
-              <div className="category-card category-card--dashed" onClick={() => navigate('/templates')}>
-                <div className="category-icon category-icon--muted">
-                  <Plus size={24} />
-                </div>
-                <div className="category-name">Add New</div>
-                <div className="category-count">Create from template</div>
-              </div>
-              <label htmlFor="excel-upload" className={`category-card category-card--dashed ${excelMutation.isPending ? 'uploading' : ''}`}>
-                <div className="category-icon category-icon--muted">
-                  <Upload size={24} />
-                </div>
-                <div className="category-name">{excelMutation.isPending ? 'Importing...' : 'Import Excel'}</div>
-                <div className="category-count">Upload .xlsx or .csv</div>
-                <input id="excel-upload" type="file" accept=".xlsx, .xls, .csv" className="hidden-input" title="Upload Excel File" aria-label="Upload Excel File" onChange={handleFileUpload} disabled={excelMutation.isPending} />
-              </label>
-            </div>
-          </div>
-        )}
-      </div>
+      <DashboardContent 
+        filtered={filtered}
+        excelMutation={excelMutation}
+        handleFileUpload={handleFileUpload}
+      />
 
       {/* ── Context Menu ── */}
       {menuId !== null && (
@@ -253,7 +172,7 @@ export default function HomePage() {
           <div className="context-menu" onClick={(e) => e.stopPropagation()}>
             <div className="context-title">{filtered?.find((r) => r.id === menuId)?.name || 'Register'}</div>
             <button className="context-item" onClick={() => { navigate(`/register/${menuId}`); setMenuId(null); }}>
-              <ExternalLink size={16} />Open Register
+              <Eye size={16} />Open Register
             </button>
             <button className="context-item" onClick={() => {
               const reg = filtered?.find((r) => r.id === menuId);

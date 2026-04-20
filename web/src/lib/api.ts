@@ -1,8 +1,9 @@
 // Mock API client for RecordBook Web — exact port from mobile
+import { TEMPLATES, type Template, type TemplateColumn } from './templates';
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const delay = (ms: number) => ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 
-let DB = {
+const DB = {
   businesses: [] as Business[],
   registers: [] as RegisterDetail[],
 };
@@ -18,13 +19,15 @@ export interface User {
 export interface SendOtpResponse { message: string; devOtp?: string; }
 export interface VerifyOtpResponse { token: string; user: User; }
 
-export async function sendOtp(_phone: string): Promise<SendOtpResponse> {
-  await delay(500);
+export async function sendOtp(phone: string): Promise<SendOtpResponse> {
+  await delay(0);
+  void phone; // mock: phone not used in dev mode
   return { message: 'OTP sent', devOtp: '123456' };
 }
 
-export async function verifyOtp(phone: string, _otp: string): Promise<VerifyOtpResponse> {
-  await delay(500);
+export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpResponse> {
+  await delay(0);
+  void otp; // mock: otp not validated in dev mode
   return {
     token: 'mock-token',
     user: { id: 1, phone, name: 'Test User', createdAt: new Date().toISOString() },
@@ -32,7 +35,7 @@ export async function verifyOtp(phone: string, _otp: string): Promise<VerifyOtpR
 }
 
 export async function getMe(): Promise<User> {
-  await delay(300);
+  await delay(0);
   return { id: 1, phone: '9999999999', name: 'Test User', createdAt: new Date().toISOString() };
 }
 
@@ -40,12 +43,12 @@ export async function getMe(): Promise<User> {
 export interface Business { id: number; name: string; ownerId: number; createdAt: string; }
 
 export async function listBusinesses(): Promise<Business[]> {
-  await delay(300);
+  await delay(0);
   return DB.businesses;
 }
 
 export async function createBusiness(name: string): Promise<Business> {
-  await delay(300);
+  await delay(0);
   const bus: Business = { id: Date.now(), name, ownerId: 1, createdAt: new Date().toISOString() };
   DB.businesses.push(bus);
   return bus;
@@ -55,6 +58,7 @@ export async function createBusiness(name: string): Promise<Business> {
 export interface RegisterSummary {
   id: number; businessId: number; name: string; icon: string; iconColor?: string;
   category: string; template: string; createdAt: string; updatedAt: string; entryCount: number;
+  lastActivity?: string;
 }
 
 export interface Column {
@@ -79,16 +83,17 @@ export interface SharedUser {
 }
 
 export async function listRegisters(businessId: number): Promise<RegisterSummary[]> {
-  await delay(400);
+  await delay(0);
   return DB.registers.filter((r) => r.businessId === businessId).map((r) => ({
     id: r.id, businessId: r.businessId, name: r.name, icon: r.icon, iconColor: r.iconColor,
     category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
     entryCount: r.entries.length,
+    lastActivity: r.entries.length > 0 ? (r.entries[r.entries.length - 1].cells ? Object.values(r.entries[r.entries.length - 1].cells).filter(Boolean).slice(0, 2).join(', ') : '') : '',
   }));
 }
 
 export async function getRegister(registerId: number): Promise<RegisterDetail> {
-  await delay(300);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   if (!reg.pages || reg.pages.length === 0) reg.pages = [{ id: 1, name: 'Page 1', index: 0 }];
@@ -100,7 +105,7 @@ export async function createRegister(data: {
   category?: string; template?: string;
   columns?: Array<{ name: string; type: string; dropdownOptions?: string[]; formula?: string }>;
 }): Promise<RegisterSummary> {
-  await delay(500);
+  await delay(0);
   const newReg: RegisterDetail = {
     id: Date.now(), businessId: data.businessId, name: data.name,
     icon: data.icon || 'file-text', iconColor: data.iconColor,
@@ -127,12 +132,12 @@ export async function createRegister(data: {
 }
 
 export async function deleteRegister(registerId: number): Promise<void> {
-  await delay(400);
+  await delay(0);
   DB.registers = DB.registers.filter((r) => r.id !== registerId);
 }
 
 export async function renameRegister(registerId: number, newName: string): Promise<RegisterSummary> {
-  await delay(300);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   reg.name = newName; reg.updatedAt = new Date().toISOString();
@@ -140,7 +145,7 @@ export async function renameRegister(registerId: number, newName: string): Promi
 }
 
 export async function duplicateRegister(registerId: number): Promise<RegisterSummary> {
-  await delay(500);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const newId = Date.now();
@@ -155,15 +160,33 @@ export async function duplicateRegister(registerId: number): Promise<RegisterSum
   return duplicated;
 }
 
-export const importExcelData = async (businessId: number, name: string, data: Record<string, any>[]): Promise<RegisterSummary> => {
-  await delay(500);
+export const importExcelData = async (businessId: number, name: string, data: Record<string, string | number | boolean | null>[]): Promise<RegisterSummary> => {
+  await delay(0);
   if (!data || data.length === 0) throw new Error("No data found in the spreadsheet");
 
   const headers = Object.keys(data[0]);
-  const columns = headers.map((h, i) => ({
-    name: h || `Column ${i + 1}`,
-    type: 'text'
-  }));
+
+  let bestTemplate: Template | null = null;
+  let maxMatches = 0;
+  for (const cat in TEMPLATES) {
+    for (const tpl of TEMPLATES[cat]) {
+      const matchCount = tpl.columns.filter(c => headers.includes(c.name)).length;
+      if (matchCount > maxMatches && matchCount >= 2) {
+         maxMatches = matchCount;
+         bestTemplate = tpl;
+      }
+    }
+  }
+
+  const columns = headers.map((h, i) => {
+    const tplCol = bestTemplate?.columns.find((c: TemplateColumn) => c.name === h);
+    return {
+      name: h || `Column ${i + 1}`,
+      type: tplCol?.type || 'text',
+      dropdownOptions: tplCol?.dropdownOptions,
+      formula: tplCol?.formula,
+    };
+  });
 
   const createdReg = await createRegister({
     businessId,
@@ -199,28 +222,172 @@ export const importExcelData = async (businessId: number, name: string, data: Re
   return reg;
 };
 
-export function evaluateFormula(formula: string, entry: Entry, columns: Column[]): string {
-  if (!formula) return '';
-  try {
-    let expression = formula;
-    for (const col of columns) {
-      const placeholder = `{${col.name}}`;
-      const value = entry.cells?.[col.id.toString()] || '0';
-      const numValue = parseFloat(value) || 0;
-      expression = expression.replaceAll(placeholder, numValue.toString());
+// ─── Formula Engine ──────────────────────────────────────────────────────────
+// Supports: {Column Name} references, +  -  *  /  ()  ^  %  Math functions
+// Handles: spaces in column names, case-insensitive match, chained formula
+//          columns (formula-in-formula), guard against division by zero
+
+function parseAndEval(expr: string): number {
+  // Trim whitespace
+  expr = expr.trim();
+
+  // ── Recursive descent parser ──────────────────────────────────────────
+  let pos = 0;
+
+  function peek(): string { return expr[pos] || ''; }
+  function consume(): string { return expr[pos++] || ''; }
+  function skipWS() { while (pos < expr.length && expr[pos] === ' ') pos++; }
+
+  function parseExpr(): number { return parseAddSub(); }
+
+  function parseAddSub(): number {
+    let left = parseMulDiv();
+    skipWS();
+    while (peek() === '+' || peek() === '-') {
+      const op = consume();
+      skipWS();
+      const right = parseMulDiv();
+      left = op === '+' ? left + right : left - right;
+      skipWS();
     }
-    const sanitized = expression.replace(/[^0-9+\-*/().\s]/g, '');
-    if (!sanitized) return '';
-    const result = Function('"use strict"; return (' + sanitized + ')')();
-    if (typeof result === 'number' && !isNaN(result) && isFinite(result)) {
-      return Number.isInteger(result) ? result.toString() : result.toFixed(2);
+    return left;
+  }
+
+  function parseMulDiv(): number {
+    let left = parsePow();
+    skipWS();
+    while (peek() === '*' || peek() === '/') {
+      const op = consume();
+      skipWS();
+      const right = parsePow();
+      if (op === '/' && right === 0) return NaN; // guard div-by-zero
+      left = op === '*' ? left * right : left / right;
+      skipWS();
     }
-    return '';
-  } catch { return 'ERR'; }
+    return left;
+  }
+
+  function parsePow(): number {
+    const base = parseUnary();
+    skipWS();
+    if (peek() === '^') {
+      consume();
+      skipWS();
+      const exp = parseUnary();
+      return Math.pow(base, exp);
+    }
+    return base;
+  }
+
+  function parseUnary(): number {
+    skipWS();
+    if (peek() === '-') { consume(); return -parsePrimary(); }
+    if (peek() === '+') { consume(); return parsePrimary(); }
+    return parsePrimary();
+  }
+
+  function parseNumber(): number {
+    let num = '';
+    while (pos < expr.length && /[0-9.]/.test(expr[pos])) { num += consume(); }
+    return parseFloat(num) || 0;
+  }
+
+  // Named math functions
+  const MATH_FNS: Record<string, (a: number) => number> = {
+    abs: Math.abs, sqrt: Math.sqrt, ceil: Math.ceil, floor: Math.floor,
+    round: Math.round, log: Math.log, log10: Math.log10,
+    sin: Math.sin, cos: Math.cos, tan: Math.tan,
+  };
+
+  function parsePrimary(): number {
+    skipWS();
+    // Parenthesised sub-expression
+    if (peek() === '(') {
+      consume(); // '('
+      const val = parseExpr();
+      skipWS();
+      if (peek() === ')') consume(); // ')'
+      return val;
+    }
+    // Named math functions: abs(…), sqrt(…) …
+    if (/[a-zA-Z]/.test(peek())) {
+      let name = '';
+      while (pos < expr.length && /[a-zA-Z0-9_]/.test(expr[pos])) { name += consume(); }
+      skipWS();
+      if (peek() === '(') {
+        consume(); // '('
+        const arg = parseExpr();
+        skipWS();
+        if (peek() === ')') consume(); // ')'
+        const fn = MATH_FNS[name.toLowerCase()];
+        if (fn) return fn(arg);
+        return 0;
+      }
+      return 0;
+    }
+    // Plain number
+    return parseNumber();
+  }
+
+  const result = parseExpr();
+  return result;
 }
 
+export function evaluateFormula(formula: string, entry: Entry, columns: Column[]): string {
+  if (!formula || formula.trim() === '') return '';
+  try {
+    // ── Step 1: Replace {Column Name} tokens with numeric values ──────────
+    // Sort by name length descending so longer names are replaced first
+    // (avoids "{Full Marks}" being partially matched by "{Marks}")
+    const sorted = [...columns].sort((a, b) => b.name.length - a.name.length);
+
+    let expression = formula;
+    for (const col of sorted) {
+      // Escape any regex special chars in the column name
+      const escaped = col.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp('\\{' + escaped + '\\}', 'gi'); // case-insensitive
+
+      // Get raw cell value
+      const rawVal = entry.cells?.[col.id.toString()] ?? '';
+
+      // If the referenced column is itself a formula, evaluate it recursively
+      let numStr: string;
+      if (col.type === 'formula' && col.formula) {
+        const nested = evaluateFormula(col.formula, entry, columns);
+        numStr = (nested === 'ERR' || nested === '') ? '0' : nested;
+      } else {
+        const parsed = parseFloat(rawVal);
+        numStr = isNaN(parsed) ? '0' : parsed.toString();
+      }
+
+      expression = expression.replace(regex, numStr);
+    }
+
+    // ── Step 2: Guard — any remaining { } means an unresolved reference ───
+    // Replace them with 0 instead of silently dropping them
+    expression = expression.replace(/\{[^}]*\}/g, '0');
+
+    // ── Step 3: Evaluate the numeric expression ───────────────────────────
+    expression = expression.trim();
+    if (expression === '') return '';
+
+    const result = parseAndEval(expression);
+
+    if (typeof result === 'number' && !isNaN(result) && isFinite(result)) {
+      // Show up to 2 decimal places, strip trailing zeros
+      if (Number.isInteger(result)) return result.toString();
+      const fixed = parseFloat(result.toFixed(2));
+      return fixed.toString();
+    }
+    return 'ERR';
+  } catch {
+    return 'ERR';
+  }
+}
+
+
 export async function addColumn(registerId: number, data: { name: string; type: string; dropdownOptions?: string[]; formula?: string }): Promise<Column> {
-  await delay(300);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const col: Column = {
@@ -232,14 +399,14 @@ export async function addColumn(registerId: number, data: { name: string; type: 
 }
 
 export async function deleteColumn(registerId: number, columnId: number): Promise<void> {
-  await delay(300);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   reg.columns = reg.columns.filter((c) => c.id !== columnId);
 }
 
 export async function renameColumn(registerId: number, columnId: number, newName: string): Promise<Column> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const col = reg.columns.find((c) => c.id === columnId);
@@ -249,7 +416,7 @@ export async function renameColumn(registerId: number, columnId: number, newName
 }
 
 export async function updateColumnDropdownOptions(registerId: number, columnId: number, options: string[]): Promise<Column> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const col = reg.columns.find((c) => c.id === columnId);
@@ -259,7 +426,7 @@ export async function updateColumnDropdownOptions(registerId: number, columnId: 
 }
 
 export async function duplicateColumn(registerId: number, columnId: number): Promise<Column> {
-  await delay(300);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const original = reg.columns.find((c) => c.id === columnId);
@@ -279,7 +446,7 @@ export async function duplicateColumn(registerId: number, columnId: number): Pro
 }
 
 export async function moveColumn(registerId: number, columnId: number, direction: 'left' | 'right'): Promise<void> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const idx = reg.columns.findIndex((c) => c.id === columnId);
@@ -293,7 +460,7 @@ export async function moveColumn(registerId: number, columnId: number, direction
 }
 
 export async function changeColumnType(registerId: number, columnId: number, newType: string): Promise<Column> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const col = reg.columns.find((c) => c.id === columnId);
@@ -305,7 +472,7 @@ export async function changeColumnType(registerId: number, columnId: number, new
 }
 
 export async function clearColumnData(registerId: number, columnId: number): Promise<void> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const colIdStr = columnId.toString();
@@ -317,7 +484,7 @@ export async function clearColumnData(registerId: number, columnId: number): Pro
 }
 
 export async function insertColumn(registerId: number, data: { name: string; type: string; dropdownOptions?: string[]; formula?: string }, position: number): Promise<Column> {
-  await delay(300);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const col: Column = {
@@ -330,27 +497,27 @@ export async function insertColumn(registerId: number, data: { name: string; typ
 }
 
 export async function freezeColumn(registerId: number, columnId: number, frozen: boolean): Promise<Column> {
-  await delay(100);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
-  (col as any).frozen = frozen;
+  (col as Column & { frozen: boolean }).frozen = frozen;
   return col;
 }
 
 export async function hideColumn(registerId: number, columnId: number, hidden: boolean): Promise<Column> {
-  await delay(100);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
-  (col as any).hidden = hidden;
+  (col as Column & { hidden: boolean }).hidden = hidden;
   return col;
 }
 
 export async function addEntry(registerId: number, cells: Record<string, string> = {}, pageIndex: number = 0): Promise<Entry> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const pageEntries = reg.entries.filter((e) => (e.pageIndex || 0) === pageIndex);
@@ -359,21 +526,23 @@ export async function addEntry(registerId: number, cells: Record<string, string>
     cells, createdAt: new Date().toISOString(), pageIndex,
   };
   reg.entries.push(entry); reg.entryCount = reg.entries.length;
+  reg.updatedAt = new Date().toISOString();
   return entry;
 }
 
 export async function updateEntry(registerId: number, entryId: number, cells: Record<string, string>): Promise<Entry> {
-  await delay(100);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const entry = reg.entries.find((e) => e.id === entryId);
   if (!entry) throw new Error('Entry not found');
   entry.cells = { ...entry.cells, ...cells };
+  reg.updatedAt = new Date().toISOString();
   return entry;
 }
 
 export async function deleteEntry(registerId: number, entryId: number): Promise<void> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   reg.entries = reg.entries.filter((e) => e.id !== entryId);
@@ -381,7 +550,7 @@ export async function deleteEntry(registerId: number, entryId: number): Promise<
 }
 
 export async function duplicateEntry(registerId: number, entryId: number): Promise<Entry> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const original = reg.entries.find((e) => e.id === entryId);
@@ -395,7 +564,7 @@ export async function duplicateEntry(registerId: number, entryId: number): Promi
 }
 
 export async function bulkDeleteEntries(registerId: number, entryIds: number[]): Promise<void> {
-  await delay(300);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   reg.entries = reg.entries.filter((e) => !entryIds.includes(e.id));
@@ -403,7 +572,7 @@ export async function bulkDeleteEntries(registerId: number, entryIds: number[]):
 }
 
 export async function addPage(registerId: number, pageName?: string): Promise<Page> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   if (!reg.pages) reg.pages = [{ id: 1, name: 'Page 1', index: 0 }];
@@ -413,7 +582,7 @@ export async function addPage(registerId: number, pageName?: string): Promise<Pa
 }
 
 export async function renamePage(registerId: number, pageId: number, newName: string): Promise<Page> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const page = reg.pages?.find((p) => p.id === pageId);
@@ -423,7 +592,7 @@ export async function renamePage(registerId: number, pageId: number, newName: st
 }
 
 export async function deletePage(registerId: number, pageId: number): Promise<void> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   if (!reg.pages || reg.pages.length <= 1) throw new Error('Cannot delete the only page');
@@ -434,7 +603,7 @@ export async function deletePage(registerId: number, pageId: number): Promise<vo
 }
 
 export async function generateShareLink(registerId: number): Promise<string> {
-  await delay(300);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   const link = `https://rekord.app/share/${registerId}/${Date.now().toString(36)}`;
@@ -443,7 +612,7 @@ export async function generateShareLink(registerId: number): Promise<string> {
 }
 
 export async function addSharedUser(registerId: number, phone: string, permission: 'view' | 'edit'): Promise<SharedUser> {
-  await delay(300);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   if (!reg.sharedWith) reg.sharedWith = [];
@@ -455,7 +624,7 @@ export async function addSharedUser(registerId: number, phone: string, permissio
 }
 
 export async function removeSharedUser(registerId: number, userId: number): Promise<void> {
-  await delay(200);
+  await delay(0);
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   if (reg.sharedWith) reg.sharedWith = reg.sharedWith.filter((u) => u.id !== userId);

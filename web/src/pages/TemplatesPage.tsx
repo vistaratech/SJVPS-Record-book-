@@ -7,8 +7,12 @@ import {
   ArrowLeft, FileText, Eye, X, Hash, Calendar, ChevronDown, FlaskConical, Type,
   Building, GraduationCap, Store, Bus, Warehouse, Package, CalendarIcon, HeartPulse,
   Utensils, Dumbbell, Building2, User, ShieldCheck, Leaf, Plane,
+  Phone, Mail, Globe, Star, CheckSquare, Image,
 } from 'lucide-react';
 import { useEffect } from 'react';
+
+import { CategoryCard } from '../components/templates/CategoryCard';
+import { TemplateModal } from '../components/templates/TemplateModal';
 
 const ICON_MAP: Record<string, any> = {
   'building': Building, 'graduation-cap': GraduationCap, 'store': Store, 'bus': Bus,
@@ -19,11 +23,17 @@ const ICON_MAP: Record<string, any> = {
 
 function getColTypeIcon(type: string) {
   switch (type) {
-    case 'number': return <Hash size={10} />;
-    case 'date': return <Calendar size={10} />;
+    case 'number':   return <Hash size={10} />;
+    case 'date':     return <Calendar size={10} />;
     case 'dropdown': return <ChevronDown size={10} />;
-    case 'formula': return <FlaskConical size={10} />;
-    default: return <Type size={10} />;
+    case 'formula':  return <FlaskConical size={10} />;
+    case 'phone':    return <Phone size={10} />;
+    case 'email':    return <Mail size={10} />;
+    case 'url':      return <Globe size={10} />;
+    case 'rating':   return <Star size={10} />;
+    case 'checkbox': return <CheckSquare size={10} />;
+    case 'image':    return <Image size={10} />;
+    default:         return <Type size={10} />;
   }
 }
 
@@ -53,7 +63,7 @@ export default function TemplatesPage() {
       });
     },
     onSuccess: (newReg) => {
-      queryClient.invalidateQueries({ queryKey: ['registers'] });
+      queryClient.invalidateQueries({ queryKey: ['registers', businessId] });
       navigate(`/register/${newReg.id}`);
     },
     onError: () => setCreatingTemplate(null),
@@ -63,7 +73,7 @@ export default function TemplatesPage() {
   const subTemplates = selectedCategory ? TEMPLATES[selectedCategory] || [] : [];
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--background)' }}>
+    <div className="templates-page-root">
       {/* Header */}
       <div className="register-header">
         <button className="register-header-btn" onClick={() => navigate(-1)}>
@@ -73,70 +83,31 @@ export default function TemplatesPage() {
       </div>
 
       {/* Category Grid */}
-      <div style={{ padding: '32px 40px' }}>
-        <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Select a Category</h2>
-        <p style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 24 }}>
+      <div className="templates-page-body">
+        <h2 className="templates-heading">Select a Category</h2>
+        <p className="templates-subheading">
           Pick a business type to see ready-made templates
         </p>
-        <div className="categories-grid" style={{ padding: 0 }}>
-          {CATEGORIES.map((cat) => {
-            const Icon = ICON_MAP[cat.icon] || FileText;
-            const count = (TEMPLATES[cat.id] || []).length;
-            return (
-              <div key={cat.id} className="category-card" onClick={() => setSelectedCategory(cat.id)}>
-                <div className="category-icon" style={{ background: cat.color }}><Icon size={24} /></div>
-                <div className="category-name">{cat.name}</div>
-                <div className="category-count">{count} templates</div>
-              </div>
-            );
-          })}
+        <div className="categories-grid categories-grid--no-pad">
+          {CATEGORIES.map((cat) => (
+            <CategoryCard 
+              key={cat.id} cat={cat} 
+              icon={ICON_MAP[cat.icon] || FileText} 
+              count={(TEMPLATES[cat.id] || []).length} 
+              onClick={() => setSelectedCategory(cat.id)} 
+            />
+          ))}
         </div>
       </div>
 
       {/* Template selection modal */}
-      {selectedCategory && (
-        <div className="modal-overlay" onClick={() => setSelectedCategory(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520, maxHeight: '85vh' }}>
-            <div className="template-modal-header" style={{ background: categoryData?.color || 'var(--navy)' }}>
-              <div className="template-modal-header-icon">
-                {(() => { const Icon = ICON_MAP[categoryData?.icon || ''] || FileText; return <Icon size={24} />; })()}
-              </div>
-              <div>
-                <div className="template-modal-header-title">{categoryData?.name} Templates</div>
-                <div className="template-modal-header-sub">Choose a layout to get started</div>
-              </div>
-              <button className="template-modal-close" onClick={() => setSelectedCategory(null)}><X size={20} /></button>
-            </div>
-
-            {subTemplates.map((tpl, idx) => (
-              <div key={idx} className="tpl-card">
-                <div className="tpl-card-header">
-                  <FileText size={22} color={categoryData?.color || 'var(--navy)'} />
-                  <div>
-                    <div className="tpl-name">{tpl.name}</div>
-                    <div className="tpl-desc">{tpl.description}</div>
-                  </div>
-                </div>
-                {tpl.columns.length > 0 && (
-                  <div className="tpl-chips">
-                    {tpl.columns.slice(0, 5).map((col, i) => (
-                      <span key={i} className="tpl-chip">{getColTypeIcon(col.type)} {col.name}</span>
-                    ))}
-                    {tpl.columns.length > 5 && <span className="tpl-chip">+{tpl.columns.length - 5} more</span>}
-                  </div>
-                )}
-                <button
-                  className="tpl-use-btn"
-                  onClick={() => { setCreatingTemplate(tpl.name); createMutation.mutate(tpl); }}
-                  disabled={!!creatingTemplate}
-                >
-                  {creatingTemplate === tpl.name ? <div className="spinner" /> : <><Eye size={14} />Preview & Use</>}
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <TemplateModal 
+        selectedCategory={selectedCategory} setSelectedCategory={setSelectedCategory}
+        categoryData={categoryData} subTemplates={subTemplates}
+        creatingTemplate={creatingTemplate}
+        handleCreate={(tpl) => { setCreatingTemplate(tpl.name); createMutation.mutate(tpl); }}
+        getColTypeIcon={getColTypeIcon} ICON_MAP={ICON_MAP}
+      />
     </div>
   );
 }

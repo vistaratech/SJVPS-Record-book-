@@ -375,8 +375,9 @@ export default function HomeScreen() {
               <View style={styles.registerInfo}>
                 <Text style={styles.registerName} numberOfLines={1}>{item.name}</Text>
                 <Text style={styles.registerMeta}>
-                  {item.entryCount} entries • {item.category}
+                  {item.entryCount} entries • {new Date(item.updatedAt).toLocaleDateString()}
                 </Text>
+                {item.lastActivity ? <Text style={[styles.registerMeta, { fontStyle: 'italic', marginTop: 2 }]} numberOfLines={1}>{item.lastActivity}</Text> : null}
               </View>
               <TouchableOpacity onPress={() => setRegisterMenuId(item.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                 <Ionicons name="ellipsis-vertical" size={16} color={Colors.mutedLight} />

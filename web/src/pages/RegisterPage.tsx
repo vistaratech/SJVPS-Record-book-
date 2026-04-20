@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -13,23 +13,23 @@ import {
 } from '../lib/api';
 import * as XLSX from 'xlsx';
 import {
-  ArrowLeft, Plus, Search, Filter, Download, Share2, MoreVertical,
-  Pencil, Trash2, Copy, ChevronDown, Calendar, X, Check, SortAsc, SortDesc,
-  Hash, FlaskConical, Type as TypeIcon, AlertCircle, FileText, UserX,
-  ChevronRight, Link2, UserPlus, ArrowLeftRight, ArrowRight, ChevronsLeftRight,
-  Pin, EyeOff, Eye, Eraser,
+  Plus, MoreVertical, ChevronDown, Calendar, SortAsc, SortDesc,
+  Hash, FlaskConical, Type as TypeIcon, ChevronRight, Pin,
 } from 'lucide-react';
+
+import { RegisterHeader } from '../components/register/RegisterHeader';
+import { RegisterToolbar } from '../components/register/RegisterToolbar';
+import { SpreadsheetRow } from '../components/register/SpreadsheetRow';
+
+import { FilterModal } from '../components/register/modals/FilterModal';
+import { ShareModal } from '../components/register/modals/ShareModal';
+import { ColumnModals } from '../components/register/modals/ColumnModals';
+import { OtherModals } from '../components/register/modals/OtherModals';
+import { RegisterContextMenus } from '../components/register/menus/RegisterContextMenus';
+import { COL_TYPES } from '../lib/constants';
 
 type CalcType = 'sum' | 'average' | 'count' | 'min' | 'max';
 type SortDir = 'asc' | 'desc' | null;
-
-const COL_TYPES = [
-  { id: 'text', label: 'Text', icon: <TypeIcon size={12} /> },
-  { id: 'number', label: 'Number', icon: <Hash size={12} /> },
-  { id: 'date', label: 'Date', icon: <Calendar size={12} /> },
-  { id: 'dropdown', label: 'Dropdown', icon: <ChevronDown size={12} /> },
-  { id: 'formula', label: 'Formula', icon: <FlaskConical size={12} /> },
-];
 
 export default function RegisterPage() {
   const { id } = useParams();
@@ -289,9 +289,12 @@ export default function RegisterPage() {
     const key = `${entryId}-${columnId}`;
     if (debounceTimers.current[key]) clearTimeout(debounceTimers.current[key]);
     debounceTimers.current[key] = setTimeout(() => {
-      updateEntry(registerId, entryId, { [columnId]: value });
+      updateEntry(registerId, entryId, { [columnId]: value }).then(() => {
+        queryClient.invalidateQueries({ queryKey: ['registers'], exact: false });
+        queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+      });
     }, 500);
-  }, [registerId]);
+  }, [registerId, queryClient]);
 
   const handleSort = (colId: number) => {
     if (sortCol === colId) {
@@ -303,11 +306,11 @@ export default function RegisterPage() {
     }
   };
 
-  const openDatePicker = (entryId: number, colId: number, currentVal: string) => {
+  const openDatePicker = useCallback((entryId: number, colId: number, currentVal: string) => {
     const parts = currentVal?.split('/') || [];
     setDateDay(parts[0] || ''); setDateMonth(parts[1] || ''); setDateYear(parts[2] || '');
     setDateEntryId(entryId); setDateColumnId(colId); setDateModal(true);
-  };
+  }, []);
 
   const handleDateSelect = () => {
     const dateStr = `${dateDay.padStart(2, '0')}/${dateMonth.padStart(2, '0')}/${dateYear}`;
@@ -315,10 +318,10 @@ export default function RegisterPage() {
     setDateModal(false);
   };
 
-  const openDropdown = (entryId: number, colId: number, options: string[]) => {
+  const openDropdown = useCallback((entryId: number, colId: number, options: string[]) => {
     setDropdownEntryId(entryId); setDropdownColumnId(colId); setDropdownOptions(options);
     setDropdownModal(true);
-  };
+  }, []);
 
   const handleExportExcel = () => {
     if (!register) return;
@@ -328,7 +331,6 @@ export default function RegisterPage() {
 
     if (headerRow.length === 0) return;
     
-    // Build rows from entries based on visibleColumns and evaluating formulas
     const rows = displayEntries.map(entry => {
       const rowObj: Record<string, string> = {};
       visibleColumns.forEach(c => {
@@ -340,6 +342,44 @@ export default function RegisterPage() {
 
     try {
       const ws = XLSX.utils.json_to_sheet(rows, { header: headerRow });
+      
+      const getColLetter = (n: number) => {
+        let s = '';
+        while (n >= 0) {
+          s = String.fromCharCode(n % 26 + 65) + s;
+          n = Math.floor(n / 26) - 1;
+        }
+        return s;
+      };
+
+      ws['!dataValidation'] = [];
+
+      visibleColumns.forEach((c, cIdx) => {
+        const colLetter = getColLetter(cIdx);
+
+        if (c.type === 'dropdown' && c.dropdownOptions && c.dropdownOptions.length > 0) {
+          ws['!dataValidation'].push({
+            sqref: `${colLetter}2:${colLetter}1000`,
+            type: 'list',
+            allowBlank: true,
+            showDropDown: true,
+            formula1: `"${c.dropdownOptions.join(',')}"`
+          });
+        }
+
+        if (c.type === 'formula' && c.formula) {
+          rows.forEach((row, rIdx) => {
+            let excelF = c.formula || '';
+            visibleColumns.forEach((col, refIdx) => {
+              const refLetter = getColLetter(refIdx);
+              excelF = excelF.replace(new RegExp(`\\{${col.name}\\}`, 'g'), `${refLetter}${rIdx + 2}`);
+            });
+            const cellRef = `${colLetter}${rIdx + 2}`;
+            ws[cellRef] = { t: 'n', f: excelF, v: row[c.name] === 'ERR' ? '' : row[c.name] };
+          });
+        }
+      });
+
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
       XLSX.writeFile(wb, `${register.name || 'Export'}.xlsx`);
@@ -354,11 +394,17 @@ export default function RegisterPage() {
     else setSelectedRows(new Set(displayEntries.map((e) => e.id)));
   };
 
-  const toggleSelectRow = (id: number) => {
-    const newSet = new Set(selectedRows);
-    if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
-    setSelectedRows(newSet);
-  };
+  const toggleSelectRow = useCallback((id: number) => {
+    setSelectedRows(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
+      return newSet;
+    });
+  }, []);
+
+  const toggleMenu = useCallback((id: number) => {
+    setRowMenuId(prev => (prev === id ? null : id));
+  }, []);
 
   const getCalcValue = (colId: number): string => {
     const type = calcTypes[colId] || 'sum';
@@ -373,6 +419,8 @@ export default function RegisterPage() {
     }
   };
 
+  const visibleColumns = useMemo(() => columns.filter((col) => !hiddenColumns.has(col.id)), [columns, hiddenColumns]);
+
   if (isLoading) return (
     <div className="center-loader">
       <div className="spinner dark spinner-large" />
@@ -380,57 +428,37 @@ export default function RegisterPage() {
   );
   if (!register) return <div className="empty-state"><p>Register not found</p></div>;
 
-  const visibleColumns = columns.filter((col) => !hiddenColumns.has(col.id));
-
   return (
     <div className="register-layout">
       {/* ── Header ── */}
-      <div className="register-header">
-        <button className="register-header-btn" aria-label="Go Back" title="Go Back" onClick={() => navigate('/')}>
-          <ArrowLeft size={14} />
-        </button>
-        <h1 className="register-header-title">{register.name}</h1>
-        <button className="register-header-btn" onClick={() => setShareModal(true)}>
-          <Share2 size={14} /> Share
-        </button>
-        <button className="register-header-btn" onClick={handleExportExcel}>
-          <Download size={14} /> Export (Excel)
-        </button>
-      </div>
+      <RegisterHeader 
+        register={register} 
+        setShareModal={setShareModal} 
+        handleExportExcel={handleExportExcel} 
+      />
 
       {/* ── Toolbar ── */}
-      <div className="register-toolbar">
-        <div className="toolbar-search">
-          <Search size={14} color="var(--muted)" />
-          <input placeholder="Search rows..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <button className="toolbar-btn" onClick={() => { setFilters(activeFilters.length ? [...activeFilters] : []); setFilterModal(true); }}>
-          <Filter size={13} /> Filter {activeFilters.length > 0 ? `(${activeFilters.length})` : ''}
-        </button>
-        <button className="toolbar-btn primary" onClick={() => addEntryMutation.mutate()}>
-          <Plus size={13} /> Add Row
-        </button>
-        <button className="toolbar-btn" onClick={() => { setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula(''); setNewColumnModal(true); }}>
-          <Plus size={13} /> Add Column
-        </button>
-        {hiddenColumns.size > 0 && (
-          <button className="hidden-cols-btn" onClick={() => {
-            setHiddenColumns(new Set());
-            hiddenColumns.forEach((colId) => hideColumn(registerId, colId, false));
-          }}>
-            <Eye size={13} /> Show {hiddenColumns.size} Hidden
-          </button>
-        )}
-        {selectedRows.size > 0 && (
-          <button className="toolbar-btn danger" onClick={() => { if (confirm(`Delete ${selectedRows.size} selected rows?`)) bulkDeleteMutation.mutate(); }}>
-            <Trash2 size={13} /> Delete ({selectedRows.size})
-          </button>
-        )}
-        <div className="toolbar-stats">
-          <span className="toolbar-stat"><Hash size={12} />{displayEntries.length} rows</span>
-          <span className="toolbar-stat"><FileText size={12} />{columns.length} cols</span>
-        </div>
-      </div>
+      <RegisterToolbar 
+        search={search}
+        setSearch={setSearch}
+        activeFilters={activeFilters}
+        setFilters={setFilters}
+        setFilterModal={setFilterModal}
+        addEntryMutation={addEntryMutation}
+        setNewColName={setNewColName}
+        setNewColType={setNewColType}
+        setNewColDropdownOpts={setNewColDropdownOpts}
+        setNewColFormula={setNewColFormula}
+        setNewColumnModal={setNewColumnModal}
+        hiddenColumns={hiddenColumns}
+        setHiddenColumns={setHiddenColumns}
+        registerId={registerId}
+        hideColumn={hideColumn}
+        selectedRows={selectedRows}
+        displayEntries={displayEntries}
+        columns={columns}
+        bulkDeleteMutation={bulkDeleteMutation}
+      />
 
       {/* ── Pages Bar ── */}
       {pages.length > 0 && (
@@ -495,42 +523,20 @@ export default function RegisterPage() {
           </thead>
           <tbody>
             {displayEntries.map((entry, idx) => (
-              <tr key={entry.id}>
-                <td className="serial">
-                  <input type="checkbox" title="Select Row" aria-label="Select Row" checked={selectedRows.has(entry.id)} onChange={() => toggleSelectRow(entry.id)} />
-                </td>
-                <td className="serial">{idx + 1}</td>
-                {visibleColumns.map((col) => (
-                  <td key={col.id}>
-                    {col.type === 'formula' ? (
-                      <div className={`cell-formula ${evaluateFormula(col.formula || '', entry, columns) === 'ERR' ? 'error' : ''}`}>
-                        {evaluateFormula(col.formula || '', entry, columns) || '–'}
-                      </div>
-                    ) : col.type === 'date' ? (
-                      <div className="cell-date" onClick={() => openDatePicker(entry.id, col.id, entry.cells?.[col.id.toString()] || '')}>
-                        {entry.cells?.[col.id.toString()] || <span className="cell-placeholder"><Calendar size={12} /> Select date</span>}
-                      </div>
-                    ) : col.type === 'dropdown' ? (
-                      <div className="cell-dropdown" onClick={() => openDropdown(entry.id, col.id, col.dropdownOptions || ['Option 1', 'Option 2', 'Option 3'])}>
-                        {entry.cells?.[col.id.toString()] || <span className="cell-placeholder"><ChevronDown size={12} /> Select</span>}
-                      </div>
-                    ) : (
-                      <input
-                        className="cell-input"
-                        value={entry.cells?.[col.id.toString()] || ''}
-                        onChange={(e) => handleCellChange(entry.id, col.id.toString(), e.target.value)}
-                        type={col.type === 'number' ? 'number' : 'text'}
-                        placeholder={col.name}
-                      />
-                    )}
-                  </td>
-                ))}
-                <td className="actions">
-                  <button className="row-menu-btn" aria-label="Row Options" title="Row Options" onClick={() => setRowMenuId(rowMenuId === entry.id ? null : entry.id)}>
-                    <MoreVertical size={14} />
-                  </button>
-                </td>
-              </tr>
+              <SpreadsheetRow 
+                key={entry.id}
+                entry={entry}
+                idx={idx}
+                visibleColumns={visibleColumns}
+                isSelected={selectedRows.has(entry.id)}
+                toggleSelectRow={toggleSelectRow}
+                handleCellChange={handleCellChange}
+                openDatePicker={openDatePicker}
+                openDropdown={openDropdown}
+                isMenuOpen={rowMenuId === entry.id}
+                toggleMenu={toggleMenu}
+                registerColumns={columns}
+              />
             ))}
 
             {/* Mock rows for empty template registers */}
@@ -575,499 +581,66 @@ export default function RegisterPage() {
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════
-         MODALS
-         ═══════════════════════════════════════════════════════════ */}
+      {/* ── Context Menus ── */}
+      <RegisterContextMenus 
+        colMenuId={colMenuId} setColMenuId={setColMenuId} columns={columns}
+        sortCol={sortCol} sortDir={sortDir} setSortCol={setSortCol} setSortDir={setSortDir}
+        setRenameColValue={setRenameColValue} setRenameColModal={setRenameColModal}
+        setChangeTypeValue={setChangeTypeValue} setChangeTypeModal={setChangeTypeModal}
+        setDropdownConfigOptions={setDropdownConfigOptions} setDropdownConfigModal={setDropdownConfigModal}
+        duplicateColumnMutation={duplicateColumnMutation}
+        setNewColName={setNewColName} setNewColType={setNewColType} setNewColDropdownOpts={setNewColDropdownOpts} setNewColFormula={setNewColFormula}
+        setInsertColModal={setInsertColModal} moveColumnMutation={moveColumnMutation}
+        frozenColumns={frozenColumns} setFrozenColumns={setFrozenColumns} freezeColumn={freezeColumn} registerId={registerId}
+        hiddenColumns={hiddenColumns} setHiddenColumns={setHiddenColumns} hideColumn={hideColumn}
+        clearColumnDataMutation={clearColumnDataMutation} deleteColumnMutation={deleteColumnMutation}
+        rowMenuId={rowMenuId} setRowMenuId={setRowMenuId}
+        duplicateEntryMutation={duplicateEntryMutation} deleteEntryMutation={deleteEntryMutation}
+      />
 
-      {/* ── Add Column ── */}
-      {newColumnModal && (
-        <div className="modal-overlay" onClick={() => setNewColumnModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Add New Column</h3>
-            <label className="modal-label">Column Name</label>
-            <input className="modal-input" value={newColName} onChange={(e) => setNewColName(e.target.value)} placeholder="e.g. Amount" autoFocus />
-            <label className="modal-label">Column Type</label>
-            <div className="type-chips">
-              {COL_TYPES.map((t) => (
-                <button key={t.id} className={`type-chip ${newColType === t.id ? 'active' : ''}`} onClick={() => setNewColType(t.id)}>
-                  {t.icon} {t.label}
-                </button>
-              ))}
-            </div>
-            {newColType === 'dropdown' && (
-              <>
-                <label className="modal-label">Options (comma-separated)</label>
-                <input className="modal-input" value={newColDropdownOpts} onChange={(e) => setNewColDropdownOpts(e.target.value)} placeholder="e.g. Active, Inactive, Pending" />
-              </>
-            )}
-            {newColType === 'formula' && (
-              <>
-                <label className="modal-label">Formula</label>
-                <input className="modal-input" value={newColFormula} onChange={(e) => setNewColFormula(e.target.value)} placeholder="e.g. {Marks}/{Full Marks}*100" />
-                <div className="formula-hint">
-                  <AlertCircle size={14} color="var(--muted)" />
-                  <span className="formula-hint-text">Use {'{Column Name}'} to reference other columns. Supports +, -, *, /</span>
-                </div>
-              </>
-            )}
-            <div className="modal-actions">
-              <button className="modal-cancel-btn" onClick={() => setNewColumnModal(false)}>Cancel</button>
-              <button className="modal-confirm-btn" disabled={!newColName.trim()} onClick={() => addColumnMutation.mutate()}>
-                Add Column
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── Modals ── */}
+      <ColumnModals 
+        newColumnModal={newColumnModal} setNewColumnModal={setNewColumnModal}
+        insertColModal={insertColModal} setInsertColModal={setInsertColModal}
+        newColName={newColName} setNewColName={setNewColName}
+        newColType={newColType} setNewColType={setNewColType}
+        newColDropdownOpts={newColDropdownOpts} setNewColDropdownOpts={setNewColDropdownOpts}
+        newColFormula={newColFormula} setNewColFormula={setNewColFormula}
+        addColumnMutation={addColumnMutation} insertColumnMutation={insertColumnMutation}
+        renameColModal={renameColModal} setRenameColModal={setRenameColModal}
+        renameColValue={renameColValue} setRenameColValue={setRenameColValue} renameColumnMutation={renameColumnMutation}
+        dropdownConfigModal={dropdownConfigModal} setDropdownConfigModal={setDropdownConfigModal}
+        dropdownConfigOptions={dropdownConfigOptions} setDropdownConfigOptions={setDropdownConfigOptions} updateDropdownMutation={updateDropdownMutation}
+        changeTypeModal={changeTypeModal} setChangeTypeModal={setChangeTypeModal}
+        changeTypeValue={changeTypeValue} setChangeTypeValue={setChangeTypeValue} changeColumnTypeMutation={changeColumnTypeMutation}
+        COL_TYPES={COL_TYPES}
+      />
 
-      {/* ── Column Context Menu (full Record Book options) ── */}
-      {colMenuId !== null && (
-        <div className="modal-overlay" onClick={() => setColMenuId(null)}>
-          <div className="context-menu context-menu-wide" onClick={(e) => e.stopPropagation()}>
-            <div className="context-title">
-              {columns.find((c) => c.id === colMenuId)?.type === 'number' ? <Hash size={14} /> :
-               columns.find((c) => c.id === colMenuId)?.type === 'date' ? <Calendar size={14} /> :
-               columns.find((c) => c.id === colMenuId)?.type === 'dropdown' ? <ChevronDown size={14} /> :
-               columns.find((c) => c.id === colMenuId)?.type === 'formula' ? <FlaskConical size={14} /> :
-               <TypeIcon size={14} />}
-              {columns.find((c) => c.id === colMenuId)?.name || 'Column'}
-              <span className="context-type-badge">{columns.find((c) => c.id === colMenuId)?.type}</span>
-            </div>
+      <FilterModal 
+        filterModal={filterModal} setFilterModal={setFilterModal}
+        filters={filters} setFilters={setFilters} setActiveFilters={setActiveFilters}
+        columns={columns}
+      />
 
-            {/* ── Sort ── */}
-            <div className="context-section-label">Sort</div>
-            <button className="context-item" onClick={() => {
-              setSortCol(colMenuId); setSortDir('asc'); setColMenuId(null);
-            }}>
-              <SortAsc size={16} /> Sort A → Z
-              {sortCol === colMenuId && sortDir === 'asc' && <Check size={14} className="context-check" />}
-            </button>
-            <button className="context-item" onClick={() => {
-              setSortCol(colMenuId); setSortDir('desc'); setColMenuId(null);
-            }}>
-              <SortDesc size={16} /> Sort Z → A
-              {sortCol === colMenuId && sortDir === 'desc' && <Check size={14} className="context-check" />}
-            </button>
+      <ShareModal 
+        shareModal={shareModal} setShareModal={setShareModal}
+        register={register} sharePhone={sharePhone} setSharePhone={setSharePhone}
+        sharePermission={sharePermission} setSharePermission={setSharePermission}
+        shareLinkMutation={shareLinkMutation} addSharedUserMutation={addSharedUserMutation} removeSharedUserMutation={removeSharedUserMutation}
+      />
 
-            <div className="context-divider" />
-
-            {/* ── Edit ── */}
-            <div className="context-section-label">Edit</div>
-            <button className="context-item" onClick={() => {
-              setRenameColValue(columns.find((c) => c.id === colMenuId)?.name || '');
-              setRenameColModal(true);
-            }}>
-              <Pencil size={16} /> Rename Column
-            </button>
-            <button className="context-item" onClick={() => {
-              setChangeTypeValue(columns.find((c) => c.id === colMenuId)?.type || 'text');
-              setChangeTypeModal(true);
-            }}>
-              <ArrowLeftRight size={16} /> Change Column Type
-            </button>
-            {columns.find((c) => c.id === colMenuId)?.type === 'dropdown' && (
-              <button className="context-item" onClick={() => {
-                const col = columns.find((c) => c.id === colMenuId);
-                setDropdownConfigOptions(col?.dropdownOptions?.join(', ') || '');
-                setDropdownConfigModal(true);
-              }}>
-                <ChevronDown size={16} /> Edit Dropdown Options
-              </button>
-            )}
-
-            <div className="context-divider" />
-
-            {/* ── Insert & Duplicate ── */}
-            <div className="context-section-label">Insert & Copy</div>
-            <button className="context-item" onClick={() => duplicateColumnMutation.mutate(colMenuId)}>
-              <Copy size={16} /> Duplicate Column
-            </button>
-            <button className="context-item" onClick={() => {
-              setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
-              setInsertColModal('left');
-            }}>
-              <Plus size={16} /> Insert Column Left
-            </button>
-            <button className="context-item" onClick={() => {
-              setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
-              setInsertColModal('right');
-            }}>
-              <ArrowRight size={16} /> Insert Column Right
-            </button>
-
-            <div className="context-divider" />
-
-            {/* ── Arrange ── */}
-            <div className="context-section-label">Arrange</div>
-            <button className="context-item"
-              disabled={columns.findIndex((c) => c.id === colMenuId) === 0}
-              onClick={() => moveColumnMutation.mutate({ colId: colMenuId, dir: 'left' })}
-            >
-              <ChevronsLeftRight size={16} /> Move Left
-            </button>
-            <button className="context-item"
-              disabled={columns.findIndex((c) => c.id === colMenuId) === columns.length - 1}
-              onClick={() => moveColumnMutation.mutate({ colId: colMenuId, dir: 'right' })}
-            >
-              <ChevronsLeftRight size={16} /> Move Right
-            </button>
-            <button className="context-item" onClick={() => {
-              const newFrozen = new Set(frozenColumns);
-              if (newFrozen.has(colMenuId)) newFrozen.delete(colMenuId);
-              else newFrozen.add(colMenuId);
-              setFrozenColumns(newFrozen);
-              freezeColumn(registerId, colMenuId, !frozenColumns.has(colMenuId));
-              setColMenuId(null);
-            }}>
-              <Pin size={16} /> {frozenColumns.has(colMenuId) ? 'Unfreeze Column' : 'Freeze / Pin Column'}
-            </button>
-            <button className="context-item" onClick={() => {
-              const newHidden = new Set(hiddenColumns);
-              newHidden.add(colMenuId);
-              setHiddenColumns(newHidden);
-              hideColumn(registerId, colMenuId, true);
-              setColMenuId(null);
-            }}>
-              <EyeOff size={16} /> Hide Column
-            </button>
-
-            <div className="context-divider" />
-
-            {/* ── Destructive ── */}
-            <button className="context-item danger" onClick={() => {
-              if (confirm('Clear all data in this column? This cannot be undone.')) clearColumnDataMutation.mutate(colMenuId);
-            }}>
-              <Eraser size={16} /> Clear Column Data
-            </button>
-            <button className="context-item danger" onClick={() => {
-              if (confirm('Delete this column and all its data?')) deleteColumnMutation.mutate(colMenuId);
-            }}>
-              <Trash2 size={16} /> Delete Column
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Row Context Menu ── */}
-      {rowMenuId !== null && (
-        <div className="modal-overlay" onClick={() => setRowMenuId(null)}>
-          <div className="context-menu" onClick={(e) => e.stopPropagation()}>
-            <div className="context-title">Row Actions</div>
-            <button className="context-item" onClick={() => duplicateEntryMutation.mutate(rowMenuId)}>
-              <Copy size={16} /> Duplicate Row
-            </button>
-            <button className="context-item danger" onClick={() => {
-              if (confirm('Delete this row?')) deleteEntryMutation.mutate(rowMenuId);
-            }}>
-              <Trash2 size={16} /> Delete Row
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Rename Column Modal ── */}
-      {renameColModal && (
-        <div className="modal-overlay" onClick={() => setRenameColModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Rename Column</h3>
-            <input className="modal-input" value={renameColValue} onChange={(e) => setRenameColValue(e.target.value)} placeholder="New column name" autoFocus />
-            <div className="modal-actions">
-              <button className="modal-cancel-btn" onClick={() => setRenameColModal(false)}>Cancel</button>
-              <button className="modal-confirm-btn" disabled={!renameColValue.trim()} onClick={() => renameColumnMutation.mutate()}>Rename</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Dropdown Config Modal ── */}
-      {dropdownConfigModal && (
-        <div className="modal-overlay" onClick={() => setDropdownConfigModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Edit Dropdown Options</h3>
-            <label className="modal-label">Options (comma-separated)</label>
-            <input className="modal-input" value={dropdownConfigOptions} onChange={(e) => setDropdownConfigOptions(e.target.value)} placeholder="e.g. Active, Inactive, Pending" autoFocus />
-            <div className="modal-actions">
-              <button className="modal-cancel-btn" onClick={() => setDropdownConfigModal(false)}>Cancel</button>
-              <button className="modal-confirm-btn" onClick={() => updateDropdownMutation.mutate()}>Save</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Change Column Type Modal ── */}
-      {changeTypeModal && (
-        <div className="modal-overlay" onClick={() => setChangeTypeModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Change Column Type</h3>
-            <p className="modal-p-text">
-              Changing the type may affect existing data in this column.
-            </p>
-            <div className="type-chips">
-              {COL_TYPES.map((t) => (
-                <button key={t.id} className={`type-chip ${changeTypeValue === t.id ? 'active' : ''}`} onClick={() => setChangeTypeValue(t.id)}>
-                  {t.icon} {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="modal-actions">
-              <button className="modal-cancel-btn" onClick={() => setChangeTypeModal(false)}>Cancel</button>
-              <button className="modal-confirm-btn" onClick={() => changeColumnTypeMutation.mutate()}>
-                Change Type
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Insert Column (Left / Right) Modal ── */}
-      {insertColModal !== null && (
-        <div className="modal-overlay" onClick={() => setInsertColModal(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Insert Column {insertColModal === 'left' ? 'Left' : 'Right'}</h3>
-            <label className="modal-label">Column Name</label>
-            <input className="modal-input" value={newColName} onChange={(e) => setNewColName(e.target.value)} placeholder="e.g. Amount" autoFocus />
-            <label className="modal-label">Column Type</label>
-            <div className="type-chips">
-              {COL_TYPES.map((t) => (
-                <button key={t.id} className={`type-chip ${newColType === t.id ? 'active' : ''}`} onClick={() => setNewColType(t.id)}>
-                  {t.icon} {t.label}
-                </button>
-              ))}
-            </div>
-            {newColType === 'dropdown' && (
-              <>
-                <label className="modal-label">Options (comma-separated)</label>
-                <input className="modal-input" value={newColDropdownOpts} onChange={(e) => setNewColDropdownOpts(e.target.value)} placeholder="e.g. Active, Inactive, Pending" />
-              </>
-            )}
-            {newColType === 'formula' && (
-              <>
-                <label className="modal-label">Formula</label>
-                <input className="modal-input" value={newColFormula} onChange={(e) => setNewColFormula(e.target.value)} placeholder="e.g. {Marks}/{Full Marks}*100" />
-              </>
-            )}
-            <div className="modal-actions">
-              <button className="modal-cancel-btn" onClick={() => setInsertColModal(null)}>Cancel</button>
-              <button className="modal-confirm-btn" disabled={!newColName.trim()} onClick={() => insertColumnMutation.mutate()}>
-                Insert Column
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Filter Modal ── */}
-      {filterModal && (
-        <div className="modal-overlay" onClick={() => setFilterModal(false)}>
-          <div className="modal-content modal-max-70" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header-flex">
-               <h3 className="modal-title modal-title-no-margin">Filter Data</h3>
-              {filters.length > 0 && (
-                <button className="clear-all-btn" onClick={() => setFilters([])}>Clear All</button>
-              )}
-            </div>
-            {filters.map((f, idx) => (
-              <div key={idx} className="filter-row">
-                <select className="modal-input filter-select" aria-label="Filter Column" title="Filter Column" value={f.columnId} onChange={(e) => { const newF = [...filters]; newF[idx].columnId = Number(e.target.value); setFilters(newF); }}>
-                  {columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                <select className="modal-input filter-operator" aria-label="Filter Operator" title="Filter Operator" value={f.operator} onChange={(e) => { const newF = [...filters]; newF[idx].operator = e.target.value; setFilters(newF); }}>
-                  <option value="contains">Contains</option>
-                  <option value="equals">Equals</option>
-                  <option value="gt">Greater than</option>
-                  <option value="lt">Less than</option>
-                  <option value="empty">Is empty</option>
-                  <option value="not_empty">Not empty</option>
-                </select>
-                {!['empty', 'not_empty'].includes(f.operator) && (
-                  <input className="modal-input filter-value" value={f.value} onChange={(e) => { const newF = [...filters]; newF[idx].value = e.target.value; setFilters(newF); }} placeholder="Value" />
-                )}
-                <button className="remove-filter-btn" aria-label="Remove Filter" title="Remove Filter" onClick={() => setFilters(filters.filter((_, i) => i !== idx))}>
-                  <X size={16} />
-                </button>
-              </div>
-            ))}
-            <button className="toolbar-btn add-filter-btn" onClick={() => setFilters([...filters, { columnId: columns[0]?.id || 0, operator: 'contains', value: '' }])}>
-              <Plus size={13} /> Add Filter
-            </button>
-            <div className="modal-actions">
-              <button className="modal-cancel-btn" onClick={() => { setActiveFilters([]); setFilterModal(false); }}>Clear & Close</button>
-              <button className="modal-confirm-btn" onClick={() => { setActiveFilters(filters); setFilterModal(false); }}>Apply Filters</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Calc Type Modal ── */}
-      {calcModal && (
-        <div className="modal-overlay" onClick={() => setCalcModal(false)}>
-          <div className="context-menu" onClick={(e) => e.stopPropagation()}>
-            <div className="context-title">Calculation Type</div>
-            {(['sum', 'average', 'count', 'min', 'max'] as CalcType[]).map((type) => (
-              <button
-                key={type}
-                className={`context-item ${calcTypes[calcColId!] === type || (!calcTypes[calcColId!] && type === 'sum') ? 'active-calc' : ''}`}
-                onClick={() => {
-                  if (calcColId !== null) setCalcTypes({ ...calcTypes, [calcColId]: type });
-                  setCalcModal(false);
-                }}
-              >
-                {type.charAt(0).toUpperCase() + type.slice(1)}
-                {(calcTypes[calcColId!] === type || (!calcTypes[calcColId!] && type === 'sum')) && <Check size={14} />}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── Date Picker Modal ── */}
-      {dateModal && (
-        <div className="modal-overlay" onClick={() => setDateModal(false)}>
-          <div className="modal-content modal-max-360" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Select Date</h3>
-            <div className="date-picker-flex">
-              <div className="date-picker-flex-1">
-                <label className="modal-label">Day</label>
-                <input className="modal-input" value={dateDay} onChange={(e) => setDateDay(e.target.value)} type="number" maxLength={2} placeholder="DD" />
-              </div>
-              <div className="date-picker-flex-1">
-                <label className="modal-label">Month</label>
-                <input className="modal-input" value={dateMonth} onChange={(e) => setDateMonth(e.target.value)} type="number" maxLength={2} placeholder="MM" />
-              </div>
-              <div className="date-picker-flex-1-5">
-                <label className="modal-label">Year</label>
-                <input className="modal-input" value={dateYear} onChange={(e) => setDateYear(e.target.value)} type="number" maxLength={4} placeholder="YYYY" />
-              </div>
-            </div>
-            <div className="modal-actions">
-              <button className="modal-cancel-btn" onClick={() => setDateModal(false)}>Cancel</button>
-              <button className="modal-confirm-btn" onClick={handleDateSelect}>Set Date</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Dropdown Cell Modal ── */}
-      {dropdownModal && (
-        <div className="modal-overlay" onClick={() => setDropdownModal(false)}>
-          <div className="modal-content modal-max-380" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Select Option</h3>
-            <div className="dropdown-options-container">
-              {dropdownOptions.map((opt, idx) => {
-                const currentVal = dropdownEntryId ? localEntries.find((e) => e.id === dropdownEntryId)?.cells?.[dropdownColumnId?.toString() || ''] : '';
-                const isSelected = currentVal === opt;
-                return (
-                  <div
-                    key={idx}
-                    className={`dropdown-option ${isSelected ? 'selected' : ''}`}
-                    onClick={() => {
-                      if (dropdownEntryId && dropdownColumnId) handleCellChange(dropdownEntryId, dropdownColumnId.toString(), opt);
-                      setDropdownModal(false);
-                    }}
-                  >
-                    <span>{opt}</span>
-                    {isSelected && <Check size={16} color="var(--navy)" />}
-                  </div>
-                );
-              })}
-            </div>
-            <button className="modal-cancel-btn dropdown-clear-btn" onClick={() => {
-              if (dropdownEntryId && dropdownColumnId) handleCellChange(dropdownEntryId, dropdownColumnId.toString(), '');
-              setDropdownModal(false);
-            }}>Clear Selection</button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Share Modal ── */}
-      {shareModal && (
-        <div className="modal-overlay" onClick={() => setShareModal(false)}>
-          <div className="modal-content modal-max-480" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Share Register</h3>
-
-            {/* Share Link */}
-            <div className="share-link-row">
-              <div className="share-link-box">
-                <Link2 size={14} />
-                <span className="share-link-text">
-                  {register.shareLink || 'Generate a share link'}
-                </span>
-              </div>
-              {register.shareLink ? (
-                <button className="share-copy-btn" onClick={() => navigator.clipboard.writeText(register.shareLink!)}>
-                  <Copy size={12} /> Copy
-                </button>
-              ) : (
-                <button className="share-copy-btn" onClick={() => shareLinkMutation.mutate()}>
-                  <Link2 size={12} /> Generate
-                </button>
-              )}
-            </div>
-
-            {/* Add user */}
-            <label className="modal-label">Add Person</label>
-            <div className="share-add-row">
-              <input className="modal-input share-phone-input" aria-label="Phone number" title="Phone number" value={sharePhone} onChange={(e) => setSharePhone(e.target.value)} placeholder="Phone number" />
-              <select className="modal-input share-perm-select" aria-label="Permission Level" title="Permission Level" value={sharePermission} onChange={(e) => setSharePermission(e.target.value as 'view' | 'edit')}>
-                <option value="view">View</option>
-                <option value="edit">Edit</option>
-              </select>
-              <button className="modal-confirm-btn" aria-label="Add User" title="Add User" onClick={() => sharePhone.trim() && addSharedUserMutation.mutate()}>
-                <UserPlus size={14} />
-              </button>
-            </div>
-
-            {/* Shared users */}
-            {register.sharedWith && register.sharedWith.length > 0 && (
-              <>
-                <label className="modal-label shared-user-label">Shared With</label>
-                {register.sharedWith.map((u) => (
-                  <div key={u.id} className="shared-user-row">
-                    <div className="shared-user-avatar">{u.name[0]}</div>
-                    <div className="shared-user-info-wrapper">
-                      <div className="shared-user-name">{u.name}</div>
-                      <div className="shared-user-phone">{u.phone} • {u.permission}</div>
-                    </div>
-                    <button className="share-remove-btn" aria-label="Remove User" title="Remove User" onClick={() => removeSharedUserMutation.mutate(u.id)}>
-                      <UserX size={16} />
-                    </button>
-                  </div>
-                ))}
-              </>
-            )}
-
-            <button className="modal-cancel-btn modal-close-btn" onClick={() => setShareModal(false)}>Close</button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Rename Page Modal ── */}
-      {renamePageModal && (
-        <div className="modal-overlay" onClick={() => setRenamePageModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Rename Page</h3>
-            <input className="modal-input" value={renamePageValue} onChange={(e) => setRenamePageValue(e.target.value)} placeholder="Page name" autoFocus />
-            <div className="modal-actions">
-              <button
-                className={`modal-cancel-btn ${pages.length > 1 ? 'modal-delete-page-btn' : ''}`}
-                onClick={() => {
-                  if (pages.length > 1 && renamePageId !== null) {
-                    if (confirm('Delete this page and its entries?')) {
-                      deletePageMutation.mutate(renamePageId);
-                      setRenamePageModal(false);
-                    }
-                  } else {
-                    setRenamePageModal(false);
-                  }
-                }}
-              >
-                {pages.length > 1 ? 'Delete' : 'Cancel'}
-              </button>
-              <button className="modal-confirm-btn" disabled={!renamePageValue.trim()} onClick={() => renamePageMutation.mutate()}>Rename</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <OtherModals 
+        renamePageModal={renamePageModal} setRenamePageModal={setRenamePageModal}
+        renamePageValue={renamePageValue} setRenamePageValue={setRenamePageValue} renamePageId={renamePageId}
+        pages={pages} deletePageMutation={deletePageMutation} renamePageMutation={renamePageMutation}
+        calcModal={calcModal} setCalcModal={setCalcModal} calcTypes={calcTypes} setCalcTypes={setCalcTypes} calcColId={calcColId}
+        dateModal={dateModal} setDateModal={setDateModal}
+        dateDay={dateDay} setDateDay={setDateDay} dateMonth={dateMonth} setDateMonth={setDateMonth} dateYear={dateYear} setDateYear={setDateYear}
+        handleDateSelect={handleDateSelect}
+        dropdownModal={dropdownModal} setDropdownModal={setDropdownModal}
+        dropdownOptions={dropdownOptions} dropdownEntryId={dropdownEntryId} dropdownColumnId={dropdownColumnId}
+        localEntries={localEntries} handleCellChange={handleCellChange}
+      />
     </div>
   );
 }
