@@ -14,7 +14,7 @@ import {
 import * as XLSX from 'xlsx';
 import {
   Plus, MoreVertical, ChevronDown, Calendar, SortAsc, SortDesc,
-  Hash, FlaskConical, Type as TypeIcon, ChevronRight, Pin,
+  Hash, FlaskConical, Type as TypeIcon, ChevronRight, Pin, IndianRupee,
 } from 'lucide-react';
 
 import { RegisterHeader } from '../components/register/RegisterHeader';
@@ -172,9 +172,37 @@ export default function RegisterPage() {
       dropdownOptions: newColType === 'dropdown' ? newColDropdownOpts.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
       formula: newColType === 'formula' ? newColFormula : undefined,
     }),
-    onSuccess: () => {
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const prev = queryClient.getQueryData(['register', registerId]) as any;
+      if (prev) {
+        const dummyId = Date.now();
+        const newCol = {
+          id: dummyId,
+          registerId,
+          name: newColName,
+          type: newColType,
+          position: prev.columns ? prev.columns.length : 0,
+          dropdownOptions: newColType === 'dropdown' ? newColDropdownOpts.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+          formula: newColType === 'formula' ? newColFormula : undefined,
+          createdAt: new Date().toISOString()
+        };
+        queryClient.setQueryData(['register', registerId], {
+          ...prev,
+          columns: [...(prev.columns || []), newCol]
+        });
+      }
+      setNewColumnModal(false);
+      return { prev };
+    },
+    onError: (err, newCol, context) => {
+      if (context?.prev) {
+        queryClient.setQueryData(['register', registerId], context.prev);
+      }
+    },
+    onSettled: () => {
+      setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
       queryClient.invalidateQueries({ queryKey: ['register', registerId] });
-      setNewColumnModal(false); setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
     },
   });
 
@@ -185,7 +213,30 @@ export default function RegisterPage() {
 
   const renameColumnMutation = useMutation({
     mutationFn: () => renameColumn(registerId, colMenuId!, renameColValue),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setRenameColModal(false); },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const prev = queryClient.getQueryData(['register', registerId]) as any;
+      if (prev && colMenuId !== null) {
+        queryClient.setQueryData(['register', registerId], {
+          ...prev,
+          columns: (prev.columns || []).map((c: any) => 
+            c.id === colMenuId ? { ...c, name: renameColValue } : c
+          )
+        });
+      }
+      setRenameColModal(false);
+      return { prev };
+    },
+    onError: (err, vars, context) => {
+      if (context?.prev) {
+        queryClient.setQueryData(['register', registerId], context.prev);
+      }
+    },
+    onSettled: () => {
+      setRenameColValue('');
+      setColMenuId(null);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+    },
   });
 
   const updateDropdownMutation = useMutation({
@@ -196,6 +247,26 @@ export default function RegisterPage() {
   const duplicateColumnMutation = useMutation({
     mutationFn: (colId: number) => duplicateColumn(registerId, colId),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setColMenuId(null); },
+  });
+
+  const setRowCountMutation = useMutation({
+    mutationFn: async (targetCount: number) => {
+      const currentCount = displayEntries.length;
+      if (targetCount > currentCount) {
+        const diff = targetCount - currentCount;
+        for (let i = 0; i < diff; i++) {
+          await addEntry(registerId, {}, currentPageIndex);
+        }
+      } else if (targetCount < currentCount) {
+        const diff = currentCount - targetCount;
+        const entriesToRemove = [...displayEntries].slice(-diff);
+        await bulkDeleteEntries(registerId, entriesToRemove.map(e => e.id));
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+      queryClient.invalidateQueries({ queryKey: ['registers'], exact: false });
+    }
   });
 
   const moveColumnMutation = useMutation({
@@ -223,10 +294,47 @@ export default function RegisterPage() {
         formula: newColType === 'formula' ? newColFormula : undefined,
       }, pos);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
-      setInsertColModal(null); setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const prev = queryClient.getQueryData(['register', registerId]) as any;
+      if (prev) {
+        const colNode = prev.columns?.find((c: any) => c.id === colMenuId);
+        const pos = colNode ? (insertColModal === 'left' ? colNode.position : colNode.position + 1) : (prev.columns?.length || 0);
+        
+        const newCol = {
+          id: Date.now(),
+          registerId,
+          name: newColName,
+          type: newColType,
+          position: pos,
+          dropdownOptions: newColType === 'dropdown' ? newColDropdownOpts.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+          formula: newColType === 'formula' ? newColFormula : undefined,
+          createdAt: new Date().toISOString()
+        };
+        
+        const newColumns = (prev.columns || []).map((c: any) => 
+          c.position >= pos ? { ...c, position: c.position + 1 } : c
+        );
+        newColumns.push(newCol);
+        newColumns.sort((a, b) => a.position - b.position);
+
+        queryClient.setQueryData(['register', registerId], {
+          ...prev,
+          columns: newColumns
+        });
+      }
+      setInsertColModal(null);
       setColMenuId(null);
+      return { prev };
+    },
+    onError: (err, variables, context) => {
+      if (context?.prev) {
+        queryClient.setQueryData(['register', registerId], context.prev);
+      }
+    },
+    onSettled: () => {
+      setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
     },
   });
 
@@ -450,14 +558,9 @@ export default function RegisterPage() {
         setNewColDropdownOpts={setNewColDropdownOpts}
         setNewColFormula={setNewColFormula}
         setNewColumnModal={setNewColumnModal}
-        hiddenColumns={hiddenColumns}
-        setHiddenColumns={setHiddenColumns}
-        registerId={registerId}
-        hideColumn={hideColumn}
-        selectedRows={selectedRows}
-        displayEntries={displayEntries}
-        columns={columns}
-        bulkDeleteMutation={bulkDeleteMutation}
+        hiddenColumns={hiddenColumns} setHiddenColumns={setHiddenColumns} registerId={registerId} hideColumn={(r, c, h) => hideColumnMutation.mutate({ colId: c, hidden: h })}
+        selectedRows={selectedRows} displayEntries={displayEntries} columns={columns} bulkDeleteMutation={bulkDeleteMutation}
+        setRowCountMutation={setRowCountMutation}
       />
 
       {/* ── Pages Bar ── */}
@@ -496,14 +599,21 @@ export default function RegisterPage() {
         <table className="spreadsheet">
           <thead>
             <tr>
-              <th className="serial serial-header-checkbox">
-                <input type="checkbox" title="Select All" aria-label="Select All" checked={selectedRows.size === displayEntries.length && displayEntries.length > 0} onChange={toggleSelectAll} />
-              </th>
               <th className="serial">S.No.</th>
-              {visibleColumns.map((col) => (
+              {visibleColumns.map((col) => {
+                const nameL = (col.name || '').toLowerCase();
+                const isPayment = nameL.includes('amount') || nameL.includes('fee') || nameL.includes('payment') || nameL.includes('balance') || nameL.includes('price');
+                const IconComponent = isPayment ? <IndianRupee size={12} /> : 
+                  col.type === 'number' ? <Hash size={12} /> : 
+                  col.type === 'date' ? <Calendar size={12} /> : 
+                  col.type === 'dropdown' ? <ChevronDown size={12} /> : 
+                  col.type === 'formula' ? <FlaskConical size={12} /> : 
+                  <TypeIcon size={12} />;
+
+                return (
                 <th key={col.id} onClick={() => handleSort(col.id)} className="col-header-cell">
                   <div className="col-header-inner">
-                    {col.type === 'number' ? <Hash size={12} /> : col.type === 'date' ? <Calendar size={12} /> : col.type === 'dropdown' ? <ChevronDown size={12} /> : col.type === 'formula' ? <FlaskConical size={12} /> : <TypeIcon size={12} />}
+                    {IconComponent}
                     <span>{col.name}</span>
                     {sortCol === col.id && (sortDir === 'asc' ? <SortAsc size={12} /> : <SortDesc size={12} />)}
                     {frozenColumns.has(col.id) && <Pin size={10} color="var(--muted)" className="frozen-pin" />}
@@ -513,11 +623,11 @@ export default function RegisterPage() {
                       title="Column Options"
                       onClick={(e) => { e.stopPropagation(); setColMenuId(colMenuId === col.id ? null : col.id); }}
                     >
-                      <MoreVertical size={12} />
+                      <MoreVertical size={14} />
                     </button>
                   </div>
                 </th>
-              ))}
+              )})}
               <th className="actions" />
             </tr>
           </thead>
@@ -542,7 +652,6 @@ export default function RegisterPage() {
             {/* Mock rows for empty template registers */}
             {displayEntries.length === 0 && columns.length > 0 && [1, 2, 3].map((n) => (
               <tr key={`mock-${n}`} className="mock" onClick={() => addEntryMutation.mutate()}>
-                <td className="serial" />
                 <td className="serial">{n}</td>
                 {visibleColumns.map((col) => (
                   <td key={col.id}><div className="mock-cell-content">{col.name}...</div></td>

@@ -651,7 +651,24 @@ a { text-decoration: none; color: inherit; }
   transition: all 0.3s ease-in-out, background 0.15s;
 }
 .spreadsheet th:hover { background: var(--border); }
-.spreadsheet th.serial { width: 50px; text-align: center; cursor: default; }
+.spreadsheet th.serial { 
+  width: 50px; 
+  min-width: 50px;
+  text-align: center; 
+  cursor: default; 
+  position: sticky; 
+  left: 0; 
+  z-index: 12; 
+  background: var(--border-light); /* ensure background stays when scrolling */
+}
+.spreadsheet th.serial-header-checkbox { 
+  width: 40px; 
+  min-width: 40px; 
+  position: sticky; 
+  left: 0; 
+  z-index: 12; 
+  background: var(--border-light);
+}
 .spreadsheet th.actions { width: 44px; cursor: default; }
 .spreadsheet th .col-header-inner { display: flex; align-items: center; gap: 6px; }
 
@@ -670,6 +687,18 @@ a { text-decoration: none; color: inherit; }
   font-family: 'JetBrains Mono', monospace;
   background: var(--border-light);
   width: 50px;
+  min-width: 50px;
+  position: sticky;
+  left: 0;
+  z-index: 11;
+}
+.spreadsheet td.serial-header-checkbox {
+  width: 40px;
+  min-width: 40px;
+  position: sticky;
+  left: 0;
+  z-index: 11;
+  background: var(--border-light);
 }
 .spreadsheet td.actions { text-align: center; width: 44px; }
 .spreadsheet tr:hover td { background: rgba(20,83,45,0.02); }
@@ -1708,12 +1737,13 @@ a { text-decoration: none; color: inherit; }
     height: 36px;
     min-width: 80px;
   }
-  .spreadsheet th.serial         { width: 36px; min-width: 36px; }
-  .spreadsheet th.serial-header-checkbox { width: 32px; min-width: 32px; }
+  .spreadsheet th.serial         { width: 36px; min-width: 36px; left: 0; }
+  .spreadsheet th.serial-header-checkbox { width: 32px; min-width: 32px; left: 0; }
   .spreadsheet th.actions        { width: 32px; min-width: 32px; }
   .col-header-cell { min-width: 80px !important; }
   .spreadsheet td  { height: 38px; font-size: 12px; }
-  .spreadsheet td.serial         { width: 36px; font-size: 11px; }
+  .spreadsheet td.serial         { width: 36px; min-width: 36px; left: 0; font-size: 11px; }
+  .spreadsheet td.serial-header-checkbox { width: 32px; min-width: 32px; left: 0; }
   .spreadsheet td.actions        { width: 32px; }
   .cell-input  { padding: 0 6px; font-size: 12px; }
   .cell-date, .cell-dropdown, .cell-formula { padding: 0 6px; font-size: 12px; }

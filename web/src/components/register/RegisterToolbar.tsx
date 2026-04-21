@@ -1,4 +1,5 @@
 import { Search, Filter, Plus, Trash2, Hash, FileText, Eye } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import type { Entry, Column } from '../../lib/api';
 
 interface FilterState {
@@ -27,14 +28,31 @@ interface RegisterToolbarProps {
   displayEntries: Entry[];
   columns: Column[];
   bulkDeleteMutation: any; // React Query UseMutationResult
+  setRowCountMutation?: any; // New mutation to bulk add/remove rows
 }
 
 export function RegisterToolbar({
   search, setSearch, activeFilters, setFilters, setFilterModal,
   addEntryMutation, setNewColName, setNewColType, setNewColDropdownOpts, setNewColFormula, setNewColumnModal,
   hiddenColumns, setHiddenColumns, registerId, hideColumn,
-  selectedRows, displayEntries, columns, bulkDeleteMutation
+  selectedRows, displayEntries, columns, bulkDeleteMutation,
+  setRowCountMutation
 }: RegisterToolbarProps) {
+  const [rowInput, setRowInput] = useState(displayEntries.length.toString());
+
+  useEffect(() => {
+    setRowInput(displayEntries.length.toString());
+  }, [displayEntries.length]);
+
+  const handleRowSubmit = () => {
+    const val = parseInt(rowInput, 10);
+    if (!isNaN(val) && val >= 0 && val !== displayEntries.length && setRowCountMutation) {
+      setRowCountMutation.mutate(val);
+    } else {
+      setRowInput(displayEntries.length.toString());
+    }
+  };
+
   return (
     <div className="register-toolbar">
       <div className="toolbar-search">
@@ -64,7 +82,18 @@ export function RegisterToolbar({
         </button>
       )}
       <div className="toolbar-stats">
-        <span className="toolbar-stat"><Hash size={12} />{displayEntries.length} rows</span>
+        <span className="toolbar-stat" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <Hash size={12} />
+          <input 
+            type="text" 
+            inputMode="numeric"
+            value={rowInput} 
+            onChange={(e) => setRowInput(e.target.value.replace(/\D/g, ''))} 
+            onBlur={handleRowSubmit}
+            onKeyDown={(e) => e.key === 'Enter' && handleRowSubmit()}
+            style={{ width: `${Math.max(1, rowInput.length)}ch`, background: 'transparent', border: 'none', color: 'inherit', outline: 'none', textAlign: 'center', fontWeight: 'inherit', fontSize: 'inherit', padding: 0 }}
+          /> rows
+        </span>
         <span className="toolbar-stat"><FileText size={12} />{columns.length} cols</span>
       </div>
     </div>

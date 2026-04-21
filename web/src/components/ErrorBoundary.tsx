@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertCircle } from 'lucide-react';
 
 interface Props {
@@ -29,14 +29,17 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="error-boundary-container">
           <div className="error-boundary-card">
-            <AlertCircle size={48} color="var(--danger)" />
+            <AlertCircle size={48} color="var(--danger, #ef4444)" />
             <h2 className="error-boundary-title">Something went wrong</h2>
             <p className="error-boundary-text">
-              {this.state.error?.message || 'An unexpected error occurred in this section of the app.'}
+              {this.state.error?.message || 'An unexpected error occurred.'}
             </p>
             <button
               className="error-boundary-btn"
-              onClick={() => window.location.reload()}
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                window.location.reload();
+              }}
             >
               Reload Page
             </button>
@@ -45,6 +48,6 @@ export class ErrorBoundary extends Component<Props, State> {
       );
     }
 
-    return this.children;
+    return this.props.children;
   }
 }

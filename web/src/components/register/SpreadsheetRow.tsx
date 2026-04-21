@@ -1,6 +1,80 @@
 import { evaluateFormula, type Entry, type Column } from '../../lib/api';
 import { Calendar, ChevronDown, Image as ImageIcon, Mail, Phone, Globe, MoreVertical } from 'lucide-react';
-import React from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+
+interface SpreadsheetTextInputProps {
+  idx: number;
+  col: Column;
+  entry: Entry;
+  visibleColumns: Column[];
+  colIdx: number;
+  handleCellChange: (entryId: number, columnId: string, value: string) => void;
+}
+
+const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colIdx, handleCellChange }: SpreadsheetTextInputProps) => {
+  const initialValue = entry.cells?.[col.id.toString()] || '';
+  const [val, setVal] = useState(initialValue);
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    setVal(initialValue);
+  }, [initialValue]);
+
+  const onChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value;
+    setVal(newVal);
+    
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      handleCellChange(entry.id, col.id.toString(), newVal);
+    }, 400); // Wait 400ms after last stroke before pushing up to the main array
+  }, [entry.id, col.id, handleCellChange]);
+
+  const onBlur = useCallback(() => {
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+      handleCellChange(entry.id, col.id.toString(), val);
+    }
+  }, [entry.id, col.id, val, handleCellChange]);
+
+  const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = document.getElementById(`cell-${idx + 1}-${col.id}`);
+      if (next) next.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = document.getElementById(`cell-${idx - 1}-${col.id}`);
+      if (prev) prev.focus();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const nextCol = visibleColumns[colIdx + 1];
+      if (nextCol) {
+        const next = document.getElementById(`cell-${idx}-${nextCol.id}`);
+        if (next) next.focus();
+      } else {
+        const firstCol = visibleColumns[0];
+        if (firstCol) {
+          const nextRow = document.getElementById(`cell-${idx + 1}-${firstCol.id}`);
+          if (nextRow) nextRow.focus();
+        }
+      }
+    }
+  }, [idx, col.id, visibleColumns, colIdx]);
+
+  return (
+    <input
+      id={`cell-${idx}-${col.id}`}
+      className="cell-input"
+      value={val}
+      onChange={onChange}
+      onBlur={onBlur}
+      onKeyDown={onKeyDown}
+      type={col.type === 'number' ? 'number' : 'text'}
+      placeholder={col.name}
+    />
+  );
+});
 
 interface SpreadsheetRowProps {
   entry: Entry;
@@ -31,15 +105,6 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow({
 }: SpreadsheetRowProps) {
   return (
     <tr>
-      <td className="serial">
-        <input 
-          type="checkbox" 
-          title="Select Row" 
-          aria-label="Select Row" 
-          checked={isSelected} 
-          onChange={() => toggleSelectRow(entry.id)} 
-        />
-      </td>
       <td className="serial">{idx + 1}</td>
       {visibleColumns.map((col, colIdx) => (
         <td key={col.id}>
@@ -99,37 +164,13 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow({
               {entry.cells?.[col.id.toString()] && <a href={entry.cells[col.id.toString()]} target="_blank" rel="noreferrer" className="cell-url-link" title="Open"><Globe size={11} /></a>}
             </div>
           ) : (
-            <input
-              id={`cell-${idx}-${col.id}`}
-              className="cell-input"
-              value={entry.cells?.[col.id.toString()] || ''}
-              onChange={(e) => handleCellChange(entry.id, col.id.toString(), e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault();
-                  const next = document.getElementById(`cell-${idx + 1}-${col.id}`);
-                  if (next) next.focus();
-                } else if (e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  const prev = document.getElementById(`cell-${idx - 1}-${col.id}`);
-                  if (prev) prev.focus();
-                } else if (e.key === 'Enter') {
-                  e.preventDefault();
-                  const nextCol = visibleColumns[colIdx + 1];
-                  if (nextCol) {
-                    const next = document.getElementById(`cell-${idx}-${nextCol.id}`);
-                    if (next) next.focus();
-                  } else {
-                    const firstCol = visibleColumns[0];
-                    if (firstCol) {
-                      const nextRow = document.getElementById(`cell-${idx + 1}-${firstCol.id}`);
-                      if (nextRow) nextRow.focus();
-                    }
-                  }
-                }
-              }}
-              type={col.type === 'number' ? 'number' : 'text'}
-              placeholder={col.name}
+            <SpreadsheetTextInput 
+              idx={idx}
+              col={col}
+              entry={entry}
+              visibleColumns={visibleColumns}
+              colIdx={colIdx}
+              handleCellChange={handleCellChange}
             />
           )}
         </td>
