@@ -1,6 +1,5 @@
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Share2, Download } from 'lucide-react';
-import { type Register } from '../../lib/api'; // Wait, standard API type
 
 interface RegisterHeaderProps {
   register: any;

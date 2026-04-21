@@ -1,7 +1,9 @@
+import { useEffect, useState, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './lib/auth';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { saveToStorage } from './lib/api';
 import LoginPage from './pages/LoginPage';
 import HomePage from './pages/HomePage';
 import RegisterPage from './pages/RegisterPage';
@@ -14,6 +16,19 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
   if (!token) return <Navigate to="/login" replace />;
   return <>{children}</>;
+}
+
+/** Toast notification for save feedback */
+function SaveToast({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return (
+    <div className="save-toast">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+      Data saved successfully
+    </div>
+  );
 }
 
 function AppRoutes() {
@@ -31,12 +46,35 @@ function AppRoutes() {
 }
 
 export default function App() {
+  const [showSaveToast, setShowSaveToast] = useState(false);
+
+  const handleSave = useCallback(() => {
+    const ok = saveToStorage();
+    if (ok) {
+      setShowSaveToast(true);
+      setTimeout(() => setShowSaveToast(false), 2000);
+    }
+  }, []);
+
+  // Ctrl+S / Cmd+S global save handler
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [handleSave]);
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
           <ErrorBoundary>
             <AppRoutes />
+            <SaveToast visible={showSaveToast} />
           </ErrorBoundary>
         </BrowserRouter>
       </AuthProvider>

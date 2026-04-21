@@ -1,3 +1,4 @@
+import React from 'react';
 import { X, FileText, Eye, type LucideIcon } from 'lucide-react';
 import { type Template } from '../../lib/templates';
 
@@ -8,7 +9,7 @@ interface TemplateModalProps {
   subTemplates: Template[];
   creatingTemplate: string | null;
   handleCreate: (tpl: Template) => void;
-  getColTypeIcon: (type: string) => JSX.Element;
+  getColTypeIcon: (type: string) => React.ReactNode;
   ICON_MAP: Record<string, LucideIcon>;
 }
 

@@ -1,5 +1,5 @@
 import { AlertCircle } from 'lucide-react';
-import { type Column } from '../../../lib/api';
+
 
 interface ColumnModalsProps {
   // New Column / Insert Column

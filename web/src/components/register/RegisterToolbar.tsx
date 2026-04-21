@@ -1,5 +1,5 @@
 import { Search, Filter, Plus, Trash2, Hash, FileText, Eye } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import type { Entry, Column } from '../../lib/api';
 
 interface FilterState {

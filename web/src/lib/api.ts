@@ -1,12 +1,46 @@
-// Mock API client for RecordBook Web — exact port from mobile
+// Mock API client for RecordBook Web — localStorage-persisted
 import { TEMPLATES, type Template, type TemplateColumn } from './templates';
 
 const delay = (ms: number) => ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 
-const DB = {
-  businesses: [] as Business[],
-  registers: [] as RegisterDetail[],
-};
+const STORAGE_KEY = 'sjvps_recordbook_db';
+
+// ── Persistence helpers ──────────────────────────────────────────────────────
+function loadDB(): { businesses: Business[]; registers: RegisterDetail[] } {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        businesses: Array.isArray(parsed.businesses) ? parsed.businesses : [],
+        registers: Array.isArray(parsed.registers) ? parsed.registers : [],
+      };
+    }
+  } catch (e) {
+    console.warn('Failed to load DB from localStorage, starting fresh', e);
+  }
+  return { businesses: [], registers: [] };
+}
+
+function persistDB() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));
+  } catch (e) {
+    console.warn('Failed to persist DB to localStorage', e);
+  }
+}
+
+/** Manually trigger a save — called by Ctrl+S handler */
+export function saveToStorage(): boolean {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const DB = loadDB();
 
 // ==================== AUTH ====================
 export interface User {
@@ -51,6 +85,7 @@ export async function createBusiness(name: string): Promise<Business> {
   await delay(0);
   const bus: Business = { id: Date.now(), name, ownerId: 1, createdAt: new Date().toISOString() };
   DB.businesses.push(bus);
+  persistDB();
   return bus;
 }
 
@@ -128,12 +163,14 @@ export async function createRegister(data: {
     newReg.entryCount = 3;
   }
   DB.registers.push(newReg);
+  persistDB();
   return newReg;
 }
 
 export async function deleteRegister(registerId: number): Promise<void> {
   await delay(0);
   DB.registers = DB.registers.filter((r) => r.id !== registerId);
+  persistDB();
 }
 
 export async function renameRegister(registerId: number, newName: string): Promise<RegisterSummary> {
@@ -141,6 +178,7 @@ export async function renameRegister(registerId: number, newName: string): Promi
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   reg.name = newName; reg.updatedAt = new Date().toISOString();
+  persistDB();
   return reg;
 }
 
@@ -157,6 +195,7 @@ export async function duplicateRegister(registerId: number): Promise<RegisterSum
   duplicated.entries = duplicated.entries.map((e: Entry, i: number) => ({ ...e, id: newId + 1000 + i, registerId: newId }));
   duplicated.pages = duplicated.pages.map((p: Page, i: number) => ({ ...p, id: newId + 2000 + i }));
   DB.registers.push(duplicated);
+  persistDB();
   return duplicated;
 }
 
@@ -219,6 +258,7 @@ export const importExcelData = async (businessId: number, name: string, data: Re
   });
 
   reg.entryCount = reg.entries.length;
+  persistDB();
   return reg;
 };
 
@@ -395,6 +435,7 @@ export async function addColumn(registerId: number, data: { name: string; type: 
     position: reg.columns.length, dropdownOptions: data.dropdownOptions, formula: data.formula,
   };
   reg.columns.push(col);
+  persistDB();
   return col;
 }
 
@@ -403,6 +444,7 @@ export async function deleteColumn(registerId: number, columnId: number): Promis
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   reg.columns = reg.columns.filter((c) => c.id !== columnId);
+  persistDB();
 }
 
 export async function renameColumn(registerId: number, columnId: number, newName: string): Promise<Column> {
@@ -412,6 +454,7 @@ export async function renameColumn(registerId: number, columnId: number, newName
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
   col.name = newName;
+  persistDB();
   return col;
 }
 
@@ -422,6 +465,7 @@ export async function updateColumnDropdownOptions(registerId: number, columnId: 
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
   col.dropdownOptions = options;
+  persistDB();
   return col;
 }
 
@@ -442,6 +486,7 @@ export async function duplicateColumn(registerId: number, columnId: number): Pro
     const val = entry.cells?.[columnId.toString()];
     if (val) entry.cells[newCol.id.toString()] = val;
   });
+  persistDB();
   return newCol;
 }
 
@@ -457,6 +502,7 @@ export async function moveColumn(registerId: number, columnId: number, direction
   [reg.columns[idx], reg.columns[targetIdx]] = [reg.columns[targetIdx], reg.columns[idx]];
   // Update positions
   reg.columns.forEach((c, i) => c.position = i);
+  persistDB();
 }
 
 export async function changeColumnType(registerId: number, columnId: number, newType: string): Promise<Column> {
@@ -468,6 +514,7 @@ export async function changeColumnType(registerId: number, columnId: number, new
   col.type = newType;
   if (newType !== 'dropdown') col.dropdownOptions = undefined;
   if (newType !== 'formula') col.formula = undefined;
+  persistDB();
   return col;
 }
 
@@ -481,6 +528,7 @@ export async function clearColumnData(registerId: number, columnId: number): Pro
       delete entry.cells[colIdStr];
     }
   });
+  persistDB();
 }
 
 export async function insertColumn(registerId: number, data: { name: string; type: string; dropdownOptions?: string[]; formula?: string }, position: number): Promise<Column> {
@@ -493,6 +541,7 @@ export async function insertColumn(registerId: number, data: { name: string; typ
   };
   reg.columns.splice(position, 0, col);
   reg.columns.forEach((c, i) => c.position = i);
+  persistDB();
   return col;
 }
 
@@ -503,6 +552,7 @@ export async function freezeColumn(registerId: number, columnId: number, frozen:
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
   (col as Column & { frozen: boolean }).frozen = frozen;
+  persistDB();
   return col;
 }
 
@@ -513,6 +563,7 @@ export async function hideColumn(registerId: number, columnId: number, hidden: b
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
   (col as Column & { hidden: boolean }).hidden = hidden;
+  persistDB();
   return col;
 }
 
@@ -527,6 +578,7 @@ export async function addEntry(registerId: number, cells: Record<string, string>
   };
   reg.entries.push(entry); reg.entryCount = reg.entries.length;
   reg.updatedAt = new Date().toISOString();
+  persistDB();
   return entry;
 }
 
@@ -538,6 +590,7 @@ export async function updateEntry(registerId: number, entryId: number, cells: Re
   if (!entry) throw new Error('Entry not found');
   entry.cells = { ...entry.cells, ...cells };
   reg.updatedAt = new Date().toISOString();
+  persistDB();
   return entry;
 }
 
@@ -547,6 +600,7 @@ export async function deleteEntry(registerId: number, entryId: number): Promise<
   if (!reg) throw new Error('Register not found');
   reg.entries = reg.entries.filter((e) => e.id !== entryId);
   reg.entryCount = reg.entries.length;
+  persistDB();
 }
 
 export async function duplicateEntry(registerId: number, entryId: number): Promise<Entry> {
@@ -560,6 +614,7 @@ export async function duplicateEntry(registerId: number, entryId: number): Promi
     cells: { ...original.cells }, createdAt: new Date().toISOString(), pageIndex: original.pageIndex,
   };
   reg.entries.push(duplicate); reg.entryCount = reg.entries.length;
+  persistDB();
   return duplicate;
 }
 
@@ -569,6 +624,7 @@ export async function bulkDeleteEntries(registerId: number, entryIds: number[]):
   if (!reg) throw new Error('Register not found');
   reg.entries = reg.entries.filter((e) => !entryIds.includes(e.id));
   reg.entryCount = reg.entries.length;
+  persistDB();
 }
 
 export async function addPage(registerId: number, pageName?: string): Promise<Page> {
@@ -578,6 +634,7 @@ export async function addPage(registerId: number, pageName?: string): Promise<Pa
   if (!reg.pages) reg.pages = [{ id: 1, name: 'Page 1', index: 0 }];
   const newPage: Page = { id: Date.now(), name: pageName || `Page ${reg.pages.length + 1}`, index: reg.pages.length };
   reg.pages.push(newPage);
+  persistDB();
   return newPage;
 }
 
@@ -588,6 +645,7 @@ export async function renamePage(registerId: number, pageId: number, newName: st
   const page = reg.pages?.find((p) => p.id === pageId);
   if (!page) throw new Error('Page not found');
   page.name = newName;
+  persistDB();
   return page;
 }
 
@@ -600,6 +658,7 @@ export async function deletePage(registerId: number, pageId: number): Promise<vo
   reg.pages = reg.pages.filter((p) => p.id !== pageId);
   reg.entries = reg.entries.filter((e) => (e.pageIndex || 0) !== pageIndex);
   reg.entryCount = reg.entries.length;
+  persistDB();
 }
 
 export async function generateShareLink(registerId: number): Promise<string> {
@@ -608,6 +667,7 @@ export async function generateShareLink(registerId: number): Promise<string> {
   if (!reg) throw new Error('Register not found');
   const link = `https://rekord.app/share/${registerId}/${Date.now().toString(36)}`;
   reg.shareLink = link;
+  persistDB();
   return link;
 }
 
@@ -620,6 +680,7 @@ export async function addSharedUser(registerId: number, phone: string, permissio
     id: Date.now(), name: `User ${phone.slice(-4)}`, phone, permission, addedAt: new Date().toISOString(),
   };
   reg.sharedWith.push(user);
+  persistDB();
   return user;
 }
 
@@ -628,6 +689,7 @@ export async function removeSharedUser(registerId: number, userId: number): Prom
   const reg = DB.registers.find((r) => r.id === registerId);
   if (!reg) throw new Error('Register not found');
   if (reg.sharedWith) reg.sharedWith = reg.sharedWith.filter((u) => u.id !== userId);
+  persistDB();
 }
 
 export function generateCSV(register: RegisterDetail, pageIndex: number = 0): string {

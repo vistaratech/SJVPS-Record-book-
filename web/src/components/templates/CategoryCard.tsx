@@ -1,4 +1,4 @@
-import { FileText, type LucideIcon } from 'lucide-react';
+import { type LucideIcon } from 'lucide-react';
 
 interface CategoryCardProps {
   cat: {

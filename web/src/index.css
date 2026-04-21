@@ -1907,3 +1907,29 @@ a { text-decoration: none; color: inherit; }
   box-shadow: var(--shadow-button);
   background: var(--navy-dark);
 }
+
+/* ═══════════════════════════════════════════════════════════
+   Save Toast — Ctrl+S feedback
+═══════════════════════════════════════════════════════════ */
+.save-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--brand-green, #4CAF1A);
+  color: #fff;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+  z-index: 99999;
+  animation: toast-slide-in 0.3s ease-out;
+}
+
+@keyframes toast-slide-in {
+  from { transform: translateY(30px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}

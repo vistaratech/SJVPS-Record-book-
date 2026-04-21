@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getRegister, addColumn, deleteColumn, renameColumn, updateColumnDropdownOptions,
@@ -34,7 +34,6 @@ type SortDir = 'asc' | 'desc' | null;
 export default function RegisterPage() {
   const { id } = useParams();
   const registerId = Number(id);
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   // ── State ──
@@ -195,7 +194,7 @@ export default function RegisterPage() {
       setNewColumnModal(false);
       return { prev };
     },
-    onError: (err, newCol, context) => {
+    onError: (_err, _newCol, context) => {
       if (context?.prev) {
         queryClient.setQueryData(['register', registerId], context.prev);
       }
@@ -227,7 +226,7 @@ export default function RegisterPage() {
       setRenameColModal(false);
       return { prev };
     },
-    onError: (err, vars, context) => {
+    onError: (_err, _vars, context) => {
       if (context?.prev) {
         queryClient.setQueryData(['register', registerId], context.prev);
       }
@@ -316,7 +315,7 @@ export default function RegisterPage() {
           c.position >= pos ? { ...c, position: c.position + 1 } : c
         );
         newColumns.push(newCol);
-        newColumns.sort((a, b) => a.position - b.position);
+        newColumns.sort((a: any, b: any) => a.position - b.position);
 
         queryClient.setQueryData(['register', registerId], {
           ...prev,
@@ -327,7 +326,7 @@ export default function RegisterPage() {
       setColMenuId(null);
       return { prev };
     },
-    onError: (err, variables, context) => {
+    onError: (_err, _vars, context) => {
       if (context?.prev) {
         queryClient.setQueryData(['register', registerId], context.prev);
       }
@@ -497,10 +496,7 @@ export default function RegisterPage() {
     }
   };
 
-  const toggleSelectAll = () => {
-    if (selectedRows.size === displayEntries.length) setSelectedRows(new Set());
-    else setSelectedRows(new Set(displayEntries.map((e) => e.id)));
-  };
+
 
   const toggleSelectRow = useCallback((id: number) => {
     setSelectedRows(prev => {
@@ -558,7 +554,7 @@ export default function RegisterPage() {
         setNewColDropdownOpts={setNewColDropdownOpts}
         setNewColFormula={setNewColFormula}
         setNewColumnModal={setNewColumnModal}
-        hiddenColumns={hiddenColumns} setHiddenColumns={setHiddenColumns} registerId={registerId} hideColumn={(r, c, h) => hideColumnMutation.mutate({ colId: c, hidden: h })}
+        hiddenColumns={hiddenColumns} setHiddenColumns={setHiddenColumns} registerId={registerId} hideColumn={hideColumn}
         selectedRows={selectedRows} displayEntries={displayEntries} columns={columns} bulkDeleteMutation={bulkDeleteMutation}
         setRowCountMutation={setRowCountMutation}
       />
@@ -742,7 +738,7 @@ export default function RegisterPage() {
         renamePageModal={renamePageModal} setRenamePageModal={setRenamePageModal}
         renamePageValue={renamePageValue} setRenamePageValue={setRenamePageValue} renamePageId={renamePageId}
         pages={pages} deletePageMutation={deletePageMutation} renamePageMutation={renamePageMutation}
-        calcModal={calcModal} setCalcModal={setCalcModal} calcTypes={calcTypes} setCalcTypes={setCalcTypes} calcColId={calcColId}
+        calcModal={calcModal} setCalcModal={setCalcModal} calcTypes={calcTypes} setCalcTypes={setCalcTypes as any} calcColId={calcColId}
         dateModal={dateModal} setDateModal={setDateModal}
         dateDay={dateDay} setDateDay={setDateDay} dateMonth={dateMonth} setDateMonth={setDateMonth} dateYear={dateYear} setDateYear={setDateYear}
         handleDateSelect={handleDateSelect}

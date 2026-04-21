@@ -8,8 +8,8 @@ import {
 import * as XLSX from 'xlsx';
 import { CATEGORIES, TEMPLATES, type Template } from '../lib/templates';
 import {
-  Search, Plus, MoreVertical, FileText, Pencil, Copy, Trash2, X,
-  Eye, Hash, Calendar, ChevronDown, FlaskConical, Type, Upload, Menu,
+  FileText, Pencil, Copy, Trash2, X,
+  Eye, Hash, Calendar, ChevronDown, FlaskConical, Type,
   Building, GraduationCap, Store, Bus, Warehouse, Package, CalendarIcon, HeartPulse,
   Utensils, Dumbbell, Building2, User, ShieldCheck, Leaf, Plane,
 } from 'lucide-react';

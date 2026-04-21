@@ -1,4 +1,4 @@
-import { Check, X } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { type Entry } from '../../../lib/api';
 
 interface OtherModalsProps {

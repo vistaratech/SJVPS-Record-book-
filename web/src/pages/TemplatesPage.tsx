@@ -4,7 +4,7 @@ import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { listBusinesses, createBusiness, createRegister } from '../lib/api';
 import { CATEGORIES, TEMPLATES, type Template } from '../lib/templates';
 import {
-  ArrowLeft, FileText, Eye, X, Hash, Calendar, ChevronDown, FlaskConical, Type,
+  ArrowLeft, FileText, Hash, Calendar, ChevronDown, FlaskConical, Type,
   Building, GraduationCap, Store, Bus, Warehouse, Package, CalendarIcon, HeartPulse,
   Utensils, Dumbbell, Building2, User, ShieldCheck, Leaf, Plane,
   Phone, Mail, Globe, Star, CheckSquare, Image,

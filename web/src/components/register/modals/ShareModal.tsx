@@ -1,5 +1,4 @@
 import { Link2, Copy, UserPlus, UserX } from 'lucide-react';
-import { type Register } from '../../../lib/api';
 
 interface ShareModalProps {
   shareModal: boolean;

@@ -14,7 +14,7 @@ interface SpreadsheetTextInputProps {
 const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colIdx, handleCellChange }: SpreadsheetTextInputProps) => {
   const initialValue = entry.cells?.[col.id.toString()] || '';
   const [val, setVal] = useState(initialValue);
-  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setVal(initialValue);
@@ -90,19 +90,17 @@ interface SpreadsheetRowProps {
   registerColumns: Column[];
 }
 
-export const SpreadsheetRow = React.memo(function SpreadsheetRow({
-  entry,
-  idx,
-  visibleColumns,
-  isSelected,
-  toggleSelectRow,
-  handleCellChange,
-  openDatePicker,
-  openDropdown,
-  isMenuOpen,
-  toggleMenu,
-  registerColumns,
-}: SpreadsheetRowProps) {
+export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: SpreadsheetRowProps) {
+  const {
+    entry,
+    idx,
+    visibleColumns,
+    handleCellChange,
+    openDatePicker,
+    openDropdown,
+    toggleMenu,
+    registerColumns,
+  } = props;
   return (
     <tr>
       <td className="serial">{idx + 1}</td>
