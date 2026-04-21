@@ -1,46 +1,9 @@
-// Mock API client for RecordBook Web — localStorage-persisted
+// Firestore-backed API client for RecordBook Web
+import { db } from './firebase';
+import {
+  collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, where,
+} from 'firebase/firestore';
 import { TEMPLATES, type Template, type TemplateColumn } from './templates';
-
-const delay = (ms: number) => ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
-
-const STORAGE_KEY = 'sjvps_recordbook_db';
-
-// ── Persistence helpers ──────────────────────────────────────────────────────
-function loadDB(): { businesses: Business[]; registers: RegisterDetail[] } {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return {
-        businesses: Array.isArray(parsed.businesses) ? parsed.businesses : [],
-        registers: Array.isArray(parsed.registers) ? parsed.registers : [],
-      };
-    }
-  } catch (e) {
-    console.warn('Failed to load DB from localStorage, starting fresh', e);
-  }
-  return { businesses: [], registers: [] };
-}
-
-function persistDB() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));
-  } catch (e) {
-    console.warn('Failed to persist DB to localStorage', e);
-  }
-}
-
-/** Manually trigger a save — called by Ctrl+S handler */
-export function saveToStorage(): boolean {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const DB = loadDB();
 
 // ==================== AUTH ====================
 export interface User {
@@ -54,14 +17,12 @@ export interface SendOtpResponse { message: string; devOtp?: string; }
 export interface VerifyOtpResponse { token: string; user: User; }
 
 export async function sendOtp(phone: string): Promise<SendOtpResponse> {
-  await delay(0);
-  void phone; // mock: phone not used in dev mode
+  void phone;
   return { message: 'OTP sent', devOtp: '123456' };
 }
 
 export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpResponse> {
-  await delay(0);
-  void otp; // mock: otp not validated in dev mode
+  void otp;
   return {
     token: 'mock-token',
     user: { id: 1, phone, name: 'Test User', createdAt: new Date().toISOString() },
@@ -69,23 +30,22 @@ export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpRe
 }
 
 export async function getMe(): Promise<User> {
-  await delay(0);
   return { id: 1, phone: '9999999999', name: 'Test User', createdAt: new Date().toISOString() };
 }
 
 // ==================== BUSINESSES ====================
 export interface Business { id: number; name: string; ownerId: number; createdAt: string; }
 
+const businessesCol = () => collection(db, 'businesses');
+
 export async function listBusinesses(): Promise<Business[]> {
-  await delay(0);
-  return DB.businesses;
+  const snap = await getDocs(businessesCol());
+  return snap.docs.map(d => d.data() as Business);
 }
 
 export async function createBusiness(name: string): Promise<Business> {
-  await delay(0);
   const bus: Business = { id: Date.now(), name, ownerId: 1, createdAt: new Date().toISOString() };
-  DB.businesses.push(bus);
-  persistDB();
+  await setDoc(doc(db, 'businesses', bus.id.toString()), bus);
   return bus;
 }
 
@@ -117,21 +77,43 @@ export interface SharedUser {
   id: number; name: string; phone: string; permission: 'view' | 'edit'; addedAt: string;
 }
 
+// ── Firestore helpers ────────────────────────────────────────────────────────
+const registersCol = () => collection(db, 'registers');
+const regDoc = (id: number) => doc(db, 'registers', id.toString());
+
+async function getRegDoc(registerId: number): Promise<RegisterDetail> {
+  const snap = await getDoc(regDoc(registerId));
+  if (!snap.exists()) throw new Error('Register not found');
+  return snap.data() as RegisterDetail;
+}
+
+async function saveRegDoc(reg: RegisterDetail): Promise<void> {
+  await setDoc(regDoc(reg.id), JSON.parse(JSON.stringify(reg)));
+}
+
+// ── Public API ───────────────────────────────────────────────────────────────
+
 export async function listRegisters(businessId: number): Promise<RegisterSummary[]> {
-  await delay(0);
-  return DB.registers.filter((r) => r.businessId === businessId).map((r) => ({
-    id: r.id, businessId: r.businessId, name: r.name, icon: r.icon, iconColor: r.iconColor,
-    category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
-    entryCount: r.entries.length,
-    lastActivity: r.entries.length > 0 ? (r.entries[r.entries.length - 1].cells ? Object.values(r.entries[r.entries.length - 1].cells).filter(Boolean).slice(0, 2).join(', ') : '') : '',
-  }));
+  const q = query(registersCol(), where('businessId', '==', businessId));
+  const snap = await getDocs(q);
+  return snap.docs.map(d => {
+    const r = d.data() as RegisterDetail;
+    return {
+      id: r.id, businessId: r.businessId, name: r.name, icon: r.icon, iconColor: r.iconColor,
+      category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
+      entryCount: (r.entries || []).length,
+      lastActivity: (r.entries || []).length > 0
+        ? (Object.values((r.entries || [])[r.entries.length - 1]?.cells || {}).filter(Boolean).slice(0, 2).join(', '))
+        : '',
+    };
+  });
 }
 
 export async function getRegister(registerId: number): Promise<RegisterDetail> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   if (!reg.pages || reg.pages.length === 0) reg.pages = [{ id: 1, name: 'Page 1', index: 0 }];
+  if (!reg.entries) reg.entries = [];
+  if (!reg.columns) reg.columns = [];
   return reg;
 }
 
@@ -140,52 +122,45 @@ export async function createRegister(data: {
   category?: string; template?: string;
   columns?: Array<{ name: string; type: string; dropdownOptions?: string[]; formula?: string }>;
 }): Promise<RegisterSummary> {
-  await delay(0);
+  const newId = Date.now();
   const newReg: RegisterDetail = {
-    id: Date.now(), businessId: data.businessId, name: data.name,
+    id: newId, businessId: data.businessId, name: data.name,
     icon: data.icon || 'file-text', iconColor: data.iconColor,
     category: data.category || 'general', template: data.template || data.name,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), entryCount: 0,
     columns: (data.columns || []).map((c, i) => ({
-      id: Date.now() + i, registerId: Date.now(), name: c.name, type: c.type,
+      id: newId + i + 1, registerId: newId, name: c.name, type: c.type,
       position: i, dropdownOptions: c.dropdownOptions, formula: c.formula,
     })),
     entries: [], pages: [{ id: 1, name: 'Page 1', index: 0 }], sharedWith: [],
   };
-  newReg.columns.forEach((c) => c.registerId = newReg.id);
   if (newReg.columns.length > 0) {
     for (let i = 0; i < 3; i++) {
       newReg.entries.push({
-        id: newReg.id + 5000 + i, registerId: newReg.id, rowNumber: i + 1,
+        id: newId + 5000 + i, registerId: newId, rowNumber: i + 1,
         cells: {}, createdAt: new Date().toISOString(), pageIndex: 0,
       });
     }
     newReg.entryCount = 3;
   }
-  DB.registers.push(newReg);
-  persistDB();
+  await saveRegDoc(newReg);
   return newReg;
 }
 
 export async function deleteRegister(registerId: number): Promise<void> {
-  await delay(0);
-  DB.registers = DB.registers.filter((r) => r.id !== registerId);
-  persistDB();
+  await deleteDoc(regDoc(registerId));
 }
 
 export async function renameRegister(registerId: number, newName: string): Promise<RegisterSummary> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
-  reg.name = newName; reg.updatedAt = new Date().toISOString();
-  persistDB();
+  const reg = await getRegDoc(registerId);
+  reg.name = newName;
+  reg.updatedAt = new Date().toISOString();
+  await saveRegDoc(reg);
   return reg;
 }
 
 export async function duplicateRegister(registerId: number): Promise<RegisterSummary> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const newId = Date.now();
   const duplicated: RegisterDetail = {
     ...JSON.parse(JSON.stringify(reg)), id: newId, name: `${reg.name} (Copy)`,
@@ -194,13 +169,11 @@ export async function duplicateRegister(registerId: number): Promise<RegisterSum
   duplicated.columns = duplicated.columns.map((c: Column, i: number) => ({ ...c, id: newId + i + 1, registerId: newId }));
   duplicated.entries = duplicated.entries.map((e: Entry, i: number) => ({ ...e, id: newId + 1000 + i, registerId: newId }));
   duplicated.pages = duplicated.pages.map((p: Page, i: number) => ({ ...p, id: newId + 2000 + i }));
-  DB.registers.push(duplicated);
-  persistDB();
+  await saveRegDoc(duplicated);
   return duplicated;
 }
 
 export const importExcelData = async (businessId: number, name: string, data: Record<string, string | number | boolean | null>[]): Promise<RegisterSummary> => {
-  await delay(0);
   if (!data || data.length === 0) throw new Error("No data found in the spreadsheet");
 
   const headers = Object.keys(data[0]);
@@ -227,15 +200,10 @@ export const importExcelData = async (businessId: number, name: string, data: Re
     };
   });
 
-  const createdReg = await createRegister({
-    businessId,
-    name: name,
-    columns
-  });
+  const createdReg = await createRegister({ businessId, name, columns });
 
-  const reg = DB.registers.find(r => r.id === createdReg.id);
-  if (!reg) throw new Error("Failed to initialize register");
-
+  // Re-fetch the full register to populate entries
+  const reg = await getRegDoc(createdReg.id);
   reg.entries = [];
 
   data.forEach((row, rowIndex) => {
@@ -258,20 +226,15 @@ export const importExcelData = async (businessId: number, name: string, data: Re
   });
 
   reg.entryCount = reg.entries.length;
-  persistDB();
+  await saveRegDoc(reg);
   return reg;
 };
 
 // ─── Formula Engine ──────────────────────────────────────────────────────────
 // Supports: {Column Name} references, +  -  *  /  ()  ^  %  Math functions
-// Handles: spaces in column names, case-insensitive match, chained formula
-//          columns (formula-in-formula), guard against division by zero
 
 function parseAndEval(expr: string): number {
-  // Trim whitespace
   expr = expr.trim();
-
-  // ── Recursive descent parser ──────────────────────────────────────────
   let pos = 0;
 
   function peek(): string { return expr[pos] || ''; }
@@ -300,7 +263,7 @@ function parseAndEval(expr: string): number {
       const op = consume();
       skipWS();
       const right = parsePow();
-      if (op === '/' && right === 0) return NaN; // guard div-by-zero
+      if (op === '/' && right === 0) return NaN;
       left = op === '*' ? left * right : left / right;
       skipWS();
     }
@@ -332,7 +295,6 @@ function parseAndEval(expr: string): number {
     return parseFloat(num) || 0;
   }
 
-  // Named math functions
   const MATH_FNS: Record<string, (a: number) => number> = {
     abs: Math.abs, sqrt: Math.sqrt, ceil: Math.ceil, floor: Math.floor,
     round: Math.round, log: Math.log, log10: Math.log10,
@@ -341,56 +303,43 @@ function parseAndEval(expr: string): number {
 
   function parsePrimary(): number {
     skipWS();
-    // Parenthesised sub-expression
     if (peek() === '(') {
-      consume(); // '('
+      consume();
       const val = parseExpr();
       skipWS();
-      if (peek() === ')') consume(); // ')'
+      if (peek() === ')') consume();
       return val;
     }
-    // Named math functions: abs(…), sqrt(…) …
     if (/[a-zA-Z]/.test(peek())) {
       let name = '';
       while (pos < expr.length && /[a-zA-Z0-9_]/.test(expr[pos])) { name += consume(); }
       skipWS();
       if (peek() === '(') {
-        consume(); // '('
+        consume();
         const arg = parseExpr();
         skipWS();
-        if (peek() === ')') consume(); // ')'
+        if (peek() === ')') consume();
         const fn = MATH_FNS[name.toLowerCase()];
         if (fn) return fn(arg);
         return 0;
       }
       return 0;
     }
-    // Plain number
     return parseNumber();
   }
 
-  const result = parseExpr();
-  return result;
+  return parseExpr();
 }
 
 export function evaluateFormula(formula: string, entry: Entry, columns: Column[]): string {
   if (!formula || formula.trim() === '') return '';
   try {
-    // ── Step 1: Replace {Column Name} tokens with numeric values ──────────
-    // Sort by name length descending so longer names are replaced first
-    // (avoids "{Full Marks}" being partially matched by "{Marks}")
     const sorted = [...columns].sort((a, b) => b.name.length - a.name.length);
-
     let expression = formula;
     for (const col of sorted) {
-      // Escape any regex special chars in the column name
       const escaped = col.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp('\\{' + escaped + '\\}', 'gi'); // case-insensitive
-
-      // Get raw cell value
+      const regex = new RegExp('\\{' + escaped + '\\}', 'gi');
       const rawVal = entry.cells?.[col.id.toString()] ?? '';
-
-      // If the referenced column is itself a formula, evaluate it recursively
       let numStr: string;
       if (col.type === 'formula' && col.formula) {
         const nested = evaluateFormula(col.formula, entry, columns);
@@ -399,22 +348,13 @@ export function evaluateFormula(formula: string, entry: Entry, columns: Column[]
         const parsed = parseFloat(rawVal);
         numStr = isNaN(parsed) ? '0' : parsed.toString();
       }
-
       expression = expression.replace(regex, numStr);
     }
-
-    // ── Step 2: Guard — any remaining { } means an unresolved reference ───
-    // Replace them with 0 instead of silently dropping them
     expression = expression.replace(/\{[^}]*\}/g, '0');
-
-    // ── Step 3: Evaluate the numeric expression ───────────────────────────
     expression = expression.trim();
     if (expression === '') return '';
-
     const result = parseAndEval(expression);
-
     if (typeof result === 'number' && !isNaN(result) && isFinite(result)) {
-      // Show up to 2 decimal places, strip trailing zeros
       if (Number.isInteger(result)) return result.toString();
       const fixed = parseFloat(result.toFixed(2));
       return fixed.toString();
@@ -426,53 +366,45 @@ export function evaluateFormula(formula: string, entry: Entry, columns: Column[]
 }
 
 
+// ─── Column Operations ──────────────────────────────────────────────────────
+
 export async function addColumn(registerId: number, data: { name: string; type: string; dropdownOptions?: string[]; formula?: string }): Promise<Column> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const col: Column = {
     id: Date.now(), registerId, name: data.name, type: data.type,
     position: reg.columns.length, dropdownOptions: data.dropdownOptions, formula: data.formula,
   };
   reg.columns.push(col);
-  persistDB();
+  await saveRegDoc(reg);
   return col;
 }
 
 export async function deleteColumn(registerId: number, columnId: number): Promise<void> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   reg.columns = reg.columns.filter((c) => c.id !== columnId);
-  persistDB();
+  await saveRegDoc(reg);
 }
 
 export async function renameColumn(registerId: number, columnId: number, newName: string): Promise<Column> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
   col.name = newName;
-  persistDB();
+  await saveRegDoc(reg);
   return col;
 }
 
 export async function updateColumnDropdownOptions(registerId: number, columnId: number, options: string[]): Promise<Column> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
   col.dropdownOptions = options;
-  persistDB();
+  await saveRegDoc(reg);
   return col;
 }
 
 export async function duplicateColumn(registerId: number, columnId: number): Promise<Column> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const original = reg.columns.find((c) => c.id === columnId);
   if (!original) throw new Error('Column not found');
   const newCol: Column = {
@@ -481,215 +413,193 @@ export async function duplicateColumn(registerId: number, columnId: number): Pro
     formula: original.formula,
   };
   reg.columns.push(newCol);
-  // Copy cell data from original column to new column
   reg.entries.forEach((entry) => {
     const val = entry.cells?.[columnId.toString()];
     if (val) entry.cells[newCol.id.toString()] = val;
   });
-  persistDB();
+  await saveRegDoc(reg);
   return newCol;
 }
 
 export async function moveColumn(registerId: number, columnId: number, direction: 'left' | 'right'): Promise<void> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const idx = reg.columns.findIndex((c) => c.id === columnId);
   if (idx === -1) throw new Error('Column not found');
   const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
   if (targetIdx < 0 || targetIdx >= reg.columns.length) return;
-  // Swap
   [reg.columns[idx], reg.columns[targetIdx]] = [reg.columns[targetIdx], reg.columns[idx]];
-  // Update positions
   reg.columns.forEach((c, i) => c.position = i);
-  persistDB();
+  await saveRegDoc(reg);
 }
 
 export async function changeColumnType(registerId: number, columnId: number, newType: string): Promise<Column> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
   col.type = newType;
   if (newType !== 'dropdown') col.dropdownOptions = undefined;
   if (newType !== 'formula') col.formula = undefined;
-  persistDB();
+  await saveRegDoc(reg);
   return col;
 }
 
 export async function clearColumnData(registerId: number, columnId: number): Promise<void> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const colIdStr = columnId.toString();
   reg.entries.forEach((entry) => {
     if (entry.cells && entry.cells[colIdStr] !== undefined) {
       delete entry.cells[colIdStr];
     }
   });
-  persistDB();
+  await saveRegDoc(reg);
 }
 
 export async function insertColumn(registerId: number, data: { name: string; type: string; dropdownOptions?: string[]; formula?: string }, position: number): Promise<Column> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const col: Column = {
     id: Date.now(), registerId, name: data.name, type: data.type,
     position, dropdownOptions: data.dropdownOptions, formula: data.formula,
   };
   reg.columns.splice(position, 0, col);
   reg.columns.forEach((c, i) => c.position = i);
-  persistDB();
+  await saveRegDoc(reg);
   return col;
 }
 
 export async function freezeColumn(registerId: number, columnId: number, frozen: boolean): Promise<Column> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
   (col as Column & { frozen: boolean }).frozen = frozen;
-  persistDB();
+  await saveRegDoc(reg);
   return col;
 }
 
 export async function hideColumn(registerId: number, columnId: number, hidden: boolean): Promise<Column> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const col = reg.columns.find((c) => c.id === columnId);
   if (!col) throw new Error('Column not found');
   (col as Column & { hidden: boolean }).hidden = hidden;
-  persistDB();
+  await saveRegDoc(reg);
   return col;
 }
 
+// ─── Entry Operations ────────────────────────────────────────────────────────
+
 export async function addEntry(registerId: number, cells: Record<string, string> = {}, pageIndex: number = 0): Promise<Entry> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const pageEntries = reg.entries.filter((e) => (e.pageIndex || 0) === pageIndex);
   const entry: Entry = {
     id: Date.now(), registerId, rowNumber: pageEntries.length + 1,
     cells, createdAt: new Date().toISOString(), pageIndex,
   };
-  reg.entries.push(entry); reg.entryCount = reg.entries.length;
+  reg.entries.push(entry);
+  reg.entryCount = reg.entries.length;
   reg.updatedAt = new Date().toISOString();
-  persistDB();
+  await saveRegDoc(reg);
   return entry;
 }
 
 export async function updateEntry(registerId: number, entryId: number, cells: Record<string, string>): Promise<Entry> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const entry = reg.entries.find((e) => e.id === entryId);
   if (!entry) throw new Error('Entry not found');
   entry.cells = { ...entry.cells, ...cells };
   reg.updatedAt = new Date().toISOString();
-  persistDB();
+  await saveRegDoc(reg);
   return entry;
 }
 
 export async function deleteEntry(registerId: number, entryId: number): Promise<void> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   reg.entries = reg.entries.filter((e) => e.id !== entryId);
   reg.entryCount = reg.entries.length;
-  persistDB();
+  await saveRegDoc(reg);
 }
 
 export async function duplicateEntry(registerId: number, entryId: number): Promise<Entry> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const original = reg.entries.find((e) => e.id === entryId);
   if (!original) throw new Error('Entry not found');
   const duplicate: Entry = {
     id: Date.now(), registerId, rowNumber: reg.entries.length + 1,
     cells: { ...original.cells }, createdAt: new Date().toISOString(), pageIndex: original.pageIndex,
   };
-  reg.entries.push(duplicate); reg.entryCount = reg.entries.length;
-  persistDB();
+  reg.entries.push(duplicate);
+  reg.entryCount = reg.entries.length;
+  await saveRegDoc(reg);
   return duplicate;
 }
 
 export async function bulkDeleteEntries(registerId: number, entryIds: number[]): Promise<void> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   reg.entries = reg.entries.filter((e) => !entryIds.includes(e.id));
   reg.entryCount = reg.entries.length;
-  persistDB();
+  await saveRegDoc(reg);
 }
 
+// ─── Page Operations ─────────────────────────────────────────────────────────
+
 export async function addPage(registerId: number, pageName?: string): Promise<Page> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   if (!reg.pages) reg.pages = [{ id: 1, name: 'Page 1', index: 0 }];
   const newPage: Page = { id: Date.now(), name: pageName || `Page ${reg.pages.length + 1}`, index: reg.pages.length };
   reg.pages.push(newPage);
-  persistDB();
+  await saveRegDoc(reg);
   return newPage;
 }
 
 export async function renamePage(registerId: number, pageId: number, newName: string): Promise<Page> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const page = reg.pages?.find((p) => p.id === pageId);
   if (!page) throw new Error('Page not found');
   page.name = newName;
-  persistDB();
+  await saveRegDoc(reg);
   return page;
 }
 
 export async function deletePage(registerId: number, pageId: number): Promise<void> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   if (!reg.pages || reg.pages.length <= 1) throw new Error('Cannot delete the only page');
   const pageIndex = reg.pages.findIndex((p) => p.id === pageId);
   reg.pages = reg.pages.filter((p) => p.id !== pageId);
   reg.entries = reg.entries.filter((e) => (e.pageIndex || 0) !== pageIndex);
   reg.entryCount = reg.entries.length;
-  persistDB();
+  await saveRegDoc(reg);
 }
 
+// ─── Sharing ─────────────────────────────────────────────────────────────────
+
 export async function generateShareLink(registerId: number): Promise<string> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   const link = `https://rekord.app/share/${registerId}/${Date.now().toString(36)}`;
   reg.shareLink = link;
-  persistDB();
+  await saveRegDoc(reg);
   return link;
 }
 
 export async function addSharedUser(registerId: number, phone: string, permission: 'view' | 'edit'): Promise<SharedUser> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   if (!reg.sharedWith) reg.sharedWith = [];
   const user: SharedUser = {
     id: Date.now(), name: `User ${phone.slice(-4)}`, phone, permission, addedAt: new Date().toISOString(),
   };
   reg.sharedWith.push(user);
-  persistDB();
+  await saveRegDoc(reg);
   return user;
 }
 
 export async function removeSharedUser(registerId: number, userId: number): Promise<void> {
-  await delay(0);
-  const reg = DB.registers.find((r) => r.id === registerId);
-  if (!reg) throw new Error('Register not found');
+  const reg = await getRegDoc(registerId);
   if (reg.sharedWith) reg.sharedWith = reg.sharedWith.filter((u) => u.id !== userId);
-  persistDB();
+  await saveRegDoc(reg);
+}
+
+// ─── Utilities (pure, no DB) ─────────────────────────────────────────────────
+
+/** Manually trigger a save — kept for Ctrl+S compat (now a no-op since data is always in Firestore) */
+export function saveToStorage(): boolean {
+  return true;
 }
 
 export function generateCSV(register: RegisterDetail, pageIndex: number = 0): string {
