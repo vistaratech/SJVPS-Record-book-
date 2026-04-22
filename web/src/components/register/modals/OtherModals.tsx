@@ -141,7 +141,7 @@ export function OtherModals(props: OtherModalsProps) {
                     key={idx}
                     className={`dropdown-option ${isSelected ? 'selected' : ''}`}
                     onClick={() => {
-                      if (dropdownEntryId && dropdownColumnId) handleCellChange(dropdownEntryId, dropdownColumnId.toString(), opt);
+                      if (dropdownEntryId != null && dropdownColumnId != null) handleCellChange(dropdownEntryId, dropdownColumnId.toString(), opt);
                       setDropdownModal(false);
                     }}
                   >
@@ -152,7 +152,7 @@ export function OtherModals(props: OtherModalsProps) {
               })}
             </div>
             <button className="modal-cancel-btn dropdown-clear-btn" onClick={() => {
-              if (dropdownEntryId && dropdownColumnId) handleCellChange(dropdownEntryId, dropdownColumnId.toString(), '');
+              if (dropdownEntryId != null && dropdownColumnId != null) handleCellChange(dropdownEntryId, dropdownColumnId.toString(), '');
               setDropdownModal(false);
             }}>Clear Selection</button>
           </div>

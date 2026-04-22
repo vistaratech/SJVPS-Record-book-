@@ -1,4 +1,4 @@
-import { Plus, Upload, FileText } from 'lucide-react';
+import { Plus, Upload, FileText, FolderOpen } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { RegisterSummary } from '../../lib/api';
 
@@ -6,9 +6,10 @@ interface DashboardContentProps {
   filtered?: RegisterSummary[];
   excelMutation: any; // Type accurately if possible, or use any
   handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onInputFolder?: () => void;
 }
 
-export function DashboardContent({ filtered, excelMutation, handleFileUpload }: DashboardContentProps) {
+export function DashboardContent({ filtered, excelMutation, handleFileUpload, onInputFolder }: DashboardContentProps) {
   const navigate = useNavigate();
 
   if (!filtered || filtered.length === 0) {
@@ -22,10 +23,13 @@ export function DashboardContent({ filtered, excelMutation, handleFileUpload }: 
             <button className="empty-btn" onClick={() => navigate('/templates')}>
               <Plus size={16} />Add New Register
             </button>
-            <label htmlFor="excel-upload-empty" className="empty-btn empty-btn-secondary">
+            <label htmlFor="excel-upload-empty" className="empty-btn empty-btn-secondary" style={{ marginLeft: 8 }}>
               <Upload size={16} />{excelMutation.isPending ? 'Importing...' : 'Import Excel'}
             </label>
             <input id="excel-upload-empty" type="file" accept=".xlsx, .xls, .csv" className="hidden-input" title="Upload Excel File" aria-label="Upload Excel File" onChange={handleFileUpload} />
+            <div className="empty-btn empty-btn-secondary" style={{ marginLeft: 8, cursor: 'pointer' }} onClick={onInputFolder}>
+              <FolderOpen size={16} />Import Folder
+            </div>
           </div>
         </div>
       </div>
@@ -56,14 +60,6 @@ export function DashboardContent({ filtered, excelMutation, handleFileUpload }: 
             <div className="category-name">Add New</div>
             <div className="category-count">Create from template</div>
           </div>
-          <label htmlFor="excel-upload" className={`category-card category-card--dashed ${excelMutation.isPending ? 'uploading' : ''}`}>
-            <div className="category-icon category-icon--muted">
-              <Upload size={24} />
-            </div>
-            <div className="category-name">{excelMutation.isPending ? 'Importing...' : 'Import Excel'}</div>
-            <div className="category-count">Upload .xlsx or .csv</div>
-            <input id="excel-upload" type="file" accept=".xlsx, .xls, .csv" className="hidden-input" title="Upload Excel File" aria-label="Upload Excel File" onChange={handleFileUpload} disabled={excelMutation.isPending} />
-          </label>
         </div>
       </div>
     </div>

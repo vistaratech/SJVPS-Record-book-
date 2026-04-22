@@ -1,10 +1,11 @@
-import { Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, SortAsc, Check, SortDesc, Pencil, ArrowLeftRight, Copy, Plus, ArrowRight, ChevronsLeftRight, Pin, EyeOff, Eraser, Trash2 } from 'lucide-react';
+import { Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, SortAsc, Check, SortDesc, Pencil, ArrowLeftRight, Copy, ArrowRight, ChevronsLeftRight, Pin, EyeOff, Eraser, Trash2, FileText, FileSpreadsheet, Share2, ArrowLeft } from 'lucide-react';
 import { type Column } from '../../../lib/api';
 
 interface RegisterContextMenusProps {
   // Column Menu
   colMenuId: number | null;
   setColMenuId: (id: number | null) => void;
+  setActiveModalColId: (id: number | null) => void;
   columns: Column[];
   sortCol: number | null;
   sortDir: 'asc' | 'desc' | null;
@@ -38,17 +39,21 @@ interface RegisterContextMenusProps {
   setRowMenuId: (id: number | null) => void;
   duplicateEntryMutation: any;
   deleteEntryMutation: any;
+  handleRowDownloadPDF: (entryId: number) => void;
+  handleRowDownloadExcel: (entryId: number) => void;
+  handleRowShareText: (entryId: number) => void;
 }
 
 export function RegisterContextMenus(props: RegisterContextMenusProps) {
   const {
-    colMenuId, setColMenuId, columns, sortCol, sortDir, setSortCol, setSortDir,
+    colMenuId, setColMenuId, setActiveModalColId, columns, sortCol, sortDir, setSortCol, setSortDir,
     setRenameColValue, setRenameColModal, setChangeTypeValue, setChangeTypeModal,
     setDropdownConfigOptions, setDropdownConfigModal, duplicateColumnMutation,
     setNewColName, setNewColType, setNewColDropdownOpts, setNewColFormula, setInsertColModal,
     moveColumnMutation, frozenColumns, setFrozenColumns, freezeColumn, registerId,
     hiddenColumns, setHiddenColumns, hideColumn, clearColumnDataMutation, deleteColumnMutation,
-    rowMenuId, setRowMenuId, duplicateEntryMutation, deleteEntryMutation
+    rowMenuId, setRowMenuId, duplicateEntryMutation, deleteEntryMutation,
+    handleRowDownloadPDF, handleRowDownloadExcel, handleRowShareText
   } = props;
 
   return (
@@ -87,12 +92,14 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
             <div className="context-section-label">Edit</div>
             <button className="context-item" onClick={() => {
               setRenameColValue(columns.find((c) => c.id === colMenuId)?.name || '');
+              setActiveModalColId(colMenuId);
               setRenameColModal(true); setColMenuId(null);
             }}>
               <Pencil size={16} /> Rename Column
             </button>
             <button className="context-item" onClick={() => {
               setChangeTypeValue(columns.find((c) => c.id === colMenuId)?.type || 'text');
+              setActiveModalColId(colMenuId);
               setChangeTypeModal(true); setColMenuId(null);
             }}>
               <ArrowLeftRight size={16} /> Change Column Type
@@ -101,6 +108,7 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
               <button className="context-item" onClick={() => {
                 const col = columns.find((c) => c.id === colMenuId);
                 setDropdownConfigOptions(col?.dropdownOptions?.join(', ') || '');
+                setActiveModalColId(colMenuId);
                 setDropdownConfigModal(true); setColMenuId(null);
               }}>
                 <ChevronDown size={16} /> Edit Dropdown Options
@@ -114,12 +122,14 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
             </button>
             <button className="context-item" onClick={() => {
               setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
+              setActiveModalColId(colMenuId);
               setInsertColModal('left'); setColMenuId(null);
             }}>
-              <Plus size={16} /> Insert Column Left
+              <ArrowLeft size={16} /> Insert Column Left
             </button>
             <button className="context-item" onClick={() => {
               setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
+              setActiveModalColId(colMenuId);
               setInsertColModal('right'); setColMenuId(null);
             }}>
               <ArrowRight size={16} /> Insert Column Right
@@ -175,11 +185,39 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
         <div className="modal-overlay" onClick={() => setRowMenuId(null)}>
           <div className="context-menu" onClick={(e) => e.stopPropagation()}>
             <div className="context-title">Row Actions</div>
-            <button className="context-item" onClick={() => duplicateEntryMutation.mutate(rowMenuId)}>
-              <Copy size={16} /> Duplicate Row
+
+            <button className="context-item" onClick={() => { handleRowDownloadPDF(rowMenuId); setRowMenuId(null); }}>
+              <FileText size={16} />
+              <div className="context-item-info">
+                <span>Download as PDF</span>
+                <span className="context-item-desc">All columns included</span>
+              </div>
             </button>
+            <button className="context-item" onClick={() => { handleRowDownloadExcel(rowMenuId); setRowMenuId(null); }}>
+              <FileSpreadsheet size={16} />
+              <div className="context-item-info">
+                <span>Download as Excel</span>
+                <span className="context-item-desc">All columns included</span>
+              </div>
+            </button>
+            <button className="context-item" onClick={() => { handleRowShareText(rowMenuId); setRowMenuId(null); }}>
+              <Share2 size={16} />
+              <div className="context-item-info">
+                <span>Share as Text</span>
+                <span className="context-item-desc">All columns included</span>
+              </div>
+            </button>
+
+            <div className="context-divider" />
+
+            <button className="context-item" onClick={() => duplicateEntryMutation.mutate(rowMenuId)}>
+              <Copy size={16} /> Duplicate Record
+            </button>
+
+            <div className="context-divider" />
+
             <button className="context-item danger" onClick={() => { if (confirm('Delete row?')) deleteEntryMutation.mutate(rowMenuId); }}>
-              <Trash2 size={16} /> Delete Row
+              <Trash2 size={16} /> Delete
             </button>
           </div>
         </div>

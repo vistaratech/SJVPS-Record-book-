@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { listBusinesses, createBusiness, createRegister } from '../lib/api';
+import { listBusinesses, createBusiness, createRegister, type RegisterSummary } from '../lib/api';
 import { CATEGORIES, TEMPLATES, type Template } from '../lib/templates';
 import {
   ArrowLeft, FileText, Hash, Calendar, ChevronDown, FlaskConical, Type,
@@ -56,6 +56,7 @@ export default function TemplatesPage() {
   const createMutation = useMutation({
     mutationFn: (tpl: Template) => {
       const cat = CATEGORIES.find((c) => c.id === selectedCategory);
+      // Capture businessId at call time so onSuccess closure is never stale
       return createRegister({
         businessId: businessId!, name: tpl.name, icon: tpl.icon,
         iconColor: cat?.color, category: cat?.name || 'general', template: tpl.name,
@@ -63,17 +64,36 @@ export default function TemplatesPage() {
       });
     },
     onSuccess: (newReg) => {
-      queryClient.invalidateQueries({ queryKey: ['registers', businessId] });
+      // Use newReg.businessId (always defined) instead of the outer businessId closure
+      // which can be undefined if the businesses query hasn't resolved yet
+      const bId = newReg.businessId;
+      // Directly patch the register list cache — bypasses staleTime entirely
+      queryClient.setQueryData(['registers', bId], (old: RegisterSummary[] | undefined) => {
+        const safeOld = old || [];
+        if (safeOld.find((r) => r.id === newReg.id)) return safeOld;
+        return [...safeOld, {
+          id: newReg.id, businessId: newReg.businessId, name: newReg.name,
+          icon: newReg.icon, iconColor: newReg.iconColor,
+          category: newReg.category, template: newReg.template,
+          createdAt: newReg.createdAt, updatedAt: newReg.updatedAt,
+          entryCount: newReg.entryCount ?? 0, lastActivity: '',
+        }];
+      });
+      // Background refetch to sync server state (won't block navigation)
+      queryClient.invalidateQueries({ queryKey: ['registers', bId] });
       navigate(`/register/${newReg.id}`);
     },
-    onError: () => setCreatingTemplate(null),
+    onError: (err: any) => {
+      alert(err.message || 'Error creating register');
+      setCreatingTemplate(null);
+    },
   });
 
   const categoryData = selectedCategory ? CATEGORIES.find((c) => c.id === selectedCategory) : null;
   const subTemplates = selectedCategory ? TEMPLATES[selectedCategory] || [] : [];
 
   return (
-    <div className="templates-page-root">
+    <div className="templates-page-root content-area templates-page-scroll">
       {/* Header */}
       <div className="register-header">
         <button className="register-header-btn" onClick={() => navigate(-1)}>
@@ -105,7 +125,11 @@ export default function TemplatesPage() {
         selectedCategory={selectedCategory} setSelectedCategory={setSelectedCategory}
         categoryData={categoryData} subTemplates={subTemplates}
         creatingTemplate={creatingTemplate}
-        handleCreate={(tpl) => { setCreatingTemplate(tpl.name); createMutation.mutate(tpl); }}
+        handleCreate={(tpl) => { 
+          if (!businessId) return; // Prevent creation if businessId isn't loaded yet
+          setCreatingTemplate(tpl.name); 
+          createMutation.mutate(tpl); 
+        }}
         getColTypeIcon={getColTypeIcon} ICON_MAP={ICON_MAP}
       />
     </div>

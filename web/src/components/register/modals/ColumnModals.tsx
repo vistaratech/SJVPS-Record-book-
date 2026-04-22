@@ -1,5 +1,56 @@
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, X, Plus } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 
+function OptionsEditor({ value, onChange }: { value: string, onChange: (v: string) => void }) {
+  const [opts, setOpts] = useState<string[]>([]);
+  
+  useEffect(() => {
+    setOpts(value ? value.split(',').map(s => s.trim()).filter(Boolean) : []);
+  }, [value]);
+
+  const updateOpts = (newOpts: string[]) => {
+    setOpts(newOpts);
+    onChange(newOpts.join(','));
+  };
+
+  return (
+    <div className="options-editor-container">
+      {opts.map((opt, i) => (
+        <div key={i} className="options-editor-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
+          <input 
+            className="modal-input" 
+            style={{ marginBottom: 0 }} 
+            value={opt} 
+            onChange={(e) => {
+              const newOpts = [...opts];
+              newOpts[i] = e.target.value;
+              updateOpts(newOpts);
+            }} 
+            placeholder="Option name" 
+          />
+          <button 
+            type="button" 
+            onClick={() => {
+              const newOpts = [...opts];
+              newOpts.splice(i, 1);
+              updateOpts(newOpts);
+            }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: '4px' }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      ))}
+      <button 
+        type="button" 
+        onClick={() => updateOpts([...opts, `Option ${opts.length + 1}`])}
+        style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: '1px dashed var(--border)', borderRadius: '6px', padding: '8px 12px', cursor: 'pointer', color: 'var(--navy)', width: '100%', justifyContent: 'center', fontSize: '13px', fontWeight: 500 }}
+      >
+        <Plus size={14} /> Add Option
+      </button>
+    </div>
+  );
+}
 
 interface ColumnModalsProps {
   // New Column / Insert Column
@@ -73,8 +124,8 @@ export function ColumnModals(props: ColumnModalsProps) {
             </div>
             {newColType === 'dropdown' && (
               <>
-                <label className="modal-label">Options (comma-separated)</label>
-                <input className="modal-input" value={newColDropdownOpts} onChange={(e) => setNewColDropdownOpts(e.target.value)} placeholder="e.g. Active, Inactive, Pending" />
+                <label className="modal-label" style={{ marginTop: '12px', display: 'block', marginBottom: '8px' }}>Options</label>
+                <OptionsEditor value={newColDropdownOpts} onChange={setNewColDropdownOpts} />
               </>
             )}
             {newColType === 'formula' && (
@@ -116,8 +167,8 @@ export function ColumnModals(props: ColumnModalsProps) {
         <div className="modal-overlay" onClick={() => setDropdownConfigModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h3 className="modal-title">Edit Dropdown Options</h3>
-            <label className="modal-label">Options (comma-separated)</label>
-            <input className="modal-input" value={dropdownConfigOptions} onChange={(e) => setDropdownConfigOptions(e.target.value)} placeholder="e.g. Active, Inactive, Pending" autoFocus />
+            <label className="modal-label" style={{ marginBottom: '8px', display: 'block' }}>Options</label>
+            <OptionsEditor value={dropdownConfigOptions} onChange={setDropdownConfigOptions} />
             <div className="modal-actions">
               <button className="modal-cancel-btn" onClick={() => setDropdownConfigModal(false)}>Cancel</button>
               <button className="modal-confirm-btn" onClick={() => updateDropdownMutation.mutate()}>Save</button>
@@ -164,14 +215,18 @@ export function ColumnModals(props: ColumnModalsProps) {
             </div>
             {newColType === 'dropdown' && (
               <>
-                <label className="modal-label">Options (comma-separated)</label>
-                <input className="modal-input" value={newColDropdownOpts} onChange={(e) => setNewColDropdownOpts(e.target.value)} placeholder="e.g. Active, Inactive, Pending" />
+                <label className="modal-label" style={{ marginTop: '12px', display: 'block', marginBottom: '8px' }}>Options</label>
+                <OptionsEditor value={newColDropdownOpts} onChange={setNewColDropdownOpts} />
               </>
             )}
             {newColType === 'formula' && (
               <>
                 <label className="modal-label">Formula</label>
                 <input className="modal-input" value={newColFormula} onChange={(e) => setNewColFormula(e.target.value)} placeholder="e.g. {Marks}/{Full Marks}*100" />
+                <div className="formula-hint">
+                  <AlertCircle size={14} color="var(--muted)" />
+                  <span className="formula-hint-text">Use {'{Column Name}'} to reference other columns. Supports +, -, *, /</span>
+                </div>
               </>
             )}
             <div className="modal-actions">

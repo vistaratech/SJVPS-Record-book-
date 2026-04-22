@@ -6,11 +6,17 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { saveToStorage } from './lib/api';
 import LoginPage from './pages/LoginPage';
 import HomePage from './pages/HomePage';
-import RegisterPage from './pages/RegisterPage';
-import TemplatesPage from './pages/TemplatesPage';
 import './index.css';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,     // 5 min — cached data used on revisit without refetch
+      refetchOnWindowFocus: false,   // don't refetch just because user switched tabs
+      retry: 1,                      // fail faster (default is 3)
+    },
+  },
+});
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
@@ -36,11 +42,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <LoginPage />} />
-      <Route path="/" element={<PrivateRoute><HomePage /></PrivateRoute>} />
-      <Route path="/register/:id" element={<PrivateRoute><RegisterPage /></PrivateRoute>} />
-      <Route path="/templates" element={<PrivateRoute><TemplatesPage /></PrivateRoute>} />
-      <Route path="/templates/:categoryId" element={<PrivateRoute><TemplatesPage /></PrivateRoute>} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="/*" element={<PrivateRoute><HomePage /></PrivateRoute>} />
     </Routes>
   );
 }

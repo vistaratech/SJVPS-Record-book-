@@ -1,20 +1,25 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useRef, useCallback, useEffect, useMemo, useDeferredValue } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getRegister, addColumn, deleteColumn, renameColumn, updateColumnDropdownOptions,
-  duplicateColumn, moveColumn, changeColumnType, clearColumnData, insertColumn,
+  duplicateColumn, moveColumn, reorderColumn, changeColumnType, clearColumnData, insertColumn,
   freezeColumn, hideColumn,
   addEntry, updateEntry, deleteEntry, duplicateEntry, bulkDeleteEntries,
   addPage, renamePage, deletePage,
   evaluateFormula, calculateColumnStats,
   generateShareLink, addSharedUser, removeSharedUser,
+  subscribeToMutationStatus, updateEntriesOrder,
   type Entry,
 } from '../lib/api';
 import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
   Plus, MoreVertical, ChevronDown, Calendar, SortAsc, SortDesc,
   Hash, FlaskConical, Type as TypeIcon, ChevronRight, Pin, IndianRupee,
+  Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
+  Search, Filter, Eye, Trash2, FileText, Download,
 } from 'lucide-react';
 
 import { RegisterHeader } from '../components/register/RegisterHeader';
@@ -33,17 +38,21 @@ type SortDir = 'asc' | 'desc' | null;
 
 export default function RegisterPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const registerId = Number(id);
   const queryClient = useQueryClient();
+
+  const cachedRegister = queryClient.getQueryData(['register', registerId]) as any;
 
   // ── State ──
   const [search, setSearch] = useState('');
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
-  const [localEntries, setLocalEntries] = useState<Entry[]>([]);
-  const [sortCol, setSortCol] = useState<number | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>(null);
+  const [localEntries, setLocalEntries] = useState<Entry[]>(cachedRegister?.entries || []);
+
   const [calcTypes, setCalcTypes] = useState<Record<number, CalcType>>({});
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [rowsToShow, setRowsToShow] = useState(50);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Modals
   const [newColumnModal, setNewColumnModal] = useState(false);
@@ -53,6 +62,14 @@ export default function RegisterPage() {
   const [dropdownConfigModal, setDropdownConfigModal] = useState(false);
   const [changeTypeModal, setChangeTypeModal] = useState(false);
   const [insertColModal, setInsertColModal] = useState<'left' | 'right' | null>(null);
+  
+  // Smooth column drag-and-drop reordering
+  const [draggedColumnId, setDraggedColumnId] = useState<number | null>(null);
+  const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null);
+  const dragGhostRef = useRef<HTMLDivElement | null>(null);
+  const colHeaderRefs = useRef<Map<number, HTMLTableCellElement>>(new Map());
+  const isDraggingCol = useRef(false);
+  const [activeModalColId, setActiveModalColId] = useState<number | null>(null);
   const [filterModal, setFilterModal] = useState(false);
   const [dateModal, setDateModal] = useState(false);
   const [dropdownModal, setDropdownModal] = useState(false);
@@ -61,6 +78,8 @@ export default function RegisterPage() {
   const [calcModal, setCalcModal] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<number>>(new Set());
   const [frozenColumns, setFrozenColumns] = useState<Set<number>>(new Set());
+  const [detailViewEntry, setDetailViewEntry] = useState<Entry | null>(null);
+  const [detailEdits, setDetailEdits] = useState<Record<string, string>>({});
 
   // New column form (shared by Add Column and Insert Column)
   const [newColName, setNewColName] = useState('');
@@ -78,8 +97,8 @@ export default function RegisterPage() {
   const [dropdownConfigOptions, setDropdownConfigOptions] = useState('');
 
   // Filter
-  const [filters, setFilters] = useState<Array<{ columnId: number; operator: string; value: string }>>([]);
-  const [activeFilters, setActiveFilters] = useState<Array<{ columnId: number; operator: string; value: string }>>([]);
+  const [filters, setFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>([]);
+  const [activeFilters, setActiveFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>([]);
 
   // Date picker for cell
   const [dateDay, setDateDay] = useState('');
@@ -111,35 +130,119 @@ export default function RegisterPage() {
     queryKey: ['register', registerId],
     queryFn: () => getRegister(registerId),
     enabled: !!registerId,
+    staleTime: 5 * 60 * 1000,        // cache for 5 min — avoids re-fetch on revisit
+    refetchOnWindowFocus: false,
   });
 
+  // Note: cache busting removed — the in-memory cache is the source of truth.
+  // Busting on every mount was causing data alteration on page refresh
+  // because debounced writes might not have persisted yet.
+
   useEffect(() => {
-    if (register) setLocalEntries(register.entries);
+    const unsubscribe = subscribeToMutationStatus((count) => {
+      setIsSaving(count > 0);
+    });
+    return () => { unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isSaving) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isSaving]);
+
+  // Stabilize references so child components only re-render when the actual data changes
+  const columns = useMemo(() => register?.columns || [], [register?.columns]);
+  const pages = useMemo(() => register?.pages || [{ id: 1, name: 'Page 1', index: 0 }], [register?.pages]);
+
+  // Auto-initialize edit values when Row Detail view opens
+  useEffect(() => {
+    if (detailViewEntry && columns.length > 0) {
+      const init: Record<string, string> = {};
+      columns.filter(c => c.type !== 'formula').forEach(c => {
+        init[c.id.toString()] = detailViewEntry.cells?.[c.id.toString()] || '';
+      });
+      setDetailEdits(init);
+    }
+  }, [detailViewEntry, columns]);
+
+  // Sync localEntries ONLY when a network fetch returns a new register object instance
+  const lastRegisterData = useRef<any>(cachedRegister);
+  useEffect(() => {
+    if (register && register !== lastRegisterData.current) {
+      lastRegisterData.current = register;
+      setLocalEntries(register.entries);
+      // Auto-expand rowsToShow so all imported/loaded rows are visible immediately
+      setRowsToShow((prev) => Math.max(prev, register.entries.length));
+    }
   }, [register]);
 
-  const columns = register?.columns || [];
-  const pages = register?.pages || [{ id: 1, name: 'Page 1', index: 0 }];
-
-  // Filter + sort entries
-  const getDisplayEntries = useCallback(() => {
+  // Filter + sort entries — memoized so it only recomputes when inputs change
+  const displayEntries = useMemo(() => {
     let entries = localEntries.filter((e) => (e.pageIndex || 0) === currentPageIndex);
 
-    // Search
     if (search) {
       entries = entries.filter((e) =>
         Object.values(e.cells || {}).some((v) => v?.toLowerCase().includes(search.toLowerCase()))
       );
     }
 
-    // Active filters
+    const parseDateString = (dStr: string) => {
+      if (!dStr) return '';
+      if (dStr.includes('/')) {
+        const parts = dStr.split('/');
+        if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+      return dStr;
+    };
+
     for (const f of activeFilters) {
       entries = entries.filter((e) => {
         const val = e.cells?.[f.columnId.toString()] || '';
+        const lVal = val.toLowerCase();
+        const lFilter = (f.value || '').toLowerCase();
+
         switch (f.operator) {
-          case 'contains': return val.toLowerCase().includes(f.value.toLowerCase());
-          case 'equals': return val.toLowerCase() === f.value.toLowerCase();
+          // Text
+          case 'contains': return lVal.includes(lFilter);
+          case 'not_contains': return !lVal.includes(lFilter);
+          case 'equals': return lVal === lFilter;
+          case 'not_equals': return lVal !== lFilter;
+          case 'starts_with': return lVal.startsWith(lFilter);
+          case 'ends_with': return lVal.endsWith(lFilter);
+          // Number
+          case 'eq': return parseFloat(val) === parseFloat(f.value);
           case 'gt': return parseFloat(val) > parseFloat(f.value);
+          case 'gte': return parseFloat(val) >= parseFloat(f.value);
           case 'lt': return parseFloat(val) < parseFloat(f.value);
+          case 'lte': return parseFloat(val) <= parseFloat(f.value);
+          case 'between': {
+            const n = parseFloat(val);
+            return n >= parseFloat(f.value) && n <= parseFloat(f.value2 || '');
+          }
+          case 'not_between': {
+            const n = parseFloat(val);
+            return n < parseFloat(f.value) || n > parseFloat(f.value2 || '');
+          }
+          // Date
+          case 'date_is': return parseDateString(val) === f.value;
+          case 'date_not': return parseDateString(val) !== f.value;
+          case 'date_before': return parseDateString(val) < f.value;
+          case 'date_after': return parseDateString(val) > f.value;
+          case 'date_between': {
+            const dVal = parseDateString(val);
+            return dVal >= f.value && dVal <= (f.value2 || '');
+          }
+          case 'date_not_between': {
+            const dVal = parseDateString(val);
+            return dVal < f.value || dVal > (f.value2 || '');
+          }
+          // Universal
           case 'empty': return !val;
           case 'not_empty': return !!val;
           default: return true;
@@ -147,22 +250,8 @@ export default function RegisterPage() {
       });
     }
 
-    // Sort
-    if (sortCol !== null && sortDir) {
-      entries = [...entries].sort((a, b) => {
-        const aVal = a.cells?.[sortCol.toString()] || '';
-        const bVal = b.cells?.[sortCol.toString()] || '';
-        const aNum = parseFloat(aVal);
-        const bNum = parseFloat(bVal);
-        if (!isNaN(aNum) && !isNaN(bNum)) return sortDir === 'asc' ? aNum - bNum : bNum - aNum;
-        return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-      });
-    }
-
     return entries;
-  }, [localEntries, currentPageIndex, search, activeFilters, sortCol, sortDir]);
-
-  const displayEntries = getDisplayEntries();
+  }, [localEntries, currentPageIndex, search, activeFilters, columns]);
 
   // ── Mutations ──
   const addColumnMutation = useMutation({
@@ -174,52 +263,54 @@ export default function RegisterPage() {
     onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: ['register', registerId] });
       const prev = queryClient.getQueryData(['register', registerId]) as any;
+      const dummyId = Date.now();
       if (prev) {
-        const dummyId = Date.now();
         const newCol = {
-          id: dummyId,
-          registerId,
-          name: newColName,
-          type: newColType,
+          id: dummyId, registerId, name: newColName, type: newColType,
           position: prev.columns ? prev.columns.length : 0,
           dropdownOptions: newColType === 'dropdown' ? newColDropdownOpts.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
           formula: newColType === 'formula' ? newColFormula : undefined,
           createdAt: new Date().toISOString()
         };
-        queryClient.setQueryData(['register', registerId], {
-          ...prev,
-          columns: [...(prev.columns || []), newCol]
-        });
+        queryClient.setQueryData(['register', registerId], { ...prev, columns: [...(prev.columns || []), newCol] });
       }
       setNewColumnModal(false);
-      return { prev };
+      return { prev, dummyId };
+    },
+    onSuccess: (newCol, _vars, context) => {
+      // Replace the optimistic dummy column with the real server column
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return { ...old, columns: old.columns.map((c: any) => c.id === context?.dummyId ? newCol : c) };
+      });
     },
     onError: (_err, _newCol, context) => {
-      if (context?.prev) {
-        queryClient.setQueryData(['register', registerId], context.prev);
-      }
+      if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
     },
-    onSettled: () => {
-      setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
-    },
+    onSettled: () => { setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula(''); },
   });
 
   const deleteColumnMutation = useMutation({
     mutationFn: (colId: number) => deleteColumn(registerId, colId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setColMenuId(null); },
+    onSuccess: (_data, colId) => {
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return { ...old, columns: old.columns.filter((c: any) => c.id !== colId) };
+      });
+      setColMenuId(null);
+    },
   });
 
   const renameColumnMutation = useMutation({
-    mutationFn: () => renameColumn(registerId, colMenuId!, renameColValue),
+    mutationFn: () => renameColumn(registerId, activeModalColId!, renameColValue),
     onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: ['register', registerId] });
       const prev = queryClient.getQueryData(['register', registerId]) as any;
-      if (prev && colMenuId !== null) {
+      if (prev && activeModalColId !== null) {
         queryClient.setQueryData(['register', registerId], {
           ...prev,
           columns: (prev.columns || []).map((c: any) => 
-            c.id === colMenuId ? { ...c, name: renameColValue } : c
+            c.id === activeModalColId ? { ...c, name: renameColValue } : c
           )
         });
       }
@@ -231,21 +322,45 @@ export default function RegisterPage() {
         queryClient.setQueryData(['register', registerId], context.prev);
       }
     },
-    onSettled: () => {
-      setRenameColValue('');
-      setColMenuId(null);
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
-    },
+    onSettled: () => { setRenameColValue(''); setActiveModalColId(null); },
   });
 
   const updateDropdownMutation = useMutation({
-    mutationFn: () => updateColumnDropdownOptions(registerId, colMenuId!, dropdownConfigOptions.split(',').map((s) => s.trim()).filter(Boolean)),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setDropdownConfigModal(false); },
+    mutationFn: () => updateColumnDropdownOptions(registerId, activeModalColId!, dropdownConfigOptions.split(',').map((s) => s.trim()).filter(Boolean)),
+    onSuccess: (updatedCol) => {
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return { ...old, columns: old.columns.map((c: any) => c.id === updatedCol.id ? updatedCol : c) };
+      });
+      setDropdownConfigModal(false);
+      setActiveModalColId(null);
+    },
   });
 
   const duplicateColumnMutation = useMutation({
     mutationFn: (colId: number) => duplicateColumn(registerId, colId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setColMenuId(null); },
+    onSuccess: (newCol, colId) => {
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        // Also copy entries data optimistic
+        const updatedEntries = old.entries.map((e: any) => {
+          const val = e.cells?.[colId.toString()];
+          if (val) {
+             const newCells = { ...e.cells, [newCol.id.toString()]: val };
+             return { ...e, cells: newCells };
+          }
+          return e;
+        });
+        return { ...old, columns: [...old.columns, newCol], entries: updatedEntries };
+      });
+      setColMenuId(null);
+      // Ensure UI local state refreshes right away to match local cache injection
+      setLocalEntries((prev) => prev.map((e) => {
+         const val = e.cells?.[colId.toString()];
+         if (val) return { ...e, cells: { ...e.cells, [newCol.id.toString()]: val } };
+         return e;
+      }));
+    },
   });
 
   const setRowCountMutation = useMutation({
@@ -270,22 +385,305 @@ export default function RegisterPage() {
 
   const moveColumnMutation = useMutation({
     mutationFn: ({ colId, dir }: { colId: number; dir: 'left' | 'right' }) => moveColumn(registerId, colId, dir),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setColMenuId(null); },
+    onMutate: async ({ colId, dir }) => {
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const prev = queryClient.getQueryData(['register', registerId]) as any;
+      if (prev) {
+        const cols = prev.columns.map((c: any) => ({ ...c }));
+        const idx = cols.findIndex((c: any) => c.id === colId);
+        const targetIdx = dir === 'left' ? idx - 1 : idx + 1;
+        if (idx >= 0 && targetIdx >= 0 && targetIdx < cols.length) {
+          [cols[idx], cols[targetIdx]] = [cols[targetIdx], cols[idx]];
+          cols.forEach((c: any, i: number) => { c.position = i; });
+          queryClient.setQueryData(['register', registerId], { ...prev, columns: cols });
+        }
+      }
+      return { prev };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
+    },
+    onSettled: () => setColMenuId(null),
   });
 
+  const reorderColumnMutation = useMutation({
+    mutationFn: ({ colId, targetIndex }: { colId: number; targetIndex: number }) => reorderColumn(registerId, colId, targetIndex),
+    onMutate: async ({ colId, targetIndex }) => {
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const prev = queryClient.getQueryData(['register', registerId]) as any;
+      if (prev) {
+        const cols = prev.columns.map((c: any) => ({ ...c }));
+        const idx = cols.findIndex((c: any) => c.id === colId);
+        if (idx !== -1) {
+          const [col] = cols.splice(idx, 1);
+          const clampedTarget = Math.max(0, Math.min(targetIndex, cols.length));
+          cols.splice(clampedTarget, 0, col);
+          cols.forEach((c: any, i: number) => { c.position = i; });
+          queryClient.setQueryData(['register', registerId], { ...prev, columns: cols });
+        }
+      }
+      return { prev };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
+    },
+    onSettled: () => setColMenuId(null),
+  });
+
+  // ── Smooth column drag-and-drop handlers ──
+  // Use refs so the mouse event closures always read the latest values
+  const dragColIdRef = useRef<number | null>(null);
+  const dropTargetIdxRef = useRef<number | null>(null);
+
+  // These refs will be populated after visibleColumns/columns are defined
+  const visibleColumnsRef = useRef<typeof columns>([]);
+  const columnsRef = useRef<typeof columns>([]);
+
+  const handleColDragMouseDown = useCallback((e: React.MouseEvent, colId: number) => {
+    // Only left mouse button; ignore if clicking the three-dot menu button
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('.col-menu-btn')) return;
+
+    const th = (e.currentTarget as HTMLElement).closest('th') as HTMLTableCellElement;
+    if (!th) return;
+
+    // If click is near the right edge of the header inner, let the native CSS resize handle work
+    const headerInner = th.querySelector('.col-header-inner') as HTMLElement | null;
+    if (headerInner) {
+      const innerRect = headerInner.getBoundingClientRect();
+      const distFromRight = innerRect.right - e.clientX;
+      if (distFromRight >= 0 && distFromRight <= 16) return; // resize zone — bail out
+    }
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let started = false;
+    let scrollRafId: number | null = null;
+    let lastMouseX = 0;
+
+    // Find the scrollable spreadsheet wrapper for auto-scroll
+    const scrollContainer = th.closest('.spreadsheet-wrapper') as HTMLElement | null;
+
+    // Auto-scroll loop: runs via requestAnimationFrame while dragging near edges
+    const startAutoScroll = () => {
+      if (scrollRafId !== null) return; // already running
+      if (!scrollContainer) return;
+
+      const edgeZone = 80; // px from edge to trigger scroll
+      const maxSpeed = 30; // px per frame at the very edge
+
+      const tick = () => {
+        if (!isDraggingCol.current || !scrollContainer) { scrollRafId = null; return; }
+        const rect = scrollContainer.getBoundingClientRect();
+        const distFromLeft = lastMouseX - rect.left;
+        const distFromRight = rect.right - lastMouseX;
+
+        if (distFromLeft < edgeZone && distFromLeft > 0) {
+          const speed = maxSpeed * (1 - distFromLeft / edgeZone);
+          scrollContainer.scrollLeft -= speed;
+        } else if (distFromRight < edgeZone && distFromRight > 0) {
+          const speed = maxSpeed * (1 - distFromRight / edgeZone);
+          scrollContainer.scrollLeft += speed;
+        }
+        scrollRafId = requestAnimationFrame(tick);
+      };
+      scrollRafId = requestAnimationFrame(tick);
+    };
+
+    const stopAutoScroll = () => {
+      if (scrollRafId !== null) {
+        cancelAnimationFrame(scrollRafId);
+        scrollRafId = null;
+      }
+    };
+
+    const cleanup = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      stopAutoScroll();
+
+      if (dragGhostRef.current) {
+        dragGhostRef.current.remove();
+        dragGhostRef.current = null;
+      }
+      document.querySelectorAll('.col-drop-indicator').forEach(el => el.remove());
+
+      isDraggingCol.current = false;
+      dragColIdRef.current = null;
+      dropTargetIdxRef.current = null;
+      setDraggedColumnId(null);
+      setDropTargetIdx(null);
+    };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!started) {
+        const dist = Math.sqrt((ev.clientX - startX) ** 2 + (ev.clientY - startY) ** 2);
+        if (dist < 5) return;
+        started = true;
+        isDraggingCol.current = true;
+        dragColIdRef.current = colId;
+        setDraggedColumnId(colId);
+        document.body.style.cursor = 'grabbing';
+        document.body.style.userSelect = 'none';
+
+        // Create floating ghost
+        const rect = th.getBoundingClientRect();
+        const ghost = document.createElement('div');
+        ghost.className = 'col-drag-ghost';
+        ghost.textContent = th.textContent || '';
+        ghost.style.width = `${rect.width}px`;
+        ghost.style.height = `${rect.height}px`;
+        ghost.style.left = `${ev.clientX - rect.width / 2}px`;
+        ghost.style.top = `${ev.clientY - rect.height / 2}px`;
+        document.body.appendChild(ghost);
+        dragGhostRef.current = ghost;
+      }
+
+      // Move ghost
+      if (dragGhostRef.current) {
+        const gw = dragGhostRef.current.offsetWidth;
+        const gh = dragGhostRef.current.offsetHeight;
+        dragGhostRef.current.style.left = `${ev.clientX - gw / 2}px`;
+        dragGhostRef.current.style.top = `${ev.clientY - gh / 2}px`;
+      }
+
+      // Auto-scroll when near the edges of the spreadsheet container
+      lastMouseX = ev.clientX;
+      startAutoScroll();
+
+      // Determine target column position
+      const visCols = visibleColumnsRef.current;
+      let bestIdx: number | null = null;
+      colHeaderRefs.current.forEach((headerEl, _id) => {
+        const rect = headerEl.getBoundingClientRect();
+        if (ev.clientX >= rect.left && ev.clientX <= rect.right) {
+          const colIdx = visCols.findIndex(c => c.id === _id);
+          if (colIdx !== -1) {
+            const midX = rect.left + rect.width / 2;
+            bestIdx = ev.clientX < midX ? colIdx : colIdx + 1;
+          }
+        }
+      });
+
+      // Remove previous indicators
+      document.querySelectorAll('.col-drop-indicator').forEach(el => el.remove());
+
+      if (bestIdx !== null) {
+        dropTargetIdxRef.current = bestIdx;
+        setDropTargetIdx(bestIdx);
+
+        // Build sorted column elements list
+        const cols = Array.from(colHeaderRefs.current.entries());
+        const sortedCols = visCols.map(vc => {
+          const entry = cols.find(([id]) => id === vc.id);
+          return entry ? entry[1] : null;
+        }).filter(Boolean) as HTMLTableCellElement[];
+
+        let indicatorLeft = 0;
+        let indicatorTop = 0;
+        let indicatorHeight = 0;
+
+        if (bestIdx <= 0 && sortedCols[0]) {
+          const r = sortedCols[0].getBoundingClientRect();
+          indicatorLeft = r.left;
+          indicatorTop = r.top;
+          indicatorHeight = r.height;
+        } else if (bestIdx >= sortedCols.length && sortedCols[sortedCols.length - 1]) {
+          const r = sortedCols[sortedCols.length - 1].getBoundingClientRect();
+          indicatorLeft = r.right;
+          indicatorTop = r.top;
+          indicatorHeight = r.height;
+        } else if (sortedCols[bestIdx]) {
+          const r = sortedCols[bestIdx].getBoundingClientRect();
+          indicatorLeft = r.left;
+          indicatorTop = r.top;
+          indicatorHeight = r.height;
+        }
+
+        if (indicatorHeight > 0) {
+          const indicator = document.createElement('div');
+          indicator.className = 'col-drop-indicator';
+          indicator.style.cssText = `
+            position: fixed; left: ${indicatorLeft - 2}px; top: ${indicatorTop}px;
+            width: 4px; height: ${indicatorHeight}px;
+            background: var(--navy, #1a237e); border-radius: 2px;
+            z-index: 9999; pointer-events: none;
+          `;
+          document.body.appendChild(indicator);
+        }
+      }
+    };
+
+    const onMouseUp = () => {
+      if (started && isDraggingCol.current) {
+        const currentDropIdx = dropTargetIdxRef.current;
+        const currentDragId = dragColIdRef.current;
+        const visCols = visibleColumnsRef.current;
+        const allCols = columnsRef.current;
+
+        if (currentDropIdx !== null && currentDragId !== null) {
+          const draggedVisIdx = visCols.findIndex(c => c.id === currentDragId);
+
+          if (draggedVisIdx !== -1 && currentDropIdx !== draggedVisIdx && currentDropIdx !== draggedVisIdx + 1) {
+            let targetFullIdx: number;
+            if (currentDropIdx >= visCols.length) {
+              const lastVisCol = visCols[visCols.length - 1];
+              targetFullIdx = allCols.findIndex(c => c.id === lastVisCol.id) + 1;
+            } else {
+              const targetVisCol = visCols[currentDropIdx];
+              targetFullIdx = allCols.findIndex(c => c.id === targetVisCol.id);
+            }
+            const dragFullIdx = allCols.findIndex(c => c.id === currentDragId);
+            if (dragFullIdx < targetFullIdx) targetFullIdx--;
+
+            reorderColumnMutation.mutate({ colId: currentDragId, targetIndex: targetFullIdx });
+          }
+        }
+      }
+      cleanup();
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [reorderColumnMutation]);
+
   const changeColumnTypeMutation = useMutation({
-    mutationFn: () => changeColumnType(registerId, colMenuId!, changeTypeValue),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setChangeTypeModal(false); setColMenuId(null); },
+    mutationFn: () => changeColumnType(registerId, activeModalColId!, changeTypeValue),
+    onSuccess: (updatedCol) => {
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return { ...old, columns: old.columns.map((c: any) => c.id === updatedCol.id ? updatedCol : c) };
+      });
+      setChangeTypeModal(false); setActiveModalColId(null);
+    },
   });
 
   const clearColumnDataMutation = useMutation({
     mutationFn: (colId: number) => clearColumnData(registerId, colId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setColMenuId(null); },
+    onSuccess: (_data, colId) => {
+      const colIdStr = colId.toString();
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          entries: old.entries.map((e: any) => {
+            const cells = { ...e.cells };
+            delete cells[colIdStr];
+            return { ...e, cells };
+          }),
+        };
+      });
+      setLocalEntries(prev => prev.map(e => { const cells = { ...e.cells }; delete cells[colIdStr]; return { ...e, cells }; }));
+      setColMenuId(null);
+    },
   });
 
   const insertColumnMutation = useMutation({
     mutationFn: () => {
-      const col = columns.find((c) => c.id === colMenuId);
+      const col = columns.find((c) => c.id === activeModalColId);
       const pos = col ? (insertColModal === 'left' ? col.position : col.position + 1) : columns.length;
       return insertColumn(registerId, {
         name: newColName, type: newColType,
@@ -297,7 +695,7 @@ export default function RegisterPage() {
       await queryClient.cancelQueries({ queryKey: ['register', registerId] });
       const prev = queryClient.getQueryData(['register', registerId]) as any;
       if (prev) {
-        const colNode = prev.columns?.find((c: any) => c.id === colMenuId);
+        const colNode = prev.columns?.find((c: any) => c.id === activeModalColId);
         const pos = colNode ? (insertColModal === 'left' ? colNode.position : colNode.position + 1) : (prev.columns?.length || 0);
         
         const newCol = {
@@ -323,56 +721,129 @@ export default function RegisterPage() {
         });
       }
       setInsertColModal(null);
-      setColMenuId(null);
+      setActiveModalColId(null);
       return { prev };
     },
     onError: (_err, _vars, context) => {
-      if (context?.prev) {
-        queryClient.setQueryData(['register', registerId], context.prev);
-      }
+      if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
     },
-    onSettled: () => {
-      setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula('');
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+    onSuccess: (newCol, _vars, context) => {
+      // Replace the optimistic dummy column with the real server column
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return { ...old, columns: old.columns.map((c: any) => c.id === (context as any)?.dummyId ? newCol : c) };
+      });
     },
+    onSettled: () => { setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula(''); },
   });
 
   const addEntryMutation = useMutation({
     mutationFn: () => addEntry(registerId, {}, currentPageIndex),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['register', registerId] }),
+    onMutate: async () => {
+      // Optimistic: add a temporary row instantly
+      const tempEntry: Entry = {
+        id: Date.now(),
+        registerId,
+        rowNumber: localEntries.length + 1,
+        cells: {},
+        createdAt: new Date().toISOString(),
+        pageIndex: currentPageIndex,
+      };
+      setLocalEntries((prev) => [...prev, tempEntry]);
+      setRowsToShow((prev) => Math.max(prev, localEntries.length + 1));
+      return { tempId: tempEntry.id };
+    },
+    onSuccess: (newEntry, _vars, context) => {
+      // Replace temp entry with real entry from server
+      setLocalEntries((prev) => prev.map((e) => e.id === context?.tempId ? newEntry : e));
+      // Patch the cache: replace temp if present, otherwise append (upsert)
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        const hasTempEntry = old.entries.some((e: any) => e.id === context?.tempId);
+        const updatedEntries = hasTempEntry
+          ? old.entries.map((e: any) => e.id === context?.tempId ? newEntry : e)
+          : [...old.entries, newEntry];
+        return { ...old, entries: updatedEntries, entryCount: updatedEntries.length };
+      });
+    },
+    onError: (_err, _vars, context) => {
+      // Roll back temp entry
+      setLocalEntries((prev) => prev.filter((e) => e.id !== context?.tempId));
+    },
   });
 
   const deleteEntryMutation = useMutation({
     mutationFn: (entryId: number) => deleteEntry(registerId, entryId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setRowMenuId(null); },
+    onSuccess: (_data, entryId) => {
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        const entries = old.entries.filter((e: any) => e.id !== entryId);
+        return { ...old, entries, entryCount: entries.length };
+      });
+      setLocalEntries(prev => prev.filter(e => e.id !== entryId));
+      setRowMenuId(null);
+    },
   });
 
   const duplicateEntryMutation = useMutation({
     mutationFn: (entryId: number) => duplicateEntry(registerId, entryId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setRowMenuId(null); },
+    onSuccess: (newEntry) => {
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return { ...old, entries: [...old.entries, newEntry], entryCount: old.entries.length + 1 };
+      });
+      setLocalEntries(prev => [...prev, newEntry]);
+      setRowMenuId(null);
+    },
   });
 
   const bulkDeleteMutation = useMutation({
     mutationFn: () => bulkDeleteEntries(registerId, Array.from(selectedRows)),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setSelectedRows(new Set()); },
+    onSuccess: () => {
+      const deletedIds = Array.from(selectedRows);
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        const entries = old.entries.filter((e: any) => !deletedIds.includes(e.id));
+        return { ...old, entries, entryCount: entries.length };
+      });
+      setLocalEntries(prev => prev.filter(e => !deletedIds.includes(e.id)));
+      setSelectedRows(new Set());
+    },
   });
 
   const addPageMutation = useMutation({
     mutationFn: () => addPage(registerId),
     onSuccess: (newPage) => {
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return { ...old, pages: [...(old.pages || []), newPage] };
+      });
       setCurrentPageIndex(newPage.index);
     },
   });
 
   const renamePageMutation = useMutation({
     mutationFn: () => renamePage(registerId, renamePageId!, renamePageValue),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setRenamePageModal(false); },
+    onSuccess: () => {
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return { ...old, pages: old.pages.map((p: any) => p.id === renamePageId ? { ...p, name: renamePageValue } : p) };
+      });
+      setRenamePageModal(false);
+    },
   });
 
   const deletePageMutation = useMutation({
     mutationFn: (pageId: number) => deletePage(registerId, pageId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['register', registerId] }); setCurrentPageIndex(0); },
+    onSuccess: (_data, pageId) => {
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        const pages = old.pages.filter((p: any) => p.id !== pageId);
+        const entries = old.entries.filter((e: any) => e.pageIndex !== old.pages.find((p: any) => p.id === pageId)?.index);
+        return { ...old, pages, entries, entryCount: entries.length };
+      });
+      setCurrentPageIndex(0);
+    },
   });
 
   const shareLinkMutation = useMutation({
@@ -392,26 +863,77 @@ export default function RegisterPage() {
 
   // ── Handlers ──
   const handleCellChange = useCallback((entryId: number, columnId: string, value: string) => {
+    // 1. Update local state instantly (optimistic)
     setLocalEntries((prev) => prev.map((e) => e.id === entryId ? { ...e, cells: { ...e.cells, [columnId]: value } } : e));
+
+    // 2. Debounce the Firestore write — no invalidateQueries, just patch the cache
     const key = `${entryId}-${columnId}`;
     if (debounceTimers.current[key]) clearTimeout(debounceTimers.current[key]);
     debounceTimers.current[key] = setTimeout(() => {
       updateEntry(registerId, entryId, { [columnId]: value }).then(() => {
-        queryClient.invalidateQueries({ queryKey: ['registers'], exact: false });
-        queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+        // Only patch the cache entry, never re-fetch the whole register
+        queryClient.setQueryData(['register', registerId], (old: any) => {
+          if (!old) return old;
+          return {
+            ...old,
+            entries: old.entries.map((e: any) =>
+              e.id === entryId ? { ...e, cells: { ...e.cells, [columnId]: value } } : e
+            ),
+          };
+        });
       });
-    }, 500);
+    }, 600);
   }, [registerId, queryClient]);
 
-  const handleSort = (colId: number) => {
-    if (sortCol === colId) {
-      if (sortDir === 'asc') setSortDir('desc');
-      else if (sortDir === 'desc') { setSortCol(null); setSortDir(null); }
-    } else {
-      setSortCol(colId);
-      setSortDir('asc');
-    }
-  };
+  // Excel-like sort: permanently reorders localEntries and persists to Firestore
+  const handleSort = useCallback((colId: number, direction: 'asc' | 'desc') => {
+    const parseDateString = (dStr: string) => {
+      if (!dStr) return '';
+      if (dStr.includes('/')) {
+        const parts = dStr.split('/');
+        if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+      return dStr;
+    };
+
+    const colDef = columns.find(c => c.id === colId);
+    const colIdStr = colId.toString();
+
+    setLocalEntries(prev => {
+      const sorted = [...prev].sort((a, b) => {
+        // Only sort entries on the current page; leave other pages untouched
+        const aPage = a.pageIndex || 0;
+        const bPage = b.pageIndex || 0;
+        if (aPage !== currentPageIndex || bPage !== currentPageIndex) return 0;
+
+        const aVal = a.cells?.[colIdStr] || '';
+        const bVal = b.cells?.[colIdStr] || '';
+
+        if (colDef?.type === 'date') {
+          const dA = parseDateString(aVal);
+          const dB = parseDateString(bVal);
+          return direction === 'asc' ? dA.localeCompare(dB) : dB.localeCompare(dA);
+        }
+
+        const aNum = parseFloat(aVal);
+        const bNum = parseFloat(bVal);
+        if (!isNaN(aNum) && !isNaN(bNum)) return direction === 'asc' ? aNum - bNum : bNum - aNum;
+        return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      });
+
+      // Persist sorted order to Firestore
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return { ...old, entries: sorted };
+      });
+      // Fire Firestore write via the mutation queue
+      updateEntriesOrder(registerId, sorted).catch(err => {
+        console.error('Failed to save sorted order:', err);
+      });
+
+      return sorted;
+    });
+  }, [columns, currentPageIndex, registerId, queryClient]);
 
   const openDatePicker = useCallback((entryId: number, colId: number, currentVal: string) => {
     const parts = currentVal?.split('/') || [];
@@ -421,7 +943,7 @@ export default function RegisterPage() {
 
   const handleDateSelect = () => {
     const dateStr = `${dateDay.padStart(2, '0')}/${dateMonth.padStart(2, '0')}/${dateYear}`;
-    if (dateEntryId && dateColumnId) handleCellChange(dateEntryId, dateColumnId.toString(), dateStr);
+    if (dateEntryId != null && dateColumnId != null) handleCellChange(dateEntryId, dateColumnId.toString(), dateStr);
     setDateModal(false);
   };
 
@@ -496,6 +1018,194 @@ export default function RegisterPage() {
     }
   };
 
+  const handleExportPDF = () => {
+    if (!register) return;
+
+    const visibleCols = columns.filter((col) => !hiddenColumns.has(col.id));
+    const headerRow = visibleCols.map(c => c.name);
+    if (headerRow.length === 0) return;
+
+    const bodyRows = displayEntries.map((entry, idx) => {
+      return [
+        (idx + 1).toString(),
+        ...visibleCols.map(c => {
+          const cellValue = c.type === 'formula'
+            ? evaluateFormula(c.formula || '', entry, columns)
+            : (entry.cells?.[c.id.toString()] || '');
+          return cellValue;
+        })
+      ];
+    });
+
+    try {
+      const doc = new jsPDF({ orientation: headerRow.length > 6 ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
+
+      // Title
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text(register.name || 'Export', 14, 18);
+
+      // Subtitle
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(120, 120, 120);
+      doc.text(`Exported on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} • ${displayEntries.length} rows`, 14, 24);
+      doc.setTextColor(0, 0, 0);
+
+      autoTable(doc, {
+        startY: 30,
+        head: [['S.No.', ...headerRow]],
+        body: bodyRows,
+        theme: 'grid',
+        headStyles: {
+          fillColor: [20, 83, 45],
+          textColor: 255,
+          fontStyle: 'bold',
+          fontSize: 8,
+          halign: 'center',
+        },
+        bodyStyles: {
+          fontSize: 8,
+          cellPadding: 3,
+        },
+        alternateRowStyles: {
+          fillColor: [245, 247, 250],
+        },
+        styles: {
+          lineColor: [200, 200, 200],
+          lineWidth: 0.25,
+          overflow: 'linebreak',
+        },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 14 },
+        },
+        margin: { left: 14, right: 14 },
+        didDrawPage: (data: any) => {
+          // Footer with page number
+          const pageCount = (doc as any).internal.getNumberOfPages();
+          doc.setFontSize(8);
+          doc.setTextColor(150);
+          doc.text(
+            `Page ${data.pageNumber} of ${pageCount}`,
+            doc.internal.pageSize.getWidth() / 2,
+            doc.internal.pageSize.getHeight() - 8,
+            { align: 'center' }
+          );
+        },
+      });
+
+      doc.save(`${register.name || 'Export'}.pdf`);
+    } catch (err) {
+      console.error('PDF Export Error:', err);
+      alert('Failed to export PDF file.');
+    }
+  };
+
+  // ── Row-level actions ──
+  const handleRowDownloadPDF = useCallback((entryId: number) => {
+    if (!register) return;
+    const entry = localEntries.find(e => e.id === entryId);
+    if (!entry) return;
+    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id));
+    const rowIdx = localEntries.indexOf(entry) + 1;
+
+    try {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+      // Title
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text(register.name || 'Record', 14, 18);
+
+      // Subtitle
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(120, 120, 120);
+      doc.text(`Row ${rowIdx} • Exported on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`, 14, 24);
+      doc.setTextColor(0, 0, 0);
+
+      const bodyRows = visibleCols.map(c => {
+        const val = c.type === 'formula'
+          ? evaluateFormula(c.formula || '', entry, columns)
+          : (entry.cells?.[c.id.toString()] || '');
+        return [c.name, val];
+      });
+
+      autoTable(doc, {
+        startY: 30,
+        head: [['Field', 'Value']],
+        body: bodyRows,
+        theme: 'grid',
+        headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+        bodyStyles: { fontSize: 9, cellPadding: 4 },
+        alternateRowStyles: { fillColor: [245, 247, 250] },
+        styles: { lineColor: [200, 200, 200], lineWidth: 0.25 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 55 } },
+        margin: { left: 14, right: 14 },
+      });
+
+      doc.save(`${register.name || 'Record'}_Row${rowIdx}.pdf`);
+    } catch (err) {
+      console.error('Row PDF Error:', err);
+      alert('Failed to export row as PDF.');
+    }
+  }, [register, localEntries, columns, hiddenColumns]);
+
+  const handleRowDownloadExcel = useCallback((entryId: number) => {
+    if (!register) return;
+    const entry = localEntries.find(e => e.id === entryId);
+    if (!entry) return;
+    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id));
+    const rowIdx = localEntries.indexOf(entry) + 1;
+
+    try {
+      const headerRow = visibleCols.map(c => c.name);
+      const rowObj: Record<string, string> = {};
+      visibleCols.forEach(c => {
+        const val = c.type === 'formula'
+          ? evaluateFormula(c.formula || '', entry, columns)
+          : (entry.cells?.[c.id.toString()] || '');
+        rowObj[c.name] = val;
+      });
+
+      const ws = XLSX.utils.json_to_sheet([rowObj], { header: headerRow });
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+      XLSX.writeFile(wb, `${register.name || 'Record'}_Row${rowIdx}.xlsx`);
+    } catch (err) {
+      console.error('Row Excel Error:', err);
+      alert('Failed to export row as Excel.');
+    }
+  }, [register, localEntries, columns, hiddenColumns]);
+
+  const handleRowShareText = useCallback((entryId: number) => {
+    if (!register) return;
+    const entry = localEntries.find(e => e.id === entryId);
+    if (!entry) return;
+    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id));
+
+    const lines = visibleCols.map(c => {
+      const val = c.type === 'formula'
+        ? evaluateFormula(c.formula || '', entry, columns)
+        : (entry.cells?.[c.id.toString()] || '—');
+      return `${c.name}: ${val}`;
+    });
+
+    const text = `📋 ${register.name}\n${'─'.repeat(30)}\n${lines.join('\n')}`;
+
+    navigator.clipboard.writeText(text).then(() => {
+      alert('Row copied to clipboard!');
+    }).catch(() => {
+      // Fallback
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      alert('Row copied to clipboard!');
+    });
+  }, [register, localEntries, columns, hiddenColumns]);
 
 
   const toggleSelectRow = useCallback((id: number) => {
@@ -510,9 +1220,47 @@ export default function RegisterPage() {
     setRowMenuId(prev => (prev === id ? null : id));
   }, []);
 
+  const visibleColumns = useMemo(() => columns.filter((col) => !hiddenColumns.has(col.id)), [columns, hiddenColumns]);
+
+  // Keep refs in sync for smooth drag handler closures
+  visibleColumnsRef.current = visibleColumns;
+  columnsRef.current = columns;
+
+  // Defer formula/stats recalculation so it doesn't block keystrokes (Fix #3)
+  const deferredDisplayEntries = useDeferredValue(displayEntries);
+
+  const [statsReady, setStatsReady] = useState(false);
+
+  useEffect(() => {
+    // Delay stats calculation to ensure the UI paints immediately when jumping between registers.
+    const timer = setTimeout(() => setStatsReady(true), 50);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const allStats = useMemo(() => {
+    const statsMap: Record<number, any> = {};
+    if (!statsReady) return statsMap;
+
+    visibleColumns.forEach(col => {
+      if (col.type === 'number' || col.type === 'formula') {
+        const colIdStr = col.id.toString();
+        let entriesToStat = deferredDisplayEntries;
+        if (col.type === 'formula' && col.formula) {
+           entriesToStat = deferredDisplayEntries.map(e => ({
+             ...e,
+             cells: { ...e.cells, [colIdStr]: evaluateFormula(col.formula!, e, columns) }
+           }));
+        }
+        statsMap[col.id] = calculateColumnStats(entriesToStat, colIdStr);
+      }
+    });
+    return statsMap;
+  }, [deferredDisplayEntries, visibleColumns, columns, statsReady]);
+
   const getCalcValue = (colId: number): string => {
     const type = calcTypes[colId] || 'sum';
-    const stats = calculateColumnStats(displayEntries, colId.toString());
+    const stats = allStats[colId];
+    if (!stats) return '-';
     switch (type) {
       case 'sum': return stats.sum.toFixed(2);
       case 'average': return stats.average.toFixed(2);
@@ -523,45 +1271,38 @@ export default function RegisterPage() {
     }
   };
 
-  const visibleColumns = useMemo(() => columns.filter((col) => !hiddenColumns.has(col.id)), [columns, hiddenColumns]);
+  const visibleEntries = useMemo(() => displayEntries.slice(0, rowsToShow), [displayEntries, rowsToShow]);
 
   if (isLoading) return (
-    <div className="center-loader">
-      <div className="spinner dark spinner-large" />
+    <div className="content-area">
+      <div className="center-loader">
+        <div className="spinner dark spinner-large" />
+        <span className="center-loader-text">Loading register…</span>
+      </div>
     </div>
   );
   if (!register) return <div className="empty-state"><p>Register not found</p></div>;
 
   return (
-    <div className="register-layout">
+    <div className="content-area">
       {/* ── Header ── */}
-      <RegisterHeader 
-        register={register} 
-        setShareModal={setShareModal} 
-        handleExportExcel={handleExportExcel} 
-      />
+      <div className="register-header">
+        <button className="register-header-btn" onClick={() => navigate('/')}>
+          <ArrowLeft size={14} />
+        </button>
+        <h1 className="register-header-title">{register.name}</h1>
+        <RegisterHeader 
+          register={register} 
+          setShareModal={setShareModal} 
+          handleExportExcel={handleExportExcel}
+          handleExportPDF={handleExportPDF}
+        />
+      </div>
 
-      {/* ── Toolbar ── */}
-      <RegisterToolbar 
-        search={search}
-        setSearch={setSearch}
-        activeFilters={activeFilters}
-        setFilters={setFilters}
-        setFilterModal={setFilterModal}
-        addEntryMutation={addEntryMutation}
-        setNewColName={setNewColName}
-        setNewColType={setNewColType}
-        setNewColDropdownOpts={setNewColDropdownOpts}
-        setNewColFormula={setNewColFormula}
-        setNewColumnModal={setNewColumnModal}
-        hiddenColumns={hiddenColumns} setHiddenColumns={setHiddenColumns} registerId={registerId} hideColumn={hideColumn}
-        selectedRows={selectedRows} displayEntries={displayEntries} columns={columns} bulkDeleteMutation={bulkDeleteMutation}
-        setRowCountMutation={setRowCountMutation}
-      />
-
-      {/* ── Pages Bar ── */}
-      {pages.length > 0 && (
-        <div className="pages-bar">
+      {/* ── Combined Pages + Actions Bar ── */}
+      <div className="pages-actions-bar">
+        {/* Left: Page tabs + Add Page + Add Column + Add Row */}
+        <div className="pages-actions-tabs">
           {pages.map((page, idx) => (
             <button
               key={page.id}
@@ -569,14 +1310,87 @@ export default function RegisterPage() {
               onClick={() => setCurrentPageIndex(idx)}
               onDoubleClick={() => { setRenamePageId(page.id); setRenamePageValue(page.name); setRenamePageModal(true); }}
             >
+              <FileText size={11} style={{ flexShrink: 0 }} />
               {page.name}
             </button>
           ))}
           <button className="page-add-btn" onClick={() => addPageMutation.mutate()}>
             <Plus size={12} /> Add Page
           </button>
+
+          <div className="pab-divider" />
+
+          {/* Add Column — next to tabs */}
+          <button className="pab-tab-action-btn" title="Add Column"
+            onClick={() => { setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula(''); setNewColumnModal(true); }}>
+            <Plus size={12} /><span>Add Column</span>
+          </button>
+
+          {/* Add Row — next to tabs, primary */}
+          <button className="pab-tab-action-btn primary" onClick={() => addEntryMutation.mutate()}>
+            <Plus size={12} /> Add Row
+          </button>
         </div>
-      )}
+
+        {/* Right: stats + search + filter + contextual */}
+        <div className="pages-actions-right">
+          {/* Stats */}
+          <span className="pab-stat"><Hash size={11} />{displayEntries.length} rows</span>
+          <span className="pab-stat"><FileText size={11} />{columns.length} cols</span>
+
+          <div className="pab-divider" />
+
+          {/* Expandable search */}
+          <div className={`pab-search${search ? ' open' : ''}`} id="pab-search-wrap">
+            <input
+              id="pab-search-input"
+              className="pab-search-input"
+              placeholder="Search rows…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Escape') setSearch(''); }}
+            />
+            <button
+              className={`pab-icon-btn${search ? ' active' : ''}`}
+              title="Search" aria-label="Search rows"
+              onClick={() => { (document.getElementById('pab-search-input') as HTMLInputElement)?.focus(); }}
+            >
+              <Search size={13} />
+            </button>
+          </div>
+
+          {/* Filter */}
+          <button
+            className={`pab-icon-btn${activeFilters.length > 0 ? ' active' : ''}`}
+            title={`Filter${activeFilters.length > 0 ? ` (${activeFilters.length})` : ''}`}
+            onClick={() => { setFilters(activeFilters.length ? [...activeFilters] : []); setFilterModal(true); }}
+            aria-label="Filter"
+          >
+            <Filter size={13} />
+            {activeFilters.length > 0 && <span className="pab-badge">{activeFilters.length}</span>}
+          </button>
+
+          {/* Show hidden */}
+          {hiddenColumns.size > 0 && (
+            <button className="pab-icon-btn active" title={`Show ${hiddenColumns.size} hidden`}
+              onClick={() => { setHiddenColumns(new Set()); hiddenColumns.forEach(c => hideColumn(registerId, c, false)); }}>
+              <Eye size={13} />
+              <span className="pab-badge">{hiddenColumns.size}</span>
+            </button>
+          )}
+
+          {/* Bulk delete */}
+          {selectedRows.size > 0 && (
+            <button className="pab-icon-btn danger" title={`Delete ${selectedRows.size} rows`}
+              onClick={() => { if (confirm(`Delete ${selectedRows.size} rows?`)) bulkDeleteMutation.mutate(); }}>
+              <Trash2 size={13} />
+              <span className="pab-badge">{selectedRows.size}</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+
 
       {/* ── Guidance Banner ── */}
       {displayEntries.length === 0 && columns.length > 0 && (
@@ -597,21 +1411,38 @@ export default function RegisterPage() {
             <tr>
               <th className="serial">S.No.</th>
               {visibleColumns.map((col) => {
-                const nameL = (col.name || '').toLowerCase();
-                const isPayment = nameL.includes('amount') || nameL.includes('fee') || nameL.includes('payment') || nameL.includes('balance') || nameL.includes('price');
-                const IconComponent = isPayment ? <IndianRupee size={12} /> : 
-                  col.type === 'number' ? <Hash size={12} /> : 
-                  col.type === 'date' ? <Calendar size={12} /> : 
-                  col.type === 'dropdown' ? <ChevronDown size={12} /> : 
-                  col.type === 'formula' ? <FlaskConical size={12} /> : 
-                  <TypeIcon size={12} />;
+                const IconComponent = (() => {
+                  const nameL = (col.name || '').toLowerCase();
+                  const isPayment = nameL.includes('amount') || nameL.includes('fee') || nameL.includes('payment') || nameL.includes('balance') || nameL.includes('price');
+                  if (isPayment) return <IndianRupee size={12} />;
+                  switch (col.type) {
+                    case 'number':   return <Hash size={12} />;
+                    case 'date':     return <Calendar size={12} />;
+                    case 'dropdown': return <ChevronDown size={12} />;
+                    case 'formula':  return <FlaskConical size={12} />;
+                    case 'phone':    return <Phone size={12} />;
+                    case 'email':    return <Mail size={12} />;
+                    case 'url':      return <Globe size={12} />;
+                    case 'rating':   return <Star size={12} />;
+                    case 'checkbox': return <CheckSquare size={12} />;
+                    case 'image':    return <ImageIcon size={12} />;
+                    default:         return <TypeIcon size={12} />;
+                  }
+                })();
 
                 return (
-                <th key={col.id} onClick={() => handleSort(col.id)} className="col-header-cell">
+                <th 
+                  key={col.id} 
+                  className={`col-header-cell ${draggedColumnId === col.id ? 'dragging' : ''}`}
+                  ref={(el) => {
+                    if (el) colHeaderRefs.current.set(col.id, el);
+                    else colHeaderRefs.current.delete(col.id);
+                  }}
+                  onMouseDown={(e) => handleColDragMouseDown(e, col.id)}
+                >
                   <div className="col-header-inner">
                     {IconComponent}
                     <span>{col.name}</span>
-                    {sortCol === col.id && (sortDir === 'asc' ? <SortAsc size={12} /> : <SortDesc size={12} />)}
                     {frozenColumns.has(col.id) && <Pin size={10} color="var(--muted)" className="frozen-pin" />}
                     <button
                       className="col-menu-btn"
@@ -628,7 +1459,7 @@ export default function RegisterPage() {
             </tr>
           </thead>
           <tbody>
-            {displayEntries.map((entry, idx) => (
+            {visibleEntries.map((entry, idx) => (
               <SpreadsheetRow 
                 key={entry.id}
                 entry={entry}
@@ -642,15 +1473,26 @@ export default function RegisterPage() {
                 isMenuOpen={rowMenuId === entry.id}
                 toggleMenu={toggleMenu}
                 registerColumns={columns}
+                onRowDoubleClick={setDetailViewEntry}
               />
             ))}
+
+            {displayEntries.length > rowsToShow && (
+              <tr>
+                <td colSpan={visibleColumns.length + 2} className="load-more-container">
+                  <button className="load-more-btn" onClick={() => setRowsToShow(prev => prev + 100)}>
+                    Load More Rows ({displayEntries.length - rowsToShow} remaining)
+                  </button>
+                </td>
+              </tr>
+            )}
 
             {/* Mock rows for empty template registers */}
             {displayEntries.length === 0 && columns.length > 0 && [1, 2, 3].map((n) => (
               <tr key={`mock-${n}`} className="mock" onClick={() => addEntryMutation.mutate()}>
                 <td className="serial">{n}</td>
                 {visibleColumns.map((col) => (
-                  <td key={col.id}><div className="mock-cell-content">{col.name}...</div></td>
+                  <td key={col.id}><div className="mock-cell-content">&nbsp;</div></td>
                 ))}
                 <td className="actions" />
               </tr>
@@ -689,7 +1531,8 @@ export default function RegisterPage() {
       {/* ── Context Menus ── */}
       <RegisterContextMenus 
         colMenuId={colMenuId} setColMenuId={setColMenuId} columns={columns}
-        sortCol={sortCol} sortDir={sortDir} setSortCol={setSortCol} setSortDir={setSortDir}
+        setActiveModalColId={setActiveModalColId}
+        handleSort={handleSort}
         setRenameColValue={setRenameColValue} setRenameColModal={setRenameColModal}
         setChangeTypeValue={setChangeTypeValue} setChangeTypeModal={setChangeTypeModal}
         setDropdownConfigOptions={setDropdownConfigOptions} setDropdownConfigModal={setDropdownConfigModal}
@@ -701,6 +1544,9 @@ export default function RegisterPage() {
         clearColumnDataMutation={clearColumnDataMutation} deleteColumnMutation={deleteColumnMutation}
         rowMenuId={rowMenuId} setRowMenuId={setRowMenuId}
         duplicateEntryMutation={duplicateEntryMutation} deleteEntryMutation={deleteEntryMutation}
+        handleRowDownloadPDF={handleRowDownloadPDF}
+        handleRowDownloadExcel={handleRowDownloadExcel}
+        handleRowShareText={handleRowShareText}
       />
 
       {/* ── Modals ── */}
@@ -746,6 +1592,67 @@ export default function RegisterPage() {
         dropdownOptions={dropdownOptions} dropdownEntryId={dropdownEntryId} dropdownColumnId={dropdownColumnId}
         localEntries={localEntries} handleCellChange={handleCellChange}
       />
+
+      {/* Row Detail View Modal (Direct Edit Mode) */}
+      {detailViewEntry && (
+        <div className="row-detail-overlay" onClick={() => { setDetailViewEntry(null); setDetailEdits({}); }}>
+          <div className="row-detail-modal" onClick={e => e.stopPropagation()}>
+            <div className="row-detail-header">
+              <div className="row-detail-title">
+                <span className="row-detail-badge">Row #{(localEntries.findIndex(e => e.id === detailViewEntry.id) + 1)}</span>
+                <h2>Record Details</h2>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button
+                  className="register-header-btn"
+                  style={{ border: '1px solid #dce4f5', background: '#fff', color: '#dc2626' }}
+                  onClick={() => handleRowDownloadPDF(detailViewEntry.id)}
+                  title="Download PDF"
+                >
+                  <FileText size={14} /> PDF
+                </button>
+                <button
+                  className="register-header-btn"
+                  style={{ border: '1px solid #dce4f5', background: '#fff', color: '#16a34a' }}
+                  onClick={() => handleRowDownloadExcel(detailViewEntry.id)}
+                  title="Download Excel"
+                >
+                  <Download size={14} /> Excel
+                </button>
+                <button className="row-detail-close" onClick={() => { setDetailViewEntry(null); setDetailEdits({}); }} aria-label="Close">✕</button>
+              </div>
+            </div>
+            <div className="row-detail-body">
+              {columns.filter(col => col.type !== 'formula').map(col => {
+                const colKey = col.id.toString();
+                const val = detailEdits[colKey] ?? '';
+                return (
+                  <div className="row-detail-field" key={col.id}>
+                    <label className="row-detail-label">{col.name}</label>
+                    <input
+                      className="row-detail-input"
+                      value={val}
+                      onChange={e => setDetailEdits(prev => ({ ...prev, [colKey]: e.target.value }))}
+                      placeholder={`Enter ${col.name}…`}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="row-detail-footer">
+              <button className="row-detail-btn-close" onClick={() => { setDetailViewEntry(null); setDetailEdits({}); }}>Cancel</button>
+              <button className="row-detail-btn-save" onClick={() => {
+                // Save all edited fields
+                Object.entries(detailEdits).forEach(([colId, value]) => {
+                  handleCellChange(detailViewEntry.id, colId, value);
+                });
+                setDetailViewEntry(null);
+                setDetailEdits({});
+              }}>Save Changes</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
