@@ -1673,9 +1673,9 @@ export default function RegisterPage() {
                     {IconComponent}
                     <span 
                       className="col-header-name"
-                      title="Double-click for options, Drag to reorder"
+                      title="Click for options, Drag to reorder"
                       onMouseDown={(e) => handleColDragMouseDown(e, col.id)}
-                      onDoubleClick={(e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
                         if (colMenuId === col.id) {
                           setColMenuId(null);
