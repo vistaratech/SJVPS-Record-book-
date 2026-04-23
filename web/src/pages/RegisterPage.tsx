@@ -194,8 +194,8 @@ export default function RegisterPage() {
     if (register && register !== lastRegisterData.current) {
       lastRegisterData.current = register;
       setLocalEntries(register.entries);
-      // Auto-expand rowsToShow but cap it to prevent browser crashes on massive registers
-      setRowsToShow((prev) => Math.min(Math.max(prev, register.entries.length), 200));
+      // Auto-expand rowsToShow so all imported/loaded rows are visible immediately
+      setRowsToShow((prev) => Math.max(prev, register.entries.length));
     }
   }, [register]);
 
@@ -1437,20 +1437,6 @@ export default function RegisterPage() {
     const unfrozen = visible.filter((col) => !frozenColumns.has(col.id));
     return [...frozen, ...unfrozen];
   }, [columns, hiddenColumns, frozenColumns]);
-
-  // Pre-calculate sticky offsets to avoid DOM reads during render (Fix for "Unresponsive" error)
-  const columnOffsets = useMemo(() => {
-    const offsets: Record<number, number> = {};
-    let currentOffset = 50; // S.No width
-    for (const col of visibleColumns) {
-      if (frozenColumns.has(col.id)) {
-        offsets[col.id] = currentOffset;
-        currentOffset += colWidths[col.id] || 120;
-      }
-    }
-    return offsets;
-  }, [visibleColumns, frozenColumns, colWidths]);
-
   // Keep refs in sync for smooth drag handler closures
   visibleColumnsRef.current = visibleColumns;
   columnsRef.current = columns;
@@ -1460,7 +1446,17 @@ export default function RegisterPage() {
 
 
 
-
+  const getFrozenLeftOffset = useCallback((colId: number) => {
+    let offset = 50; // S.No column width
+    for (const vc of visibleColumns) {
+      if (vc.id === colId) break;
+      if (frozenColumns.has(vc.id)) {
+        const headerEl = colHeaderRefs.current.get(vc.id);
+        offset += headerEl?.offsetWidth || 120;
+      }
+    }
+    return offset;
+  }, [frozenColumns, visibleColumns]);
 
 
 
@@ -1597,10 +1593,33 @@ export default function RegisterPage() {
         </div>
       )}
 
+      {/* ── Dynamic Column Widths ── */}
+      <style>{`
+        ${visibleColumns.map((col, idx) => {
+          const w = colWidths[col.id];
+          if (!w) return '';
+          return `
+            .spreadsheet tr > :nth-child(${idx + 2}) {
+              width: ${w}px !important;
+              min-width: ${w}px !important;
+              max-width: ${w}px !important;
+            }
+            .spreadsheet tr > :nth-child(${idx + 2}) .col-header-inner {
+              width: ${w}px !important;
+              min-width: ${w}px !important;
+              max-width: ${w}px !important;
+            }
+            .spreadsheet td:nth-child(${idx + 2}) {
+              overflow: hidden !important;
+              text-overflow: ellipsis !important;
+            }
+          `;
+        }).join('')}
+      `}</style>
+
       {/* ── Spreadsheet ── */}
       <div className="spreadsheet-wrapper">
-        <table className="spreadsheet" style={{ tableLayout: 'fixed', width: 'max-content' }}>
-          <colgroup><col style={{ width: 50 }} />{visibleColumns.map(col => (<col key={col.id} style={{ width: colWidths[col.id] || 120 }} />))}</colgroup>
+        <table className="spreadsheet">
           <thead>
             <tr>
               <th className="serial">S.NO.</th>
@@ -1628,7 +1647,17 @@ export default function RegisterPage() {
 
                 // Compute frozen column sticky left offset
                 const isFrozen = frozenColumns.has(col.id);
-                const stickyLeft = columnOffsets[col.id];
+                let stickyLeft: number | undefined;
+                if (isFrozen) {
+                  stickyLeft = 50; // S.No. column width
+                  for (const vc of visibleColumns) {
+                    if (vc.id === col.id) break;
+                    if (frozenColumns.has(vc.id)) {
+                      const headerEl = colHeaderRefs.current.get(vc.id);
+                      stickyLeft += headerEl?.offsetWidth || 120;
+                    }
+                  }
+                }
 
                 return (
                 <th 
@@ -1694,7 +1723,6 @@ export default function RegisterPage() {
                 registerColumns={columns}
                 onRowDoubleClick={setDetailViewEntry}
                 frozenColumns={frozenColumns}
-                columnOffsets={columnOffsets}
                 totalRows={displayEntries.length}
               />
             ))}
@@ -1730,7 +1758,7 @@ export default function RegisterPage() {
                     const isNumeric = col.type === 'number' || col.type === 'formula' || col.type === 'currency';
                     const calcType = calcTypes[col.id] || (isNumeric ? 'sum' : 'count');
                     const isFrozen = frozenColumns.has(col.id);
-                    const leftOffset = isFrozen ? columnOffsets[col.id] : 0;
+                    const leftOffset = isFrozen ? getFrozenLeftOffset(col.id) : 0;
                     
                     const entriesToCalculate = selectedRows.size > 0 
                       ? displayEntries.filter(e => selectedRows.has(e.id)) 
