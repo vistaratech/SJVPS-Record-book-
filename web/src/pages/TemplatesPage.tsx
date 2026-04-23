@@ -7,7 +7,7 @@ import {
   ArrowLeft, FileText, Hash, Calendar, ChevronDown, FlaskConical, Type,
   Building, GraduationCap, Store, Bus, Warehouse, Package, CalendarIcon, HeartPulse,
   Utensils, Dumbbell, Building2, User, ShieldCheck, Leaf, Plane,
-  Phone, Mail, Globe, Star, CheckSquare, Image,
+  Phone, Mail, Globe, Star, CheckSquare, Image, Plus
 } from 'lucide-react';
 import { useEffect } from 'react';
 
@@ -18,7 +18,7 @@ const ICON_MAP: Record<string, any> = {
   'building': Building, 'graduation-cap': GraduationCap, 'store': Store, 'bus': Bus,
   'warehouse': Warehouse, 'package': Package, 'calendar': CalendarIcon, 'heart-pulse': HeartPulse,
   'utensils': Utensils, 'dumbbell': Dumbbell, 'building-2': Building2, 'user': User,
-  'shield-check': ShieldCheck, 'leaf': Leaf, 'plane': Plane,
+  'shield-check': ShieldCheck, 'leaf': Leaf, 'plane': Plane, 'plus': Plus,
 };
 
 function getColTypeIcon(type: string) {
@@ -113,8 +113,21 @@ export default function TemplatesPage() {
             <CategoryCard 
               key={cat.id} cat={cat} 
               icon={ICON_MAP[cat.icon] || FileText} 
-              count={(TEMPLATES[cat.id] || []).length} 
-              onClick={() => setSelectedCategory(cat.id)} 
+              count={cat.id === 'blank' ? 0 : (TEMPLATES[cat.id] || []).length} 
+              onClick={() => {
+                if (cat.id === 'blank') {
+                  if (!businessId) return;
+                  setCreatingTemplate('Blank Register');
+                  createMutation.mutate({
+                    name: 'Blank Register',
+                    columns: [],
+                    icon: 'file',
+                    description: 'Start from scratch'
+                  });
+                } else {
+                  setSelectedCategory(cat.id);
+                }
+              }} 
             />
           ))}
         </div>

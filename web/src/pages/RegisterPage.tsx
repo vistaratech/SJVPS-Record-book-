@@ -124,6 +124,7 @@ export default function RegisterPage() {
 
   // Calc modal
   const [calcColId, setCalcColId] = useState<number | null>(null);
+  const [calcMenu, setCalcMenu] = useState<{ colId: number; rect: DOMRect } | null>(null);
 
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -193,10 +194,29 @@ export default function RegisterPage() {
     if (register && register !== lastRegisterData.current) {
       lastRegisterData.current = register;
       setLocalEntries(register.entries);
-      // Auto-expand rowsToShow so all imported/loaded rows are visible immediately
-      setRowsToShow((prev) => Math.max(prev, register.entries.length));
+      // Auto-expand rowsToShow but cap it to prevent browser crashes on massive registers
+      setRowsToShow((prev) => Math.min(Math.max(prev, register.entries.length), 200));
     }
   }, [register]);
+
+  const handleCalcCellClick = (e: React.MouseEvent, colId: number) => {
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setCalcMenu({ colId, rect });
+  };
+
+  const updateCalcType = (colId: number, type: string) => {
+    setCalcTypes(prev => ({ ...prev, [colId.toString()]: type as CalcType }));
+    setCalcMenu(null);
+  };
+
+  useEffect(() => {
+    if (calcMenu) {
+      const h = () => setCalcMenu(null);
+      window.addEventListener('click', h);
+      return () => window.removeEventListener('click', h);
+    }
+  }, [calcMenu]);
 
   // Filter + sort entries — memoized so it only recomputes when inputs change
   const displayEntries = useMemo(() => {
@@ -1030,6 +1050,65 @@ export default function RegisterPage() {
       return rowObj;
     });
 
+    // ── Add Summation/Footer Row ──
+    const footerRow: Record<string, string> = {};
+    let hasAnyCalc = false;
+    visibleColumns.forEach(c => {
+      const calcType = calcTypes[c.id] || (
+        (c.type === 'number' || c.type === 'currency' || c.type === 'formula') ? 'sum' : 'count'
+      );
+      
+      if (calcType === 'none') {
+        footerRow[c.name] = '';
+        return;
+      }
+
+      hasAnyCalc = true;
+      const values = displayEntries.map(entry => {
+        if (c.type === 'formula') return evaluateFormula(c.formula || '', entry, columns);
+        return entry.cells?.[c.id.toString()] || '';
+      });
+
+      let calcValue: string | number = 0;
+      if (calcType === 'empty') {
+        calcValue = values.filter(v => v.trim() === '').length;
+      } else if (calcType === 'filled' || calcType === 'count') {
+        calcValue = values.filter(v => v.trim() !== '').length;
+      } else if (calcType === 'distinct') {
+        calcValue = new Set(values.filter(v => v.trim() !== '')).size;
+      } else if (calcType === 'sum' || calcType === 'average' || calcType === 'min' || calcType === 'max') {
+        const nums = values.map(v => {
+          if (v === 'true') return 1;
+          if (v === 'false' || !v) return 0;
+          const cleaned = v.toString().replace(/[^\d.-]/g, '');
+          const n = parseFloat(cleaned);
+          return isNaN(n) ? 0 : n;
+        });
+
+        if (calcType === 'sum') {
+          calcValue = nums.reduce((a, b) => a + b, 0);
+        } else if (calcType === 'average') {
+          calcValue = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2) : 0;
+        } else if (calcType === 'min') {
+          calcValue = nums.length > 0 ? Math.min(...nums) : 0;
+        } else if (calcType === 'max') {
+          calcValue = nums.length > 0 ? Math.max(...nums) : 0;
+        }
+      }
+
+      const prefix = calcType === 'sum' ? 'SUM: ' : 
+                     calcType === 'count' ? 'COUNT: ' : 
+                     calcType === 'distinct' ? 'DISTINCT: ' : 
+                     calcType === 'average' ? 'AVG: ' : 
+                     calcType === 'min' ? 'MIN: ' : 
+                     calcType === 'max' ? 'MAX: ' : '';
+      footerRow[c.name] = `${prefix}${calcValue}`;
+    });
+
+    if (hasAnyCalc) {
+      rows.push(footerRow);
+    }
+
     try {
       const ws = XLSX.utils.json_to_sheet(rows, { header: headerRow });
       
@@ -1098,6 +1177,61 @@ export default function RegisterPage() {
       ];
     });
 
+    // ── Add Summation/Footer Row ──
+    const footerRow: string[] = ['TOTALS'];
+    let hasAnyCalc = false;
+    visibleCols.forEach(c => {
+      const calcType = calcTypes[c.id] || (
+        (c.type === 'number' || c.type === 'currency' || c.type === 'formula') ? 'sum' : 'count'
+      );
+      
+      if (calcType === 'none') {
+        footerRow.push('');
+        return;
+      }
+
+      hasAnyCalc = true;
+      const values = displayEntries.map(entry => {
+        if (c.type === 'formula') return evaluateFormula(c.formula || '', entry, columns);
+        return entry.cells?.[c.id.toString()] || '';
+      });
+
+      let calcValue: string | number = 0;
+      if (calcType === 'empty') {
+        calcValue = values.filter(v => v.trim() === '').length;
+      } else if (calcType === 'filled' || calcType === 'count') {
+        calcValue = values.filter(v => v.trim() !== '').length;
+      } else if (calcType === 'distinct') {
+        calcValue = new Set(values.filter(v => v.trim() !== '')).size;
+      } else if (calcType === 'sum' || calcType === 'average' || calcType === 'min' || calcType === 'max') {
+        const nums = values.map(v => {
+          if (v === 'true') return 1;
+          if (v === 'false' || !v) return 0;
+          const cleaned = v.toString().replace(/[^\d.-]/g, '');
+          const n = parseFloat(cleaned);
+          return isNaN(n) ? 0 : n;
+        });
+
+        if (calcType === 'sum') {
+          calcValue = nums.reduce((a, b) => a + b, 0);
+        } else if (calcType === 'average') {
+          calcValue = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2) : 0;
+        } else if (calcType === 'min') {
+          calcValue = nums.length > 0 ? Math.min(...nums) : 0;
+        } else if (calcType === 'max') {
+          calcValue = nums.length > 0 ? Math.max(...nums) : 0;
+        }
+      }
+
+      const prefix = calcType === 'sum' ? 'SUM: ' : 
+                     calcType === 'count' ? 'COUNT: ' : 
+                     calcType === 'distinct' ? 'DISTINCT: ' : 
+                     calcType === 'average' ? 'AVG: ' : 
+                     calcType === 'min' ? 'MIN: ' : 
+                     calcType === 'max' ? 'MAX: ' : '';
+      footerRow.push(`${prefix}${calcValue}`);
+    });
+
     try {
       const doc = new jsPDF({ orientation: headerRow.length > 6 ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
 
@@ -1113,14 +1247,28 @@ export default function RegisterPage() {
       doc.text(`Exported on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} • ${displayEntries.length} rows`, 14, 24);
       doc.setTextColor(0, 0, 0);
 
+      doc.setProperties({ title: register.name || 'Register Export' });
+
       autoTable(doc, {
         startY: 30,
         head: [['S.No.', ...headerRow]],
         body: bodyRows,
+        foot: hasAnyCalc ? [footerRow] : undefined,
         theme: 'grid',
+        tableWidth: 'wrap',
+        horizontalPageBreak: true,
+        horizontalPageBreakRepeat: 0,
         headStyles: {
           fillColor: [20, 83, 45],
           textColor: 255,
+          fontStyle: 'bold',
+          fontSize: 8,
+          halign: 'center',
+          valign: 'middle',
+        },
+        footStyles: {
+          fillColor: [230, 240, 230],
+          textColor: [20, 83, 45],
           fontStyle: 'bold',
           fontSize: 8,
           halign: 'center',
@@ -1128,6 +1276,7 @@ export default function RegisterPage() {
         bodyStyles: {
           fontSize: 8,
           cellPadding: 3,
+          valign: 'middle',
         },
         alternateRowStyles: {
           fillColor: [245, 247, 250],
@@ -1136,9 +1285,10 @@ export default function RegisterPage() {
           lineColor: [200, 200, 200],
           lineWidth: 0.25,
           overflow: 'linebreak',
+          minCellWidth: 20,
         },
         columnStyles: {
-          0: { halign: 'center', cellWidth: 14 },
+          0: { halign: 'center', cellWidth: 12, minCellWidth: 12 },
         },
         margin: { left: 14, right: 14 },
         didDrawPage: (data: any) => {
@@ -1287,6 +1437,20 @@ export default function RegisterPage() {
     const unfrozen = visible.filter((col) => !frozenColumns.has(col.id));
     return [...frozen, ...unfrozen];
   }, [columns, hiddenColumns, frozenColumns]);
+
+  // Pre-calculate sticky offsets to avoid DOM reads during render (Fix for "Unresponsive" error)
+  const columnOffsets = useMemo(() => {
+    const offsets: Record<number, number> = {};
+    let currentOffset = 50; // S.No width
+    for (const col of visibleColumns) {
+      if (frozenColumns.has(col.id)) {
+        offsets[col.id] = currentOffset;
+        currentOffset += colWidths[col.id] || 120;
+      }
+    }
+    return offsets;
+  }, [visibleColumns, frozenColumns, colWidths]);
+
   // Keep refs in sync for smooth drag handler closures
   visibleColumnsRef.current = visibleColumns;
   columnsRef.current = columns;
@@ -1296,17 +1460,7 @@ export default function RegisterPage() {
 
 
 
-  const getFrozenLeftOffset = useCallback((colId: number) => {
-    let offset = 50; // S.No column width
-    for (const vc of visibleColumns) {
-      if (vc.id === colId) break;
-      if (frozenColumns.has(vc.id)) {
-        const headerEl = colHeaderRefs.current.get(vc.id);
-        offset += headerEl?.offsetWidth || 120;
-      }
-    }
-    return offset;
-  }, [frozenColumns, visibleColumns]);
+
 
 
 
@@ -1443,33 +1597,10 @@ export default function RegisterPage() {
         </div>
       )}
 
-      {/* ── Dynamic Column Widths ── */}
-      <style>{`
-        ${visibleColumns.map((col, idx) => {
-          const w = colWidths[col.id];
-          if (!w) return '';
-          return `
-            .spreadsheet tr > :nth-child(${idx + 2}) {
-              width: ${w}px !important;
-              min-width: ${w}px !important;
-              max-width: ${w}px !important;
-            }
-            .spreadsheet tr > :nth-child(${idx + 2}) .col-header-inner {
-              width: ${w}px !important;
-              min-width: ${w}px !important;
-              max-width: ${w}px !important;
-            }
-            .spreadsheet td:nth-child(${idx + 2}) {
-              overflow: hidden !important;
-              text-overflow: ellipsis !important;
-            }
-          `;
-        }).join('')}
-      `}</style>
-
       {/* ── Spreadsheet ── */}
       <div className="spreadsheet-wrapper">
-        <table className="spreadsheet">
+        <table className="spreadsheet" style={{ tableLayout: 'fixed', width: 'max-content' }}>
+          <colgroup><col style={{ width: 50 }} />{visibleColumns.map(col => (<col key={col.id} style={{ width: colWidths[col.id] || 120 }} />))}</colgroup>
           <thead>
             <tr>
               <th className="serial">S.NO.</th>
@@ -1497,17 +1628,7 @@ export default function RegisterPage() {
 
                 // Compute frozen column sticky left offset
                 const isFrozen = frozenColumns.has(col.id);
-                let stickyLeft: number | undefined;
-                if (isFrozen) {
-                  stickyLeft = 50; // S.No. column width
-                  for (const vc of visibleColumns) {
-                    if (vc.id === col.id) break;
-                    if (frozenColumns.has(vc.id)) {
-                      const headerEl = colHeaderRefs.current.get(vc.id);
-                      stickyLeft += headerEl?.offsetWidth || 120;
-                    }
-                  }
-                }
+                const stickyLeft = columnOffsets[col.id];
 
                 return (
                 <th 
@@ -1573,6 +1694,8 @@ export default function RegisterPage() {
                 registerColumns={columns}
                 onRowDoubleClick={setDetailViewEntry}
                 frozenColumns={frozenColumns}
+                columnOffsets={columnOffsets}
+                totalRows={displayEntries.length}
               />
             ))}
 
@@ -1600,51 +1723,72 @@ export default function RegisterPage() {
             {displayEntries.length > 0 && (
               <tfoot>
                 <tr className="calc-row">
-                  <td className="sticky-col sticky-col-1 calc-cell-td" style={{ background: 'var(--border-light)' }} />
-                  <td className="sticky-col sticky-col-2 calc-cell-td" style={{ background: 'var(--border-light)' }}>
-                    <span className="calc-label">Σ</span>
+                  <td className="sticky-col sticky-col-1 calc-cell-td" style={{ background: 'var(--border-light)', textAlign: 'center' }}>
+                    <span className="calc-label" style={{ fontWeight: 800, fontSize: '14px', color: 'var(--navy)' }}>Σ</span>
                   </td>
                   {visibleColumns.map((col) => {
                     const isNumeric = col.type === 'number' || col.type === 'formula' || col.type === 'currency';
                     const calcType = calcTypes[col.id] || (isNumeric ? 'sum' : 'count');
                     const isFrozen = frozenColumns.has(col.id);
-                    const leftOffset = isFrozen ? getFrozenLeftOffset(col.id) : 0;
+                    const leftOffset = isFrozen ? columnOffsets[col.id] : 0;
                     
                     const entriesToCalculate = selectedRows.size > 0 
                       ? displayEntries.filter(e => selectedRows.has(e.id)) 
                       : displayEntries;
                       
-                    // Calculate directly here for selected logic
                     let calcValue: number | string = '-';
                     const values = entriesToCalculate.map(e => e.cells?.[col.id.toString()] || '');
                     
-                    if (calcType === 'empty') calcValue = values.filter(v => v.trim() === '').length;
-                    else if (calcType === 'filled') calcValue = values.filter(v => v.trim() !== '').length;
-                    else if (calcType === 'count') calcValue = values.filter(v => v.trim() !== '').length; // Same as filled by default
-                    else if (isNumeric) {
-                      const nums = values.map(v => parseFloat(v)).filter(v => !isNaN(v));
-                      if (nums.length === 0) calcValue = 0;
-                      else if (calcType === 'sum') calcValue = nums.reduce((a, b) => a + b, 0);
-                      else if (calcType === 'average') calcValue = nums.reduce((a, b) => a + b, 0) / nums.length;
-                      else if (calcType === 'min') calcValue = Math.min(...nums);
-                      else if (calcType === 'max') calcValue = Math.max(...nums);
+                    if (calcType === 'empty') {
+                      calcValue = values.filter(v => v.trim() === '').length;
+                    } else if (calcType === 'filled' || calcType === 'count') {
+                      calcValue = values.filter(v => v.trim() !== '').length;
+                    } else if (calcType === 'distinct') {
+                      calcValue = new Set(values.filter(v => v.trim() !== '')).size;
+                    } else if (isNumeric || calcType === 'sum' || calcType === 'average' || calcType === 'min' || calcType === 'max') {
+                      const nums = values.map(v => {
+                        if (v === 'true') return 1;
+                        if (v === 'false') return 0;
+                        // Handle potential currency symbols or commas
+                        const clean = v.replace(/[₹,]/g, '');
+                        return parseFloat(clean);
+                      }).filter(v => !isNaN(v));
+
+                      if (nums.length === 0) {
+                        calcValue = 0;
+                      } else {
+                        if (calcType === 'sum') calcValue = nums.reduce((a, b) => a + b, 0);
+                        else if (calcType === 'average') calcValue = nums.reduce((a, b) => a + b, 0) / nums.length;
+                        else if (calcType === 'min') calcValue = Math.min(...nums);
+                        else if (calcType === 'max') calcValue = Math.max(...nums);
+                      }
                       
                       if (typeof calcValue === 'number') {
                          calcValue = Number.isInteger(calcValue) ? calcValue : parseFloat(calcValue.toFixed(2));
                       }
                     }
                     
+                    if (calcType === 'none') calcValue = '-';
+
                     return (
                       <td
                         key={col.id}
                         className={`calc-cell-td ${isFrozen ? 'frozen-col' : ''}`}
                         style={isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 11, background: 'var(--border-light)' } : undefined}
-                        onDoubleClick={() => {
-                          setCalcColId(col.id);
-                          setCalcModal(true);
-                        }}
                       >
-                        <span className="calc-label">{calcType.toUpperCase()}:</span> {calcValue}
+                        <div className="calc-cell-content" onClick={(e) => handleCalcCellClick(e, col.id)}>
+                          <span className="calc-dropdown-icon">
+                            <ChevronDown size={10} />
+                          </span>
+                          <span className="calc-label">
+                            {calcType === 'sum' && 'Σ '}
+                            {calcType === 'count' && 'N '}
+                            {calcType === 'distinct' && 'D '}
+                            {calcType === 'average' && 'μ '}
+                            {calcType === 'none' ? 'CALC' : calcType.toUpperCase()}:
+                          </span>
+                          <span className="calc-value">{calcValue}</span>
+                        </div>
                       </td>
                     );
                   })}
@@ -1674,6 +1818,8 @@ export default function RegisterPage() {
         handleRowDownloadPDF={handleRowDownloadPDF}
         handleRowDownloadExcel={handleRowDownloadExcel}
         handleRowShareText={handleRowShareText}
+        calcTypes={calcTypes}
+        updateCalcType={updateCalcType}
       />
 
       {/* ── Modals ── */}
@@ -1779,6 +1925,58 @@ export default function RegisterPage() {
                 setDetailEdits({});
               }}>Save Changes</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {calcMenu && (
+        <div className="context-popover-layer" onClick={() => setCalcMenu(null)}>
+          <div 
+            className="context-menu calc-dropdown-menu"
+            style={{
+              position: 'fixed',
+              bottom: window.innerHeight - calcMenu.rect.top + 5,
+              left: Math.min(calcMenu.rect.left, window.innerWidth - 180),
+              zIndex: 1000,
+              width: '180px'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="context-section-label">Calculation Type</div>
+            {[
+              { id: 'sum', label: 'Sum (Σ)', icon: 'Σ' },
+              { id: 'count', label: 'Count (N)', icon: 'N' },
+              { id: 'distinct', label: 'Distinct (D)', icon: 'D' },
+              { id: 'average', label: 'Average (Avg)', icon: 'μ' },
+              { id: 'min', label: 'Minimum (Min)', icon: '↓' },
+              { id: 'max', label: 'Maximum (Max)', icon: '↑' },
+              { id: 'filled', label: 'Filled Cells', icon: '●' },
+              { id: 'empty', label: 'Empty Cells', icon: '○' },
+            ].map(opt => {
+              const currentType = calcTypes[calcMenu.colId] || (
+                (columns.find(c => c.id === calcMenu.colId)?.type === 'number' || 
+                 columns.find(c => c.id === calcMenu.colId)?.type === 'currency' || 
+                 columns.find(c => c.id === calcMenu.colId)?.type === 'formula') ? 'sum' : 'count'
+              );
+              const isActive = currentType === opt.id;
+              return (
+                <button 
+                  key={opt.id}
+                  className={`context-item ${isActive ? 'active' : ''}`} 
+                  onClick={() => updateCalcType(calcMenu.colId, opt.id)}
+                >
+                  <span className="context-item-icon" style={{ fontSize: '12px', width: '16px', fontWeight: 800 }}>{opt.icon}</span>
+                  <span className="context-item-label" style={{ fontWeight: isActive ? 700 : 400 }}>{opt.label}</span>
+                  {isActive && <span style={{ marginLeft: 'auto', fontSize: '10px' }}>●</span>}
+                </button>
+              );
+            })}
+            
+            <div className="context-divider" />
+            
+            <button className="context-item danger" onClick={() => updateCalcType(calcMenu.colId, 'none')}>
+              <span className="context-item-label">Remove Calculation</span>
+            </button>
           </div>
         </div>
       )}

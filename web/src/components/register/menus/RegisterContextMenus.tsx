@@ -40,6 +40,9 @@ interface RegisterContextMenusProps {
   handleRowDownloadPDF: (entryId: number) => void;
   handleRowDownloadExcel: (entryId: number) => void;
   handleRowShareText: (entryId: number) => void;
+  // Calc
+  calcTypes: Record<number, string>;
+  updateCalcType: (colId: number, type: string) => void;
 }
 
 export function RegisterContextMenus(props: RegisterContextMenusProps) {
@@ -51,7 +54,8 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
     moveColumnMutation, frozenColumns, setFrozenColumns, freezeColumn, registerId,
     hiddenColumns, setHiddenColumns, hideColumn, clearColumnDataMutation, deleteColumnMutation,
     rowMenuId, setRowMenuId, duplicateEntryMutation, deleteEntryMutation,
-    handleRowDownloadPDF, handleRowDownloadExcel, handleRowShareText
+    handleRowDownloadPDF, handleRowDownloadExcel, handleRowShareText,
+    calcTypes, updateCalcType
   } = props;
 
   return (
@@ -168,6 +172,43 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
             }}>
               <EyeOff size={16} /> Hide Column
             </button>
+
+            <div className="context-divider" />
+            <div className="context-section-label">Footer Calculation</div>
+            <div className="context-item-row" style={{ padding: '6px 12px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {['sum', 'count', 'distinct', 'average', 'none'].map((type) => {
+                const isActive = (calcTypes[colMenuId!] || (
+                  (columns.find(c => c.id === colMenuId)?.type === 'number' || 
+                   columns.find(c => c.id === colMenuId)?.type === 'currency' || 
+                   columns.find(c => c.id === colMenuId)?.type === 'formula') ? 'sum' : 'count'
+                )) === type;
+                return (
+                  <button 
+                    key={type}
+                    className={`context-item-mini ${isActive ? 'active' : ''}`} 
+                    style={{ 
+                      padding: '4px 10px', 
+                      fontSize: '11px', 
+                      borderRadius: '6px',
+                      border: '1px solid var(--border)',
+                      background: isActive ? 'var(--primary-light)' : 'white',
+                      color: isActive ? 'var(--primary)' : 'inherit',
+                      borderColor: isActive ? 'var(--primary)' : 'var(--border)',
+                      cursor: 'pointer',
+                      textTransform: 'capitalize',
+                      fontWeight: isActive ? 600 : 400,
+                      transition: 'all 0.2s'
+                    }}
+                    onClick={() => {
+                      updateCalcType(colMenuId!, type);
+                      setColMenuId(null);
+                    }}
+                  >
+                    {type}
+                  </button>
+                );
+              })}
+            </div>
 
             <div className="context-divider" />
             <button className="context-item danger" onClick={() => { if (confirm('Clear all data?')) clearColumnDataMutation.mutate(colMenuId); }}>

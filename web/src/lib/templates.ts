@@ -1,6 +1,7 @@
 // Template definitions — web version using Lucide icon names
 
 export const CATEGORIES = [
+  { id: 'blank',        icon: 'plus',           color: '#10B981', name: 'Blank Register' },
   { id: 'property',     icon: 'building',      color: '#3B82F6', name: 'Property' },
   { id: 'school',       icon: 'graduation-cap', color: '#10B981', name: 'School' },
   { id: 'shop',         icon: 'store',          color: '#F59E0B', name: 'Shop' },
