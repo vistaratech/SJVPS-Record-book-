@@ -45,7 +45,7 @@ export async function listBusinesses(): Promise<Business[]> {
 }
 
 export async function createBusiness(name: string): Promise<Business> {
-  const bus: Business = { id: Date.now(), name, ownerId: 1, createdAt: new Date().toISOString() };
+  const bus: Business = { id: generateId(), name, ownerId: 1, createdAt: new Date().toISOString() };
   await setDoc(doc(db, 'businesses', bus.id.toString()), bus);
   return bus;
 }
@@ -68,7 +68,7 @@ export async function listFolders(businessId: number): Promise<Folder[]> {
 }
 
 export async function createFolder(businessId: number, name: string): Promise<Folder> {
-  const folder: Folder = { id: Date.now(), businessId, name, createdAt: new Date().toISOString() };
+  const folder: Folder = { id: generateId(), businessId, name, createdAt: new Date().toISOString() };
   await setDoc(folderDoc(folder.id), folder);
   return folder;
 }
@@ -133,6 +133,13 @@ const registerMutationQueues = new Map<number, Promise<any>>();
 // Tracks how many mutations are currently pending/running globally
 let pendingMutationsCount = 0;
 const mutationListeners = new Set<(count: number) => void>();
+let lastGeneratedId = 0;
+
+function generateId(): number {
+  const now = Date.now();
+  lastGeneratedId = now <= lastGeneratedId ? lastGeneratedId + 1 : now;
+  return lastGeneratedId;
+}
 
 export function subscribeToMutationStatus(callback: (count: number) => void) {
   mutationListeners.add(callback);
@@ -270,7 +277,7 @@ export async function createRegister(data: {
   category?: string; template?: string;
   columns?: Array<{ name: string; type: string; dropdownOptions?: string[]; formula?: string }>;
 }): Promise<RegisterSummary> {
-  const newId = Date.now();
+  const newId = generateId();
   const newReg: RegisterDetail = {
     id: newId, businessId: data.businessId, folderId: data.folderId, name: data.name,
     icon: data.icon || 'file-text', iconColor: data.iconColor,
@@ -318,7 +325,7 @@ export async function renameRegister(registerId: number, newName: string): Promi
 export async function duplicateRegister(registerId: number): Promise<RegisterSummary> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
-    const newId = Date.now();
+    const newId = generateId();
     const duplicated: RegisterDetail = {
       ...JSON.parse(JSON.stringify(reg)), id: newId, name: `${reg.name} (Copy)`,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), entryCount: reg.entries.length,
@@ -383,6 +390,10 @@ const COLUMN_ALIASES: Record<string, ColumnHint> = {
 
   // ── Status ──
   'status':          { type: 'dropdown', dropdownOptions: ['Active', 'Inactive', 'Pending'] },
+  'old/new':         { type: 'dropdown', dropdownOptions: ['OLD', 'NEW'] },
+  'old / new':       { type: 'dropdown', dropdownOptions: ['OLD', 'NEW'] },
+  'sib stu':         { type: 'checkbox' },
+  'sibling':         { type: 'checkbox' },
 
   // ── Religion ──
   'religion':        { type: 'dropdown', dropdownOptions: ['Hindu', 'Muslim', 'Christian', 'Sikh', 'Buddhist', 'Jain', 'Other'] },
@@ -442,7 +453,7 @@ function excelSerialToDateStr(serial: number): string {
   const dd = String(d.getUTCDate()).padStart(2, '0');
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
   const yyyy = d.getUTCFullYear();
-  return `${dd}-${mm}-${yyyy}`;
+  return `${dd}/${mm}/${yyyy}`;
 }
 
 /** Check if a value looks like an Excel serial date (number between ~1 and ~60000). */
@@ -756,7 +767,7 @@ export async function addColumn(registerId: number, data: { name: string; type: 
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
     const col: Column = {
-      id: Date.now(), registerId, name: data.name, type: data.type,
+      id: generateId(), registerId, name: data.name, type: data.type,
       position: reg.columns.length, dropdownOptions: data.dropdownOptions, formula: data.formula,
     };
     reg.columns.push(col);
@@ -804,7 +815,7 @@ export async function duplicateColumn(registerId: number, columnId: number): Pro
     const original = reg.columns.find((c) => c.id === columnId);
     if (!original) throw new Error('Column not found');
     const newCol: Column = {
-      id: Date.now(), registerId, name: `${original.name} (Copy)`, type: original.type,
+      id: generateId(), registerId, name: `${original.name} (Copy)`, type: original.type,
       position: reg.columns.length, dropdownOptions: original.dropdownOptions ? [...original.dropdownOptions] : undefined,
       formula: original.formula,
     };
@@ -883,7 +894,7 @@ export async function insertColumn(registerId: number, data: { name: string; typ
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
     const col: Column = {
-      id: Date.now(), registerId, name: data.name, type: data.type,
+      id: generateId(), registerId, name: data.name, type: data.type,
       position, dropdownOptions: data.dropdownOptions, formula: data.formula,
     };
     reg.columns.splice(position, 0, col);
@@ -921,8 +932,23 @@ export async function addEntry(registerId: number, cells: Record<string, string>
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
     const pageEntries = reg.entries.filter((e) => (e.pageIndex || 0) === pageIndex);
+
+    // Auto-populate auto_increment columns
+    const autoIncrCols = reg.columns.filter(c => c.type === 'auto_increment');
+    for (const col of autoIncrCols) {
+      const colIdStr = col.id.toString();
+      if (!cells[colIdStr]) {
+        let maxVal = 0;
+        for (const e of pageEntries) {
+          const v = parseInt(e.cells?.[colIdStr] || '0', 10);
+          if (!isNaN(v) && v > maxVal) maxVal = v;
+        }
+        cells[colIdStr] = (maxVal + 1).toString();
+      }
+    }
+
     const entry: Entry = {
-      id: Date.now(), registerId, rowNumber: pageEntries.length + 1,
+      id: generateId(), registerId, rowNumber: pageEntries.length + 1,
       cells, createdAt: new Date().toISOString(), pageIndex,
     };
     reg.entries.push(entry);
@@ -970,7 +996,7 @@ export async function duplicateEntry(registerId: number, entryId: number): Promi
     const original = reg.entries.find((e) => e.id === entryId);
     if (!original) throw new Error('Entry not found');
     const duplicate: Entry = {
-      id: Date.now(), registerId, rowNumber: reg.entries.length + 1,
+      id: generateId(), registerId, rowNumber: reg.entries.length + 1,
       cells: { ...original.cells }, createdAt: new Date().toISOString(), pageIndex: original.pageIndex,
     };
     reg.entries.push(duplicate);
@@ -995,7 +1021,7 @@ export async function addPage(registerId: number, pageName?: string): Promise<Pa
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
     if (!reg.pages) reg.pages = [{ id: 1, name: 'Page 1', index: 0 }];
-    const newPage: Page = { id: Date.now(), name: pageName || `Page ${reg.pages.length + 1}`, index: reg.pages.length };
+    const newPage: Page = { id: generateId(), name: pageName || `Page ${reg.pages.length + 1}`, index: reg.pages.length };
     reg.pages.push(newPage);
     await saveRegDocImmediate(reg);
     return newPage;
@@ -1044,7 +1070,7 @@ export async function addSharedUser(registerId: number, phone: string, permissio
     const reg = await getRegDoc(registerId);
     if (!reg.sharedWith) reg.sharedWith = [];
     const user: SharedUser = {
-      id: Date.now(), name: `User ${phone.slice(-4)}`, phone, permission, addedAt: new Date().toISOString(),
+      id: generateId(), name: `User ${phone.slice(-4)}`, phone, permission, addedAt: new Date().toISOString(),
     };
     reg.sharedWith.push(user);
     await saveRegDocImmediate(reg);
@@ -1082,7 +1108,7 @@ export function generateCSV(register: RegisterDetail, pageIndex: number = 0): st
   return [headerRow, ...dataRows].join('\n');
 }
 
-export interface ColumnStats { sum: number; average: number; count: number; min: number; max: number; filled: number; }
+export interface ColumnStats { sum: number; average: number; count: number; min: number; max: number; filled: number; empty: number; }
 
 export function calculateColumnStats(entries: Entry[], columnId: string): ColumnStats {
   const values = entries.map((e) => e.cells?.[columnId]).filter((v) => v !== undefined && v !== null && v !== '');
@@ -1092,5 +1118,6 @@ export function calculateColumnStats(entries: Entry[], columnId: string): Column
     average: numbers.length > 0 ? numbers.reduce((a, b) => a + b, 0) / numbers.length : 0,
     count: values.length, min: numbers.length > 0 ? Math.min(...numbers) : 0,
     max: numbers.length > 0 ? Math.max(...numbers) : 0, filled: values.length,
+    empty: entries.length - values.length
   };
 }

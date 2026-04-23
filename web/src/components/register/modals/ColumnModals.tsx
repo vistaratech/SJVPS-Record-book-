@@ -1,5 +1,5 @@
 import { AlertCircle, X, Plus } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 function OptionsEditor({ value, onChange }: { value: string, onChange: (v: string) => void }) {
   const [opts, setOpts] = useState<string[]>([]);

@@ -78,6 +78,20 @@ export const TEMPLATES: Record<string, Template[]> = {
   // ─── School ───────────────────────────────────────────────────
   school: [
     {
+      name: 'Admission Register',
+      icon: 'users',
+      description: 'Student admissions with family and class details',
+      columns: [
+        { name: 'Date',         type: 'date' },
+        { name: 'Old / New',    type: 'dropdown', dropdownOptions: ['OLD', 'NEW'] },
+        { name: 'Sib Stu',      type: 'checkbox' },
+        { name: 'DOB',          type: 'date' },
+        { name: 'Name',         type: 'text' },
+        { name: 'Parent Name',  type: 'text' },
+        { name: 'Class',        type: 'dropdown', dropdownOptions: ['PRE-KG', 'LKG', 'UKG', '1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th', '12th'] },
+      ],
+    },
+    {
       name: 'Attendance Register',
       icon: 'check-circle',
       description: 'Daily student attendance tracking',

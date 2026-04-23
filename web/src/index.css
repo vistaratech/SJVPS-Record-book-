@@ -1080,11 +1080,11 @@ a { text-decoration: none; color: inherit; }
   position: sticky;
   top: 0;
   z-index: 10;
-  background: var(--border-light);
+  background: #f8faff;
   border-bottom: 2px solid var(--border);
   border-right: 1px solid var(--border);
   padding: 0;
-  height: 34px;
+  height: 36px;
   text-align: left;
   font-size: 12px;
   font-weight: 700;
@@ -1097,7 +1097,7 @@ a { text-decoration: none; color: inherit; }
   user-select: none;
   transition: background 0.1s;
 }
-.spreadsheet th:hover { background: var(--border); }
+.spreadsheet th:hover { background: #f1f5ff; }
 .spreadsheet th.serial { 
   width: 50px; 
   min-width: 50px;
@@ -1137,6 +1137,86 @@ a { text-decoration: none; color: inherit; }
   width: 16px;
   height: 100%;
   cursor: col-resize;
+}
+
+/* ── Drag Grip Handle (RecordBook-style ⋮⋮) ── */
+.col-drag-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  min-width: 14px;
+  height: 22px;
+  cursor: grab;
+  color: var(--muted, #9ca3af);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  line-height: 1;
+  border-radius: 3px;
+  transition: color 0.15s, background 0.15s;
+  user-select: none;
+  flex-shrink: 0;
+}
+.col-drag-grip:hover {
+  color: var(--navy, #1a237e);
+  background: rgba(26, 35, 126, 0.08);
+}
+.col-drag-grip:active {
+  cursor: grabbing;
+  color: var(--navy, #1a237e);
+  background: rgba(26, 35, 126, 0.15);
+}
+
+/* Column header name — truncate with ellipsis */
+.col-header-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  letter-spacing: 0.35px;
+}
+
+.col-type-text-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  min-width: 14px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--navy);
+  opacity: 0.9;
+}
+
+/* ── Right-side ⋮ Menu Dots (RecordBook-style) ── */
+.col-menu-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  min-width: 14px;
+  height: 22px;
+  cursor: pointer;
+  color: var(--muted, #9ca3af);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  line-height: 1;
+  border-radius: 3px;
+  transition: color 0.15s, background 0.15s;
+  user-select: none;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.col-menu-dots:hover {
+  color: var(--navy, #1a237e);
+  background: rgba(26, 35, 126, 0.08);
+}
+.col-menu-dots:active {
+  color: var(--navy, #1a237e);
+  background: rgba(26, 35, 126, 0.15);
 }
 
 /* Column being dragged — dim it */
@@ -1276,7 +1356,79 @@ a { text-decoration: none; color: inherit; }
 .cell-url-link { flex-shrink: 0; display: flex; align-items: center; padding: 0 8px; color: var(--navy); opacity: 0.7; transition: opacity 0.15s; }
 .cell-url-link:hover { opacity: 1; }
 
+/* ── Auto-Increment Cell ── */
+.cell-auto-increment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 100%;
+  font-size: 13px;
+  color: var(--navy);
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(26, 35, 126, 0.03);
+  cursor: default;
+  user-select: text;
+}
+.cell-auto-increment svg { opacity: 0.5; flex-shrink: 0; }
+
+/* ── Currency Cell ── */
+.cell-currency {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  height: 100%;
+  font-size: 13px;
+  color: #166534;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  min-height: 34px;
+}
+.cell-currency:hover { background: rgba(22, 101, 52, 0.04); }
+.cell-currency:focus {
+  background: #ffffff;
+  outline: 2px solid #217346;
+  outline-offset: -2px;
+  z-index: 2;
+  position: relative;
+}
+.currency-editing {
+  color: #166534;
+  font-weight: 600;
+}
+/* Hide number input spin arrows for currency */
+.currency-editing::-webkit-inner-spin-button,
+.currency-editing::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.currency-editing { -moz-appearance: textfield; }
+
+/* ── Sort Indicator ── */
+.sort-indicator {
+  font-size: 9px;
+  color: var(--navy);
+  opacity: 0.7;
+  margin-left: -2px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+/* ── Frozen Column Visual ── */
+.spreadsheet th.frozen-col,
+.spreadsheet td.frozen-col {
+  border-right: 2px solid var(--navy) !important;
+  background: var(--border-light) !important;
+}
+.spreadsheet td.frozen-col {
+  background: #fafbff !important;
+}
+
 .row-menu-btn {
+
   width: 28px;
   height: 28px;
   border-radius: 6px;
@@ -1290,26 +1442,28 @@ a { text-decoration: none; color: inherit; }
 }
 .row-menu-btn:hover { background: var(--border-light); color: var(--navy); }
 
-/* ── Calc Bar ── */
-.calc-bar {
-  display: flex;
+/* ── Calc Row (Inside Table) ── */
+.calc-row {
   height: 36px;
   background: var(--border-light);
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  box-shadow: 0 -1px 0 var(--border);
 }
-.calc-cell {
+.calc-cell-td {
   padding: 0 16px;
-  display: flex;
-  align-items: center;
   font-size: 11px;
   font-weight: 600;
   color: var(--navy);
   border-right: 1px solid var(--border);
+  border-top: 1px solid var(--border);
   cursor: pointer;
   transition: background 0.15s;
+  background: var(--border-light);
+  white-space: nowrap;
 }
-.calc-cell:hover { background: var(--border); }
+.calc-cell-td:hover { background: var(--border); }
 .calc-label { color: var(--muted); font-size: 10px; margin-right: 4px; }
 
 /* ═══════════ EMPTY STATE ═══════════ */
@@ -1459,6 +1613,18 @@ a { text-decoration: none; color: inherit; }
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--border);
   animation: slideUp 0.15s ease;
+}
+
+.context-popover-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.context-menu-column {
+  position: fixed;
+  max-height: min(70vh, calc(100vh - 90px));
+  overflow-y: auto;
 }
 .context-menu-wide {
   min-width: 260px;
@@ -2483,10 +2649,8 @@ a { text-decoration: none; color: inherit; }
   .guidance-title  { font-size: 13px; }
   .guidance-sub    { font-size: 11px; }
 
-  /* ── Calc bar ────────────────────────────────────────── */
-  .calc-bar  { overflow-x: auto; }
-  .calc-bar::-webkit-scrollbar { display: none; }
-  .calc-cell { padding: 0 10px; font-size: 10px; min-width: 80px; }
+  /* ── Calc Row ────────────────────────────────────────── */
+  .calc-cell-td { padding: 0 10px; font-size: 10px; }
 
   /* ── Modals — slide up from bottom ──────────────────── */
   .modal-overlay {

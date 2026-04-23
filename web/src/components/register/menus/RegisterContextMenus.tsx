@@ -1,16 +1,14 @@
-import { Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, SortAsc, Check, SortDesc, Pencil, ArrowLeftRight, Copy, ArrowRight, ChevronsLeftRight, Pin, EyeOff, Eraser, Trash2, FileText, FileSpreadsheet, Share2, ArrowLeft } from 'lucide-react';
+import { Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, SortAsc, SortDesc, Pencil, ArrowLeftRight, Copy, ArrowRight, ChevronsLeftRight, Pin, EyeOff, Eraser, Trash2, FileText, FileSpreadsheet, Share2, ArrowLeft } from 'lucide-react';
 import { type Column } from '../../../lib/api';
 
 interface RegisterContextMenusProps {
   // Column Menu
   colMenuId: number | null;
+  colMenuRect: DOMRect | null;
   setColMenuId: (id: number | null) => void;
   setActiveModalColId: (id: number | null) => void;
   columns: Column[];
-  sortCol: number | null;
-  sortDir: 'asc' | 'desc' | null;
-  setSortCol: (id: number | null) => void;
-  setSortDir: (dir: 'asc' | 'desc' | null) => void;
+  handleSort: (colId: number, direction: 'asc' | 'desc') => void;
   setRenameColValue: (v: string) => void;
   setRenameColModal: (v: boolean) => void;
   setChangeTypeValue: (v: string) => void;
@@ -46,7 +44,7 @@ interface RegisterContextMenusProps {
 
 export function RegisterContextMenus(props: RegisterContextMenusProps) {
   const {
-    colMenuId, setColMenuId, setActiveModalColId, columns, sortCol, sortDir, setSortCol, setSortDir,
+    colMenuId, colMenuRect, setColMenuId, setActiveModalColId, columns, handleSort,
     setRenameColValue, setRenameColModal, setChangeTypeValue, setChangeTypeModal,
     setDropdownConfigOptions, setDropdownConfigModal, duplicateColumnMutation,
     setNewColName, setNewColType, setNewColDropdownOpts, setNewColFormula, setInsertColModal,
@@ -60,8 +58,12 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
     <>
       {/* ── Column Context Menu ── */}
       {colMenuId !== null && (
-        <div className="modal-overlay" onClick={() => setColMenuId(null)}>
-          <div className="context-menu context-menu-wide" onClick={(e) => e.stopPropagation()}>
+        <div className="context-popover-layer" onClick={() => setColMenuId(null)}>
+          <div
+            className="context-menu context-menu-wide context-menu-column"
+            style={colMenuRect ? { top: colMenuRect.bottom + 4, left: colMenuRect.left } : undefined}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="context-title">
               {(() => {
                 const col = columns.find((c) => c.id === colMenuId);
@@ -79,13 +81,11 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
             </div>
 
             <div className="context-section-label">Sort</div>
-            <button className="context-item" onClick={() => { setSortCol(colMenuId); setSortDir('asc'); setColMenuId(null); }}>
+            <button className="context-item" onClick={() => { handleSort(colMenuId!, 'asc'); setColMenuId(null); }}>
               <SortAsc size={16} /> Sort A → Z
-              {sortCol === colMenuId && sortDir === 'asc' && <Check size={14} className="context-check" />}
             </button>
-            <button className="context-item" onClick={() => { setSortCol(colMenuId); setSortDir('desc'); setColMenuId(null); }}>
+            <button className="context-item" onClick={() => { handleSort(colMenuId!, 'desc'); setColMenuId(null); }}>
               <SortDesc size={16} /> Sort Z → A
-              {sortCol === colMenuId && sortDir === 'desc' && <Check size={14} className="context-check" />}
             </button>
 
             <div className="context-divider" />
