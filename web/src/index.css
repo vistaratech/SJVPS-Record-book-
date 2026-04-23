@@ -1123,50 +1123,21 @@ a { text-decoration: none; color: inherit; }
   gap: 6px;
   padding: 0 6px;
   height: 100%;
-  resize: horizontal;
   overflow: hidden;
   min-width: 40px;
   position: relative;
 }
-/* Right-edge resize zone — shows col-resize cursor */
-.spreadsheet th .col-header-inner::after {
-  content: '';
+/* Right-edge resize zone handle */
+.col-resize-handle {
   position: absolute;
   top: 0;
   right: 0;
-  width: 16px;
+  width: 12px;
   height: 100%;
   cursor: col-resize;
+  z-index: 15;
 }
 
-/* ── Drag Grip Handle (RecordBook-style ⋮⋮) ── */
-.col-drag-grip {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  min-width: 14px;
-  height: 22px;
-  cursor: grab;
-  color: var(--muted, #9ca3af);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: -1px;
-  line-height: 1;
-  border-radius: 3px;
-  transition: color 0.15s, background 0.15s;
-  user-select: none;
-  flex-shrink: 0;
-}
-.col-drag-grip:hover {
-  color: var(--navy, #1a237e);
-  background: rgba(26, 35, 126, 0.08);
-}
-.col-drag-grip:active {
-  cursor: grabbing;
-  color: var(--navy, #1a237e);
-  background: rgba(26, 35, 126, 0.15);
-}
 
 /* Column header name — truncate with ellipsis */
 .col-header-name {
@@ -1190,34 +1161,6 @@ a { text-decoration: none; color: inherit; }
   opacity: 0.9;
 }
 
-/* ── Right-side ⋮ Menu Dots (RecordBook-style) ── */
-.col-menu-dots {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  min-width: 14px;
-  height: 22px;
-  cursor: pointer;
-  color: var(--muted, #9ca3af);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: -1px;
-  line-height: 1;
-  border-radius: 3px;
-  transition: color 0.15s, background 0.15s;
-  user-select: none;
-  flex-shrink: 0;
-  margin-left: auto;
-}
-.col-menu-dots:hover {
-  color: var(--navy, #1a237e);
-  background: rgba(26, 35, 126, 0.08);
-}
-.col-menu-dots:active {
-  color: var(--navy, #1a237e);
-  background: rgba(26, 35, 126, 0.15);
-}
 
 /* Column being dragged — dim it */
 .spreadsheet th.dragging {

@@ -1,16 +1,22 @@
 import { AlertCircle, X, Plus } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 function OptionsEditor({ value, onChange }: { value: string, onChange: (v: string) => void }) {
-  const [opts, setOpts] = useState<string[]>([]);
+  const [opts, setOpts] = useState<string[]>(() => value ? value.split(',') : []);
+  const lastSentValue = useRef(value);
   
   useEffect(() => {
-    setOpts(value ? value.split(',').map(s => s.trim()).filter(Boolean) : []);
+    if (value !== lastSentValue.current) {
+      setOpts(value ? value.split(',') : []);
+      lastSentValue.current = value;
+    }
   }, [value]);
 
   const updateOpts = (newOpts: string[]) => {
     setOpts(newOpts);
-    onChange(newOpts.join(','));
+    const newStr = newOpts.join(',');
+    lastSentValue.current = newStr;
+    onChange(newStr);
   };
 
   return (

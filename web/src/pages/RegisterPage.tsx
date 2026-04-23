@@ -16,7 +16,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
-  Plus, MoreVertical, ChevronDown, Calendar,
+  Plus, ChevronDown, Calendar,
   Hash, FlaskConical, ChevronRight, Pin, IndianRupee,
   Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
   Search, Filter, Eye, Trash2, FileText, Download, ListOrdered,
@@ -126,6 +126,9 @@ export default function RegisterPage() {
   const [calcColId, setCalcColId] = useState<number | null>(null);
 
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  // Column widths state for custom resizing
+  const [colWidths, setColWidths] = useState<Record<number, number>>({});
 
   // ── Data ──
   const { data: register, isLoading } = useQuery({
@@ -636,6 +639,70 @@ export default function RegisterPage() {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   }, [reorderColumnMutation]);
+
+  const handleColResizeMouseDown = useCallback((e: React.MouseEvent, colId: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = colHeaderRefs.current.get(colId);
+    if (!th) return;
+
+    const innerDiv = th.querySelector('.col-header-inner') as HTMLElement;
+    if (!innerDiv) return;
+
+    const startX = e.clientX;
+    const startWidth = innerDiv.offsetWidth;
+
+    // Use a dynamic style tag to resize the entire column efficiently without React re-renders
+    let styleTag = document.getElementById('col-resize-style');
+    if (!styleTag) {
+      styleTag = document.createElement('style');
+      styleTag.id = 'col-resize-style';
+      document.head.appendChild(styleTag);
+    }
+
+    const colIdx = visibleColumnsRef.current.findIndex(c => c.id === colId);
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const newWidth = Math.max(40, startWidth + (ev.clientX - startX));
+      if (styleTag && colIdx !== -1) {
+        styleTag.textContent = `
+          .spreadsheet tr > :nth-child(${colIdx + 2}) {
+            width: ${newWidth}px !important;
+            min-width: ${newWidth}px !important;
+            max-width: ${newWidth}px !important;
+          }
+          .spreadsheet tr > :nth-child(${colIdx + 2}) .col-header-inner {
+            width: ${newWidth}px !important;
+            min-width: ${newWidth}px !important;
+            max-width: ${newWidth}px !important;
+          }
+          .spreadsheet td:nth-child(${colIdx + 2}) {
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+          }
+        `;
+      }
+    };
+
+    const onMouseUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      
+      const newWidth = Math.max(40, startWidth + (ev.clientX - startX));
+      setColWidths(prev => ({ ...prev, [colId]: newWidth }));
+      
+      if (styleTag) styleTag.textContent = ''; // Clear temp style
+      
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
 
   const changeColumnTypeMutation = useMutation({
     mutationFn: () => changeColumnType(registerId, activeModalColId!, changeTypeValue),
@@ -1376,6 +1443,30 @@ export default function RegisterPage() {
         </div>
       )}
 
+      {/* ── Dynamic Column Widths ── */}
+      <style>{`
+        ${visibleColumns.map((col, idx) => {
+          const w = colWidths[col.id];
+          if (!w) return '';
+          return `
+            .spreadsheet tr > :nth-child(${idx + 2}) {
+              width: ${w}px !important;
+              min-width: ${w}px !important;
+              max-width: ${w}px !important;
+            }
+            .spreadsheet tr > :nth-child(${idx + 2}) .col-header-inner {
+              width: ${w}px !important;
+              min-width: ${w}px !important;
+              max-width: ${w}px !important;
+            }
+            .spreadsheet td:nth-child(${idx + 2}) {
+              overflow: hidden !important;
+              text-overflow: ellipsis !important;
+            }
+          `;
+        }).join('')}
+      `}</style>
+
       {/* ── Spreadsheet ── */}
       <div className="spreadsheet-wrapper">
         <table className="spreadsheet">
@@ -1429,25 +1520,12 @@ export default function RegisterPage() {
                   style={isFrozen ? { position: 'sticky', left: stickyLeft, zIndex: 13, background: 'var(--border-light)' } : undefined}
                 >
                   <div className="col-header-inner">
-                    {/* Left ⋮ — Drag grip handle */}
-                    <span
-                      className="col-drag-grip"
-                      title="Drag to reorder"
-                      onMouseDown={(e) => handleColDragMouseDown(e, col.id)}
-                    >⋮</span>
                     {IconComponent}
-                    <span className="col-header-name">{col.name}</span>
-                    {sortColId === col.id && sortDir && (
-                      <span className="sort-indicator" title={sortDir === 'asc' ? 'Sorted A→Z' : 'Sorted Z→A'}>
-                        {sortDir === 'asc' ? '▲' : '▼'}
-                      </span>
-                    )}
-                    {frozenColumns.has(col.id) && <Pin size={10} color="var(--muted)" className="frozen-pin" />}
-                    {/* Right ⋮ — Column options menu */}
-                    <span
-                      className="col-menu-dots"
-                      title="Column Options"
-                      onClick={(e) => {
+                    <span 
+                      className="col-header-name"
+                      title="Double-click for options, Drag to reorder"
+                      onMouseDown={(e) => handleColDragMouseDown(e, col.id)}
+                      onDoubleClick={(e) => {
                         e.stopPropagation();
                         if (colMenuId === col.id) {
                           setColMenuId(null);
@@ -1458,7 +1536,20 @@ export default function RegisterPage() {
                           setColMenuId(col.id);
                         }
                       }}
-                    >⋮</span>
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {col.name}
+                    </span>
+                    {sortColId === col.id && sortDir && (
+                      <span className="sort-indicator" title={sortDir === 'asc' ? 'Sorted A→Z' : 'Sorted Z→A'}>
+                        {sortDir === 'asc' ? '▲' : '▼'}
+                      </span>
+                    )}
+                    {frozenColumns.has(col.id) && <Pin size={10} color="var(--muted)" className="frozen-pin" />}
+                    <div 
+                      className="col-resize-handle"
+                      onMouseDown={(e) => handleColResizeMouseDown(e, col.id)}
+                    />
                   </div>
                 </th>
               )})}
@@ -1548,7 +1639,7 @@ export default function RegisterPage() {
                         key={col.id}
                         className={`calc-cell-td ${isFrozen ? 'frozen-col' : ''}`}
                         style={isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 11, background: 'var(--border-light)' } : undefined}
-                        onClick={() => {
+                        onDoubleClick={() => {
                           setCalcColId(col.id);
                           setCalcModal(true);
                         }}

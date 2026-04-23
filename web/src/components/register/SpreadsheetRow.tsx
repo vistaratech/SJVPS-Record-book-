@@ -1,5 +1,5 @@
 import { evaluateFormula, type Entry, type Column } from '../../lib/api';
-import { Calendar, ChevronDown, Image as ImageIcon, Mail, Phone, Globe, MoreVertical, ListOrdered, IndianRupee } from 'lucide-react';
+import { Calendar, ChevronDown, Image as ImageIcon, Mail, Phone, Globe, ListOrdered, IndianRupee } from 'lucide-react';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // Format number with Indian currency style: ₹1,23,456.00
@@ -343,7 +343,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
           title="Row Options" 
           onClick={() => toggleMenu(entry.id)}
         >
-          <MoreVertical size={14} />
+          <span style={{ fontSize: '15px', fontWeight: 800, letterSpacing: '-1px', lineHeight: 1 }}>⋮</span>
         </button>
       </td>
     </tr>

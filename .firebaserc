@@ -1,5 +1,7 @@
 {
-  "projects": {},
+  "projects": {
+    "default": "r777-5db5f"
+  },
   "targets": {},
   "etags": {}
 }

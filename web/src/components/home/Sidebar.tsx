@@ -1,5 +1,5 @@
 import { useCallback, memo, useState } from 'react';
-import { Menu, Search, Plus, FileText, MoreVertical, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2 } from 'lucide-react';
+import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import type { RegisterSummary, Business } from '../../lib/api';
@@ -152,9 +152,9 @@ export const Sidebar = memo(function Sidebar({
         title="Register options"
         aria-label="Register options"
         onClick={(e) => { e.stopPropagation(); setMenuId(menuId === reg.id ? null : reg.id); }}
-        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px' }}
+        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--muted)' }}
       >
-        <MoreVertical size={14} />
+        <span style={{ fontSize: '15px', fontWeight: 800, letterSpacing: '-1px', lineHeight: 1 }}>⋮</span>
       </button>
     </div>
   );
@@ -354,9 +354,9 @@ export const Sidebar = memo(function Sidebar({
                   <button
                     className="register-item-menu"
                     onClick={(e) => { e.stopPropagation(); setFolderMenuId(folderMenuId === folder.id ? null : folder.id); }}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px' }}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--muted)' }}
                   >
-                    <MoreVertical size={14} />
+                    <span style={{ fontSize: '15px', fontWeight: 800, letterSpacing: '-1px', lineHeight: 1 }}>⋮</span>
                   </button>
                 </div>
                 
