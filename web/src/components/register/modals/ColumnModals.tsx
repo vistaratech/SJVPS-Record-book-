@@ -1,5 +1,387 @@
 import { AlertCircle, X, Plus } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
+import { 
+  Calculator, PlusCircle, MinusCircle, XCircle, DivideCircle, 
+  Percent, Settings2, Trash2 
+} from 'lucide-react';
+import { evaluateFormula } from '../../../lib/api';
+
+function FormulaBuilder({ formula, onChange, columns, entries, outputName, excludeId }: { formula: string, onChange: (v: string) => void, columns: any[], entries?: any[], outputName?: string, excludeId?: number | null }) {
+  const [mode, setMode] = useState<'preset' | 'custom'>('preset');
+  const [presetType, setPresetType] = useState<'add' | 'sub' | 'mul' | 'div' | 'pct'>('add');
+  
+  // Selection state for presets
+  const [selectedCols, setSelectedCols] = useState<number[]>([]); // For Add, Mul, Sub
+  const [colA, setColA] = useState<number | null>(null); // For Div, Pct (numerator)
+  const [colB, setColB] = useState<number | null>(null); // For Div, Pct (denominator)
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  // Sync selection state from existing formula
+  useEffect(() => {
+    if (!formula) return;
+    
+    // Detect preset type locally to avoid dependency on async state
+    let detectedType: 'add' | 'sub' | 'mul' | 'div' | 'pct' | null = null;
+    if (formula.includes('+')) {
+      detectedType = 'add';
+    } else if (formula.includes('-') && formula.includes('{')) {
+      // Subtraction preset: {A} - {B} - {C}
+      detectedType = 'sub';
+    } else if (formula.includes('*') && !formula.includes('/')) {
+      detectedType = 'mul';
+    } else if (formula.includes('/') && !formula.includes('*100')) {
+      detectedType = 'div';
+    } else if (formula.includes('/') && formula.includes('*100')) {
+      detectedType = 'pct';
+    }
+
+    if (detectedType) {
+      setPresetType(detectedType);
+    } else if (formula) {
+      setMode('custom');
+    }
+
+    // Extract column names from formula like {Name}
+    const matches = Array.from(formula.matchAll(/\{([^}]+)\}/g));
+    const foundNames = matches.map(m => m[1]);
+    const foundIds = foundNames.map(name => columns.find(c => c.name === name)?.id).filter(Boolean) as number[];
+
+    if (foundIds.length > 0) {
+      if (detectedType === 'div' || detectedType === 'pct') {
+        setColA(foundIds[0]);
+        setColB(foundIds[1] || null);
+      } else {
+        setSelectedCols(foundIds);
+      }
+    }
+  }, []); // Only run once on mount to initialize UI from existing formula
+
+  const generateFormula = (type: string, sCols: number[], a: number | null, b: number | null) => {
+    const colName = (id: number) => {
+      const c = columns.find(col => col.id === id);
+      return c ? `{${c.name}}` : '';
+    };
+
+    let f = '';
+    switch (type) {
+      case 'add':
+        f = sCols.map(id => colName(id)).filter(Boolean).join(' + ');
+        break;
+      case 'sub':
+        f = sCols.map(id => colName(id)).filter(Boolean).join(' - ');
+        break;
+      case 'mul':
+        f = sCols.map(id => colName(id)).filter(Boolean).join(' * ');
+        break;
+      case 'div':
+        if (a && b) f = `${colName(a)} / ${colName(b)}`;
+        break;
+      case 'pct':
+        if (a && b) f = `(${colName(a)} / ${colName(b)}) * 100`;
+        break;
+    }
+    if (f !== formula) {
+      onChange(f);
+    }
+  };
+
+  const handlePresetChange = (type: any) => {
+    setPresetType(type);
+    generateFormula(type, selectedCols, colA, colB);
+  };
+
+  const toggleColSelection = (id: number) => {
+    const isSelected = selectedCols.includes(id);
+    const next = isSelected 
+      ? selectedCols.filter(i => i !== id) 
+      : [...selectedCols, id];
+    setSelectedCols(next);
+    generateFormula(presetType, next, colA, colB);
+  };
+
+  const removeColAtIndex = (index: number) => {
+    const next = selectedCols.filter((_, i) => i !== index);
+    setSelectedCols(next);
+    generateFormula(presetType, next, colA, colB);
+  };
+
+  const setA = (id: number | null) => {
+    setColA(id);
+    generateFormula(presetType, selectedCols, id, colB);
+  };
+
+  const setB = (id: number | null) => {
+    setColB(id);
+    generateFormula(presetType, selectedCols, colA, id);
+  };
+
+  return (
+    <div className="formula-builder" style={{ marginTop: '12px', padding: '12px', background: 'var(--bg-light)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+      <div className="formula-mode-tabs" style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+        <button 
+          className={`mode-tab ${mode === 'preset' ? 'active' : ''}`} 
+          onClick={() => setMode('preset')}
+          style={{ flex: 1, padding: '6px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--border)', background: mode === 'preset' ? 'var(--navy)' : 'white', color: mode === 'preset' ? 'white' : 'var(--text-main)', cursor: 'pointer', fontWeight: mode === 'preset' ? 600 : 400 }}
+        >
+          Visual Builder (Preset)
+        </button>
+        <button 
+          className={`mode-tab ${mode === 'custom' ? 'active' : ''}`} 
+          onClick={() => setMode('custom')}
+          style={{ flex: 1, padding: '6px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--border)', background: mode === 'custom' ? 'var(--navy)' : 'white', color: mode === 'custom' ? 'white' : 'var(--text-main)', cursor: 'pointer', fontWeight: mode === 'custom' ? 600 : 400 }}
+        >
+          Custom Formula (Advanced)
+        </button>
+      </div>
+
+      {mode === 'preset' ? (
+        <div className="preset-editor">
+          <div className="preset-types" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginBottom: '12px' }}>
+            <button onClick={() => handlePresetChange('add')} className={`preset-btn ${presetType === 'add' ? 'active' : ''}`} style={presetBtnStyle(presetType === 'add')}>
+              <PlusCircle size={14} /> Add
+            </button>
+            <button onClick={() => handlePresetChange('sub')} className={`preset-btn ${presetType === 'sub' ? 'active' : ''}`} style={presetBtnStyle(presetType === 'sub')}>
+              <MinusCircle size={14} /> Sub
+            </button>
+            <button onClick={() => handlePresetChange('mul')} className={`preset-btn ${presetType === 'mul' ? 'active' : ''}`} style={presetBtnStyle(presetType === 'mul')}>
+              <XCircle size={14} /> Mult
+            </button>
+            <button onClick={() => handlePresetChange('div')} className={`preset-btn ${presetType === 'div' ? 'active' : ''}`} style={presetBtnStyle(presetType === 'div')}>
+              <DivideCircle size={14} /> Div
+            </button>
+            <button onClick={() => handlePresetChange('pct')} className={`preset-btn ${presetType === 'pct' ? 'active' : ''}`} style={presetBtnStyle(presetType === 'pct')}>
+              <Percent size={14} /> %
+            </button>
+            <button onClick={() => setMode('custom')} className="preset-btn" style={presetBtnStyle(false)}>
+              <Settings2 size={14} /> More
+            </button>
+          </div>
+
+          {(presetType === 'add' || presetType === 'mul' || presetType === 'sub') && (
+            <div className="col-selector" style={{ marginTop: '16px' }}>
+              <label style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginBottom: '8px', fontWeight: 600, textTransform: 'uppercase' }}>
+                Build your calculation step-by-step:
+              </label>
+              
+              {/* Added Columns List */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
+                {selectedCols.length === 0 && (
+                  <div style={{ padding: '12px', border: '1px dashed var(--border)', borderRadius: '8px', textAlign: 'center', fontSize: '12px', color: 'var(--muted)' }}>
+                    No columns added yet. Use the search below to start.
+                  </div>
+                )}
+                {selectedCols.map((id, index) => {
+                  const col = columns.find(c => c.id === id);
+                  if (!col) return null;
+                  return (
+                    <div key={`${id}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'white', border: '1px solid var(--border)', borderRadius: '8px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                      <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--navy)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 800 }}>
+                        {index + 1}
+                      </div>
+                      <span style={{ flex: 1, fontSize: '13px', fontWeight: 500 }}>{col.name}</span>
+                      {index > 0 && (
+                        <div style={{ fontSize: '12px', fontWeight: 900, color: 'var(--primary)', padding: '0 8px' }}>
+                          {presetType === 'add' ? '+' : presetType === 'mul' ? '×' : '-'}
+                        </div>
+                      )}
+                      <button 
+                        onClick={() => removeColAtIndex(index)}
+                        style={{ padding: '4px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Search and Add Section */}
+              <div style={{ position: 'relative' }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ flex: 1, position: 'relative' }}>
+                    <input 
+                      type="text" 
+                      className="modal-input"
+                      style={{ marginBottom: 0, paddingLeft: '32px', fontSize: '13px' }}
+                      placeholder="Search columns to add..."
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setIsDropdownOpen(true);
+                      }}
+                      onFocus={() => setIsDropdownOpen(true)}
+                    />
+                    <Settings2 size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }} />
+                    {searchQuery && (
+                      <button 
+                        onClick={() => setSearchQuery('')}
+                        style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {isDropdownOpen && (
+                  <div style={{ 
+                    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, 
+                    marginTop: '4px', background: 'white', border: '1px solid var(--border)', 
+                    borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxHeight: '200px', overflowY: 'auto' 
+                  }}>
+                    {columns
+                      .filter(c => c.id !== excludeId && c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                      .map(c => (
+                        <button
+                          key={c.id}
+                          onClick={() => {
+                            toggleColSelection(c.id);
+                            setSearchQuery('');
+                            setIsDropdownOpen(false);
+                          }}
+                          style={{ 
+                            width: '100%', padding: '10px 12px', textAlign: 'left', background: 'none', border: 'none', 
+                            borderBottom: '1px solid var(--bg-light)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
+                            transition: 'background 0.2s'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-light)'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                        >
+                          <PlusCircle size={14} color="var(--primary)" />
+                          <span style={{ fontSize: '13px', color: 'var(--text-main)' }}>{c.name}</span>
+                          <span style={{ fontSize: '10px', color: 'var(--muted)', background: 'var(--bg-light)', padding: '2px 4px', borderRadius: '4px' }}>{c.type}</span>
+                        </button>
+                      ))}
+                    {columns.filter(c => c.id !== excludeId && c.name.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                      <div style={{ padding: '12px', fontSize: '12px', color: 'var(--muted)', textAlign: 'center' }}>No columns found</div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <button 
+                className="modal-confirm-btn"
+                style={{ width: '100%', marginTop: '12px', background: 'var(--primary-light)', color: 'var(--primary)', border: '1px solid var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '12px' }}
+                onClick={() => setIsDropdownOpen(true)}
+              >
+                <Plus size={16} /> Add {selectedCols.length > 0 ? 'Another' : 'a'} Column
+              </button>
+            </div>
+          )}
+
+          {(presetType === 'div' || presetType === 'pct') && (
+            <div className="dual-col-selector" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>
+                  {presetType === 'div' ? 'Dividend (Top)' : 'Value (Obtained)'}
+                </label>
+                <select 
+                  className="modal-input" 
+                  style={{ marginBottom: 0, padding: '4px', fontSize: '12px' }}
+                  value={colA || ''} 
+                  onChange={(e) => setA(Number(e.target.value))}
+                >
+                  <option value="">Select Column</option>
+                  {columns.filter(c => c.id !== excludeId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>
+                  {presetType === 'div' ? 'Divisor (Bottom)' : 'Total (Out of)'}
+                </label>
+                <select 
+                  className="modal-input" 
+                  style={{ marginBottom: 0, padding: '4px', fontSize: '12px' }}
+                  value={colB || ''} 
+                  onChange={(e) => setB(Number(e.target.value))}
+                >
+                  <option value="">Select Column</option>
+                  {columns.filter(c => c.id !== excludeId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="custom-editor">
+          <label className="modal-label" style={{ fontSize: '11px' }}>Formula</label>
+          <input 
+            className="modal-input" 
+            value={formula} 
+            onChange={(e) => onChange(e.target.value)} 
+            placeholder="e.g. {A} + {B} * 0.18" 
+          />
+          <div style={{ marginTop: '8px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>Insert Column:</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+              {columns.filter(c => c.id !== excludeId).map(c => (
+                <button 
+                  key={c.id} 
+                  onClick={() => onChange(formula + `{${c.name}}`)}
+                  style={{ padding: '2px 6px', fontSize: '10px', borderRadius: '4px', border: '1px solid var(--border)', background: 'white', cursor: 'pointer' }}
+                >
+                  +{c.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="formula-preview" style={{ marginTop: '16px', borderTop: '2px solid var(--border)', paddingTop: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+          <label style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 800, textTransform: 'uppercase' }}>
+            Live Calculation Preview
+          </label>
+          <div style={{ fontSize: '10px', color: 'var(--primary)', fontWeight: 600 }}>
+            {outputName || 'New Column'} = {formula || '—'}
+          </div>
+        </div>
+        
+        <div style={{ background: 'white', padding: '14px', borderRadius: '12px', border: '1px solid var(--primary-light)', boxShadow: '0 4px 12px rgba(26,35,126,0.08)' }}>
+          {entries && entries.length > 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ fontSize: '10px', color: 'var(--muted)', fontWeight: 600 }}>Testing with Row 1:</span>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {columns.filter(c => formula.includes(`{${c.name}}`)).slice(0, 3).map(c => (
+                    <span key={c.id} style={{ fontSize: '11px', background: 'var(--bg-light)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--border)' }}>
+                      {c.name}: <b>{entries[0].cells?.[c.id.toString()] || '0'}</b>
+                    </span>
+                  ))}
+                  {columns.filter(c => formula.includes(`{${c.name}}`)).length > 3 && <span style={{ fontSize: '11px', color: 'var(--muted)' }}>...</span>}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right', borderLeft: '1px solid var(--border)', paddingLeft: '16px' }}>
+                <span style={{ fontSize: '10px', color: 'var(--muted)', display: 'block', fontWeight: 600 }}>Result:</span>
+                <span style={{ fontSize: '22px', fontWeight: 900, color: 'var(--navy)', lineHeight: 1 }}>
+                  {evaluateFormula(formula, entries[0], columns) || '0'}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '10px', fontSize: '13px', color: 'var(--muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+              <Calculator size={20} opacity={0.3} />
+              <span>Add data to Row 1 to see calculation results.</span>
+            </div>
+          )}
+        </div>
+        <div style={{ marginTop: '10px', display: 'flex', alignItems: 'flex-start', gap: '6px', fontSize: '11px', color: 'var(--muted)', lineHeight: 1.4 }}>
+          <AlertCircle size={14} style={{ marginTop: '1px', flexShrink: 0 }} />
+          <span>The formula calculates automatically as you type in any row. No manual refresh needed.</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const presetBtnStyle = (active: boolean) => ({
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+  padding: '6px', fontSize: '11px', borderRadius: '6px', border: `1px solid ${active ? 'var(--navy)' : 'var(--border)'}`,
+  background: active ? 'var(--navy)' : 'white', color: active ? 'white' : 'var(--text-main)',
+  cursor: 'pointer', transition: 'all 0.2s'
+});
 
 function OptionsEditor({ value, onChange }: { value: string, onChange: (v: string) => void }) {
   const [opts, setOpts] = useState<string[]>(() => value ? value.split(',') : []);
@@ -95,8 +477,11 @@ interface ColumnModalsProps {
   changeTypeValue: string;
   setChangeTypeValue: (v: string) => void;
   changeColumnTypeMutation: any;
+  activeModalColId: number | null;
 
   COL_TYPES: any[];
+  columns: any[];
+  entries: any[];
 }
 
 export function ColumnModals(props: ColumnModalsProps) {
@@ -108,7 +493,8 @@ export function ColumnModals(props: ColumnModalsProps) {
     renameColModal, setRenameColModal, renameColValue, setRenameColValue, renameColumnMutation,
     dropdownConfigModal, setDropdownConfigModal, dropdownConfigOptions, setDropdownConfigOptions, updateDropdownMutation,
     changeTypeModal, setChangeTypeModal, changeTypeValue, setChangeTypeValue, changeColumnTypeMutation,
-    COL_TYPES
+    activeModalColId,
+    COL_TYPES, columns, entries
   } = props;
 
   return (
@@ -135,14 +521,14 @@ export function ColumnModals(props: ColumnModalsProps) {
               </>
             )}
             {newColType === 'formula' && (
-              <>
-                <label className="modal-label">Formula</label>
-                <input className="modal-input" value={newColFormula} onChange={(e) => setNewColFormula(e.target.value)} placeholder="e.g. {Marks}/{Full Marks}*100" />
-                <div className="formula-hint">
-                  <AlertCircle size={14} color="var(--muted)" />
-                  <span className="formula-hint-text">Use {'{Column Name}'} to reference other columns. Supports +, -, *, /</span>
-                </div>
-              </>
+              <FormulaBuilder 
+                formula={newColFormula} 
+                onChange={setNewColFormula} 
+                columns={columns} 
+                entries={entries}
+                outputName={newColName}
+                excludeId={activeModalColId}
+              />
             )}
             <div className="modal-actions">
               <button className="modal-cancel-btn" onClick={() => setNewColumnModal(false)}>Cancel</button>
@@ -196,6 +582,22 @@ export function ColumnModals(props: ColumnModalsProps) {
                 </button>
               ))}
             </div>
+            {changeTypeValue === 'dropdown' && (
+              <>
+                <label className="modal-label" style={{ marginTop: '12px', display: 'block', marginBottom: '8px' }}>Options</label>
+                <OptionsEditor value={newColDropdownOpts} onChange={setNewColDropdownOpts} />
+              </>
+            )}
+            {changeTypeValue === 'formula' && (
+              <FormulaBuilder 
+                formula={newColFormula} 
+                onChange={setNewColFormula} 
+                columns={columns} 
+                entries={entries}
+                outputName={newColName}
+                excludeId={activeModalColId}
+              />
+            )}
             <div className="modal-actions">
               <button className="modal-cancel-btn" onClick={() => setChangeTypeModal(false)}>Cancel</button>
               <button className="modal-confirm-btn" onClick={() => changeColumnTypeMutation.mutate()}>Change Type</button>
@@ -226,14 +628,13 @@ export function ColumnModals(props: ColumnModalsProps) {
               </>
             )}
             {newColType === 'formula' && (
-              <>
-                <label className="modal-label">Formula</label>
-                <input className="modal-input" value={newColFormula} onChange={(e) => setNewColFormula(e.target.value)} placeholder="e.g. {Marks}/{Full Marks}*100" />
-                <div className="formula-hint">
-                  <AlertCircle size={14} color="var(--muted)" />
-                  <span className="formula-hint-text">Use {'{Column Name}'} to reference other columns. Supports +, -, *, /</span>
-                </div>
-              </>
+              <FormulaBuilder 
+                formula={newColFormula} 
+                onChange={setNewColFormula} 
+                columns={columns} 
+                outputName={newColName}
+                excludeId={activeModalColId}
+              />
             )}
             <div className="modal-actions">
               <button className="modal-cancel-btn" onClick={() => setInsertColModal(null)}>Cancel</button>

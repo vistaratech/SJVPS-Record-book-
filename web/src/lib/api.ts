@@ -740,7 +740,7 @@ export function evaluateFormula(formula: string, entry: Entry, columns: Column[]
         const nested = evaluateFormula(col.formula, entry, columns);
         numStr = (nested === 'ERR' || nested === '') ? '0' : nested;
       } else {
-        const parsed = parseFloat(rawVal);
+        const parsed = parseFloat(rawVal.replace(/[₹$,]/g, ''));
         numStr = isNaN(parsed) ? '0' : parsed.toString();
       }
       expression = expression.replace(regex, numStr);
@@ -866,14 +866,30 @@ export async function reorderColumn(registerId: number, columnId: number, target
   });
 }
 
-export async function changeColumnType(registerId: number, columnId: number, newType: string): Promise<Column> {
+export async function changeColumnType(
+  registerId: number, 
+  columnId: number, 
+  newType: string, 
+  options?: { formula?: string; dropdownOptions?: string[] }
+): Promise<Column> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
     const col = reg.columns.find((c) => c.id === columnId);
     if (!col) throw new Error('Column not found');
     col.type = newType;
-    if (newType !== 'dropdown') col.dropdownOptions = undefined;
-    if (newType !== 'formula') col.formula = undefined;
+    
+    if (newType === 'formula') {
+      col.formula = options?.formula;
+    } else {
+      col.formula = undefined;
+    }
+
+    if (newType === 'dropdown') {
+      col.dropdownOptions = options?.dropdownOptions;
+    } else {
+      col.dropdownOptions = undefined;
+    }
+
     await saveRegDocImmediate(reg);
     return col;
   });

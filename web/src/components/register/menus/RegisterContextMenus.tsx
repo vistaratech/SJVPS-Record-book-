@@ -102,7 +102,11 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
               <Pencil size={16} /> Rename Column
             </button>
             <button className="context-item" onClick={() => {
-              setChangeTypeValue(columns.find((c) => c.id === colMenuId)?.type || 'text');
+              const col = columns.find((c) => c.id === colMenuId);
+              setChangeTypeValue(col?.type || 'text');
+              setNewColName(col?.name || '');
+              setNewColFormula(col?.formula || '');
+              setNewColDropdownOpts(col?.dropdownOptions?.join(', ') || '');
               setActiveModalColId(colMenuId);
               setChangeTypeModal(true); setColMenuId(null);
             }}>

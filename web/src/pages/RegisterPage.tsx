@@ -19,7 +19,7 @@ import {
   Plus, ChevronDown, Calendar,
   Hash, FlaskConical, ChevronRight, Pin, IndianRupee,
   Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
-  Search, Filter, Eye, Trash2, FileText, Download, ListOrdered,
+  Search, Filter, Eye, Trash2, FileText, Download, ListOrdered, Maximize2,
 } from 'lucide-react';
 
 import { RegisterHeader } from '../components/register/RegisterHeader';
@@ -32,7 +32,7 @@ import { OtherModals } from '../components/register/modals/OtherModals';
 import { RegisterContextMenus } from '../components/register/menus/RegisterContextMenus';
 import { COL_TYPES } from '../lib/constants';
 
-type CalcType = 'sum' | 'average' | 'count' | 'min' | 'max' | 'filled' | 'empty';
+type CalcType = 'sum' | 'average' | 'count' | 'min' | 'max' | 'filled' | 'empty' | 'distinct' | 'none';
 
 export default function RegisterPage() {
   const { id } = useParams();
@@ -81,6 +81,8 @@ export default function RegisterPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc' | null>(null);
   const [detailViewEntry, setDetailViewEntry] = useState<Entry | null>(null);
   const [detailEdits, setDetailEdits] = useState<Record<string, string>>({});
+  const detailInputRefs = useRef<Map<number, HTMLElement>>(new Map());
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // New column form (shared by Add Column and Insert Column)
   const [newColName, setNewColName] = useState('');
@@ -123,7 +125,7 @@ export default function RegisterPage() {
   const [renamePageValue, setRenamePageValue] = useState('');
 
   // Calc modal
-  const [calcColId, setCalcColId] = useState<number | null>(null);
+  const [calcColId] = useState<number | null>(null);
   const [calcMenu, setCalcMenu] = useState<{ colId: number; rect: DOMRect } | null>(null);
 
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -204,6 +206,38 @@ export default function RegisterPage() {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setCalcMenu({ colId, rect });
   };
+
+  const handleImageDownload = useCallback(async (url: string) => {
+    if (!url) return;
+    try {
+      // For data URLs or blobs, we can download directly
+      if (url.startsWith('data:') || url.startsWith('blob:')) {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `record_image_${Date.now()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      // For external URLs, try to fetch to avoid browser opening in new tab
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `record_image_${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error("Download failed:", err);
+      // Fallback: just open in new tab if fetch fails (CORS)
+      window.open(url, '_blank');
+    }
+  }, []);
 
   const updateCalcType = (colId: number, type: string) => {
     setCalcTypes(prev => ({ ...prev, [colId.toString()]: type as CalcType }));
@@ -725,13 +759,19 @@ export default function RegisterPage() {
   }, []);
 
   const changeColumnTypeMutation = useMutation({
-    mutationFn: () => changeColumnType(registerId, activeModalColId!, changeTypeValue),
+    mutationFn: () => changeColumnType(registerId, activeModalColId!, changeTypeValue, {
+      formula: changeTypeValue === 'formula' ? newColFormula : undefined,
+      dropdownOptions: changeTypeValue === 'dropdown' ? newColDropdownOpts.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+    }),
     onSuccess: (updatedCol) => {
       queryClient.setQueryData(['register', registerId], (old: any) => {
         if (!old) return old;
         return { ...old, columns: old.columns.map((c: any) => c.id === updatedCol.id ? updatedCol : c) };
       });
-      setChangeTypeModal(false); setActiveModalColId(null);
+      setChangeTypeModal(false); 
+      setActiveModalColId(null);
+      setNewColFormula('');
+      setNewColDropdownOpts('');
     },
   });
 
@@ -1036,22 +1076,33 @@ export default function RegisterPage() {
   const handleExportExcel = () => {
     if (!register) return;
 
-    const visibleColumns = columns.filter((col) => !hiddenColumns.has(col.id));
-    const headerRow = visibleColumns.map(c => c.name);
+    const visibleColumns = columns.filter((col) => !hiddenColumns.has(col.id) && col.type !== 'image');
+    const headerRow = ['S.No.', ...visibleColumns.map(c => c.name)];
 
     if (headerRow.length === 0) return;
     
-    const rows = displayEntries.map(entry => {
-      const rowObj: Record<string, string> = {};
+    const dataAOA: any[][] = [headerRow];
+
+    displayEntries.forEach((entry, idx) => {
+      const rowData: any[] = [(idx + 1).toString()];
       visibleColumns.forEach(c => {
-         const cellValue = c.type === 'formula' ? evaluateFormula(c.formula || '', entry, columns) : (entry.cells?.[c.id.toString()] || '');
-         rowObj[c.name] = cellValue;
+        const val = c.type === 'formula'
+          ? evaluateFormula(c.formula || '', entry, columns)
+          : (entry.cells?.[c.id.toString()] || '');
+        
+        if (c.type === 'number' || c.type === 'currency') {
+          const cleaned = val.toString().replace(/[^\d.-]/g, '');
+          const n = parseFloat(cleaned);
+          rowData.push(isNaN(n) ? val : n);
+        } else {
+          rowData.push(val);
+        }
       });
-      return rowObj;
+      dataAOA.push(rowData);
     });
 
     // ── Add Summation/Footer Row ──
-    const footerRow: Record<string, string> = {};
+    const footerRow: any[] = ['TOTALS'];
     let hasAnyCalc = false;
     visibleColumns.forEach(c => {
       const calcType = calcTypes[c.id] || (
@@ -1059,7 +1110,7 @@ export default function RegisterPage() {
       );
       
       if (calcType === 'none') {
-        footerRow[c.name] = '';
+        footerRow.push('');
         return;
       }
 
@@ -1102,15 +1153,15 @@ export default function RegisterPage() {
                      calcType === 'average' ? 'AVG: ' : 
                      calcType === 'min' ? 'MIN: ' : 
                      calcType === 'max' ? 'MAX: ' : '';
-      footerRow[c.name] = `${prefix}${calcValue}`;
+      footerRow.push(`${prefix}${calcValue}`);
     });
 
     if (hasAnyCalc) {
-      rows.push(footerRow);
+      dataAOA.push(footerRow);
     }
 
     try {
-      const ws = XLSX.utils.json_to_sheet(rows, { header: headerRow });
+      const ws = XLSX.utils.aoa_to_sheet(dataAOA);
       
       const getColLetter = (n: number) => {
         let s = '';
@@ -1124,27 +1175,32 @@ export default function RegisterPage() {
       ws['!dataValidation'] = [];
 
       visibleColumns.forEach((c, cIdx) => {
-        const colLetter = getColLetter(cIdx);
+        const colLetter = getColLetter(cIdx + 1); // +1 because we added S.No.
 
         if (c.type === 'dropdown' && c.dropdownOptions && c.dropdownOptions.length > 0) {
-          ws['!dataValidation'].push({
-            sqref: `${colLetter}2:${colLetter}1000`,
-            type: 'list',
-            allowBlank: true,
-            showDropDown: true,
-            formula1: `"${c.dropdownOptions.join(',')}"`
-          });
+          const validationFormula = `"${c.dropdownOptions.join(',')}"`;
+          if (validationFormula.length <= 255) {
+            ws['!dataValidation'].push({
+              sqref: `${colLetter}2:${colLetter}2000`,
+              type: 'list',
+              allowBlank: true,
+              showDropDown: true,
+              formula1: validationFormula
+            });
+          }
         }
 
         if (c.type === 'formula' && c.formula) {
-          rows.forEach((row, rIdx) => {
+          displayEntries.forEach((_, rIdx) => {
             let excelF = c.formula || '';
             visibleColumns.forEach((col, refIdx) => {
-              const refLetter = getColLetter(refIdx);
+              const refLetter = getColLetter(refIdx + 1);
               excelF = excelF.replace(new RegExp(`\\{${col.name}\\}`, 'g'), `${refLetter}${rIdx + 2}`);
             });
             const cellRef = `${colLetter}${rIdx + 2}`;
-            ws[cellRef] = { t: 'n', f: excelF, v: row[c.name] === 'ERR' ? '' : row[c.name] };
+            const val = evaluateFormula(c.formula || '', displayEntries[rIdx], columns);
+            const n = parseFloat(val);
+            ws[cellRef] = { t: isNaN(n) ? 's' : 'n', f: excelF, v: isNaN(n) ? val : n };
           });
         }
       });
@@ -1161,8 +1217,8 @@ export default function RegisterPage() {
   const handleExportPDF = () => {
     if (!register) return;
 
-    const visibleCols = columns.filter((col) => !hiddenColumns.has(col.id));
-    const headerRow = visibleCols.map(c => c.name);
+    const visibleCols = columns.filter((col) => !hiddenColumns.has(col.id) && col.type !== 'image');
+    const headerRow = ['S.No.', ...visibleCols.map(c => c.name)];
     if (headerRow.length === 0) return;
 
     const bodyRows = displayEntries.map((entry, idx) => {
@@ -1255,14 +1311,14 @@ export default function RegisterPage() {
         body: bodyRows,
         foot: hasAnyCalc ? [footerRow] : undefined,
         theme: 'grid',
-        tableWidth: 'wrap',
+        tableWidth: 'auto',
         horizontalPageBreak: true,
         horizontalPageBreakRepeat: 0,
         headStyles: {
           fillColor: [20, 83, 45],
           textColor: 255,
           fontStyle: 'bold',
-          fontSize: 8,
+          fontSize: 7,
           halign: 'center',
           valign: 'middle',
         },
@@ -1270,12 +1326,12 @@ export default function RegisterPage() {
           fillColor: [230, 240, 230],
           textColor: [20, 83, 45],
           fontStyle: 'bold',
-          fontSize: 8,
+          fontSize: 7,
           halign: 'center',
         },
         bodyStyles: {
-          fontSize: 8,
-          cellPadding: 3,
+          fontSize: 7,
+          cellPadding: 2,
           valign: 'middle',
         },
         alternateRowStyles: {
@@ -1283,14 +1339,14 @@ export default function RegisterPage() {
         },
         styles: {
           lineColor: [200, 200, 200],
-          lineWidth: 0.25,
+          lineWidth: 0.1,
           overflow: 'linebreak',
-          minCellWidth: 20,
+          minCellWidth: 10,
         },
         columnStyles: {
-          0: { halign: 'center', cellWidth: 12, minCellWidth: 12 },
+          0: { halign: 'center', cellWidth: 10 },
         },
-        margin: { left: 14, right: 14 },
+        margin: { left: 10, right: 10 },
         didDrawPage: (data: any) => {
           // Footer with page number
           const pageCount = (doc as any).internal.getNumberOfPages();
@@ -1317,7 +1373,7 @@ export default function RegisterPage() {
     if (!register) return;
     const entry = localEntries.find(e => e.id === entryId);
     if (!entry) return;
-    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id));
+    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
     const rowIdx = localEntries.indexOf(entry) + 1;
 
     try {
@@ -1335,23 +1391,45 @@ export default function RegisterPage() {
       doc.text(`Row ${rowIdx} • Exported on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`, 14, 24);
       doc.setTextColor(0, 0, 0);
 
-      const bodyRows = visibleCols.map(c => {
+      const bodyRows = [
+        ['S.No.', rowIdx.toString()],
+        ...visibleCols.map(c => {
         const val = c.type === 'formula'
           ? evaluateFormula(c.formula || '', entry, columns)
           : (entry.cells?.[c.id.toString()] || '');
         return [c.name, val];
-      });
+      })];
 
       autoTable(doc, {
         startY: 30,
         head: [['Field', 'Value']],
         body: bodyRows,
         theme: 'grid',
-        headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-        bodyStyles: { fontSize: 9, cellPadding: 4 },
-        alternateRowStyles: { fillColor: [245, 247, 250] },
-        styles: { lineColor: [200, 200, 200], lineWidth: 0.25 },
-        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 55 } },
+        headStyles: {
+          fillColor: [20, 83, 45],
+          textColor: 255,
+          fontStyle: 'bold',
+          fontSize: 9,
+          halign: 'left',
+          valign: 'middle'
+        },
+        bodyStyles: {
+          fontSize: 9,
+          cellPadding: 4,
+          valign: 'middle'
+        },
+        alternateRowStyles: {
+          fillColor: [245, 247, 250]
+        },
+        styles: {
+          lineColor: [200, 200, 200],
+          lineWidth: 0.2,
+          overflow: 'linebreak'
+        },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 50, fillColor: [240, 244, 240] },
+          1: { cellWidth: 'auto' }
+        },
         margin: { left: 14, right: 14 },
       });
 
@@ -1366,22 +1444,27 @@ export default function RegisterPage() {
     if (!register) return;
     const entry = localEntries.find(e => e.id === entryId);
     if (!entry) return;
-    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id));
+    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
     const rowIdx = localEntries.indexOf(entry) + 1;
 
     try {
-      const headerRow = visibleCols.map(c => c.name);
-      const rowObj: Record<string, string> = {};
-      visibleCols.forEach(c => {
+      const headerRow = ['S.No.', ...visibleCols.map(c => c.name)];
+      const dataRow = [(localEntries.indexOf(entry) + 1).toString(), ...visibleCols.map(c => {
         const val = c.type === 'formula'
           ? evaluateFormula(c.formula || '', entry, columns)
           : (entry.cells?.[c.id.toString()] || '');
-        rowObj[c.name] = val;
-      });
+        
+        if (c.type === 'number' || c.type === 'currency') {
+          const cleaned = val.toString().replace(/[^\d.-]/g, '');
+          const n = parseFloat(cleaned);
+          return isNaN(n) ? val : n;
+        }
+        return val;
+      })];
 
-      const ws = XLSX.utils.json_to_sheet([rowObj], { header: headerRow });
+      const ws = XLSX.utils.aoa_to_sheet([headerRow, dataRow]);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+      XLSX.utils.book_append_sheet(wb, ws, 'Row Data');
       XLSX.writeFile(wb, `${register.name || 'Record'}_Row${rowIdx}.xlsx`);
     } catch (err) {
       console.error('Row Excel Error:', err);
@@ -1393,7 +1476,7 @@ export default function RegisterPage() {
     if (!register) return;
     const entry = localEntries.find(e => e.id === entryId);
     if (!entry) return;
-    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id));
+    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
 
     const lines = visibleCols.map(c => {
       const val = c.type === 'formula'
@@ -1686,9 +1769,10 @@ export default function RegisterPage() {
                           setColMenuId(col.id);
                         }
                       }}
-                      style={{ cursor: 'pointer' }}
+                      style={{ cursor: 'default' }}
                     >
                       {col.name}
+                      {col.type === 'formula' && <span className="col-formula-badge" title={col.formula}>Fx</span>}
                     </span>
                     {sortColId === col.id && sortDir && (
                       <span className="sort-indicator" title={sortDir === 'asc' ? 'Sorted A→Z' : 'Sorted Z→A'}>
@@ -1721,7 +1805,8 @@ export default function RegisterPage() {
                 isMenuOpen={rowMenuId === entry.id}
                 toggleMenu={toggleMenu}
                 registerColumns={columns}
-                onRowDoubleClick={setDetailViewEntry}
+                onRowDetail={setDetailViewEntry}
+                onImagePreview={setPreviewImage}
                 frozenColumns={frozenColumns}
                 totalRows={displayEntries.length}
               />
@@ -1765,7 +1850,10 @@ export default function RegisterPage() {
                       : displayEntries;
                       
                     let calcValue: number | string = '-';
-                    const values = entriesToCalculate.map(e => e.cells?.[col.id.toString()] || '');
+                    const values = entriesToCalculate.map(e => {
+                      if (col.type === 'formula') return evaluateFormula(col.formula || '', e, columns);
+                      return e.cells?.[col.id.toString()] || '';
+                    });
                     
                     if (calcType === 'empty') {
                       calcValue = values.filter(v => v.trim() === '').length;
@@ -1865,7 +1953,10 @@ export default function RegisterPage() {
         dropdownConfigOptions={dropdownConfigOptions} setDropdownConfigOptions={setDropdownConfigOptions} updateDropdownMutation={updateDropdownMutation}
         changeTypeModal={changeTypeModal} setChangeTypeModal={setChangeTypeModal}
         changeTypeValue={changeTypeValue} setChangeTypeValue={setChangeTypeValue} changeColumnTypeMutation={changeColumnTypeMutation}
+        activeModalColId={activeModalColId}
         COL_TYPES={COL_TYPES}
+        columns={columns}
+        entries={localEntries}
       />
 
       <FilterModal 
@@ -1926,22 +2017,190 @@ export default function RegisterPage() {
               </div>
             </div>
             <div className="row-detail-body">
-              {columns.filter(col => col.type !== 'formula').map(col => {
-                const colKey = col.id.toString();
-                const val = detailEdits[colKey] ?? '';
-                return (
-                  <div className="row-detail-field" key={col.id}>
-                    <label className="row-detail-label">{col.name}</label>
-                    <input
-                      className="row-detail-input"
-                      value={val}
-                      onChange={e => setDetailEdits(prev => ({ ...prev, [colKey]: e.target.value }))}
-                      placeholder={`Enter ${col.name}…`}
-                    />
-                  </div>
-                );
-              })}
+              {(() => {
+                const handleDetailKeyDown = (e: React.KeyboardEvent, currentId: number) => {
+                  const currentIndex = columns.findIndex(c => c.id === currentId);
+                  
+                  if (e.key === 'Enter' || (e.key === 'ArrowDown' && (e.target as HTMLElement).tagName !== 'SELECT')) {
+                    e.preventDefault();
+                    const nextCol = columns[currentIndex + 1];
+                    if (nextCol) {
+                      detailInputRefs.current.get(nextCol.id)?.focus();
+                    }
+                  } else if (e.key === 'ArrowUp' && (e.target as HTMLElement).tagName !== 'SELECT') {
+                    e.preventDefault();
+                    const prevCol = columns[currentIndex - 1];
+                    if (prevCol) {
+                      detailInputRefs.current.get(prevCol.id)?.focus();
+                    }
+                  }
+                };
+
+                return columns.map((col) => {
+                  const colKey = col.id.toString();
+                  const val = detailEdits[colKey] ?? '';
+
+                  return (
+                    <div className={`row-detail-field ${col.type}-field`} key={col.id}>
+                      <div className="row-detail-label-container">
+                        <div className="row-detail-label-group">
+                          <label className="row-detail-label">
+                            {col.name}
+                            {col.type === 'formula' && <FlaskConical size={10} style={{ marginLeft: 4, opacity: 0.6 }} />}
+                          </label>
+                          <span className="row-detail-type-badge">{col.type.replace('_', ' ')}</span>
+                        </div>
+                        <button 
+                          className="row-detail-col-btn" 
+                          title="Column Settings"
+                          onClick={() => {
+                            setActiveModalColId(col.id);
+                            setChangeTypeValue(col.type);
+                            if (col.type === 'formula') setNewColFormula(col.formula || '');
+                            if (col.type === 'dropdown') setNewColDropdownOpts((col.dropdownOptions || []).join(', '));
+                            setChangeTypeModal(true);
+                          }}
+                        >
+                          <ChevronDown size={12} />
+                        </button>
+                      </div>
+                      
+                      <div className="row-detail-input-wrapper">
+                        {col.type === 'dropdown' ? (
+                          <select
+                            className="row-detail-input"
+                            value={val}
+                            ref={(el) => {
+                              if (el) detailInputRefs.current.set(col.id, el);
+                              else detailInputRefs.current.delete(col.id);
+                            }}
+                            onKeyDown={(e) => handleDetailKeyDown(e, col.id)}
+                            onChange={e => setDetailEdits(prev => ({ ...prev, [colKey]: e.target.value }))}
+                          >
+                            <option value="">Select Option...</option>
+                            {(col.dropdownOptions || []).map((opt: string) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        ) : col.type === 'checkbox' ? (
+                          <div 
+                            className="row-detail-checkbox-wrapper"
+                            tabIndex={0}
+                            ref={(el) => {
+                              if (el) detailInputRefs.current.set(col.id, el);
+                              else detailInputRefs.current.delete(col.id);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === ' ') {
+                                e.preventDefault();
+                                setDetailEdits(prev => ({ ...prev, [colKey]: (val === 'true' || val === 'Checked') ? 'false' : 'true' }));
+                              } else {
+                                handleDetailKeyDown(e, col.id);
+                              }
+                            }}
+                            onClick={() => setDetailEdits(prev => ({ ...prev, [colKey]: (val === 'true' || val === 'Checked') ? 'false' : 'true' }))}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={val === 'true' || val === 'Checked'}
+                              readOnly
+                            />
+                            <span className="checkbox-label">{val === 'true' || val === 'Checked' ? 'Checked' : 'Unchecked'}</span>
+                          </div>
+                        ) : col.type === 'date' ? (
+                          <input
+                            type="date"
+                            className="row-detail-input"
+                            value={val}
+                            ref={(el) => {
+                              if (el) detailInputRefs.current.set(col.id, el);
+                              else detailInputRefs.current.delete(col.id);
+                            }}
+                            onKeyDown={(e) => handleDetailKeyDown(e, col.id)}
+                            onChange={e => setDetailEdits(prev => ({ ...prev, [colKey]: e.target.value }))}
+                          />
+                        ) : col.type === 'image' ? (
+                          <div className="row-detail-image-field">
+                            {val ? (
+                              <div className="row-detail-image-container">
+                                <div className="row-detail-img-wrapper" onClick={() => setPreviewImage(val)}>
+                                  <img 
+                                    src={val} 
+                                    alt="preview" 
+                                    className="row-detail-img-preview" 
+                                  />
+                                  <div className="row-detail-img-overlay">
+                                    <Maximize2 size={24} color="white" />
+                                    <span>Quick Reveal</span>
+                                  </div>
+                                </div>
+                                <div className="row-detail-image-actions">
+                                  <button className="row-detail-img-btn" onClick={() => setPreviewImage(val)}>View Large</button>
+                                  <button className="row-detail-img-btn" onClick={() => handleImageDownload(val)}>Download</button>
+                                  <button className="row-detail-img-btn danger" onClick={() => setDetailEdits(prev => ({ ...prev, [colKey]: '' }))}>Remove</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <label className="row-detail-image-upload">
+                                <input 
+                                  type="file" 
+                                  accept="image/*" 
+                                  hidden 
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      const reader = new FileReader();
+                                      reader.onload = (rev) => {
+                                        setDetailEdits(prev => ({ ...prev, [colKey]: rev.target?.result as string }));
+                                      };
+                                      reader.readAsDataURL(file);
+                                    }
+                                  }}
+                                />
+                                <ImageIcon size={16} />
+                                <span>Upload Image</span>
+                              </label>
+                            )}
+                          </div>
+                        ) : col.type === 'formula' ? (
+                          <div 
+                            className="row-detail-formula-result"
+                            tabIndex={0}
+                            ref={(el) => {
+                              if (el) detailInputRefs.current.set(col.id, el);
+                              else detailInputRefs.current.delete(col.id);
+                            }}
+                            onKeyDown={(e) => handleDetailKeyDown(e, col.id)}
+                            onClick={() => {
+                              setActiveModalColId(col.id);
+                              setNewColFormula(col.formula || '');
+                              setCalcModal(true);
+                            }}
+                            title="Click to edit formula"
+                          >
+                            {evaluateFormula(col.formula || '', detailViewEntry, columns)}
+                          </div>
+                        ) : (
+                          <input
+                            className="row-detail-input"
+                            value={val}
+                            ref={(el) => {
+                              if (el) detailInputRefs.current.set(col.id, el);
+                              else detailInputRefs.current.delete(col.id);
+                            }}
+                            onKeyDown={(e) => handleDetailKeyDown(e, col.id)}
+                            onChange={e => setDetailEdits(prev => ({ ...prev, [colKey]: e.target.value }))}
+                            placeholder={`Enter ${col.name}…`}
+                            type={col.type === 'number' || col.type === 'currency' ? 'number' : 'text'}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
             </div>
+
             <div className="row-detail-footer">
               <button className="row-detail-btn-close" onClick={() => { setDetailViewEntry(null); setDetailEdits({}); }}>Cancel</button>
               <button className="row-detail-btn-save" onClick={() => {
@@ -2005,6 +2264,37 @@ export default function RegisterPage() {
             <button className="context-item danger" onClick={() => updateCalcType(calcMenu.colId, 'none')}>
               <span className="context-item-label">Remove Calculation</span>
             </button>
+          </div>
+        </div>
+      )}
+      
+      {/* ── Image Preview Modal ── */}
+      {previewImage && (
+        <div className="img-preview-overlay" onClick={() => setPreviewImage(null)}>
+          <div className="img-preview-content" onClick={e => e.stopPropagation()}>
+            <div className="img-preview-header">
+              <h3>Image Preview</h3>
+              <div className="img-preview-actions">
+                <button 
+                  onClick={() => handleImageDownload(previewImage)}
+                  className="img-download-btn"
+                  title="Download Image"
+                >
+                  <Download size={18} />
+                  Download
+                </button>
+                <button 
+                  className="img-preview-close" 
+                  onClick={() => setPreviewImage(null)}
+                  title="Close Preview"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="img-preview-body">
+              <img src={previewImage} alt="Large preview" />
+            </div>
           </div>
         </div>
       )}

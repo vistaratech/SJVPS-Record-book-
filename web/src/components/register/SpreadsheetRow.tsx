@@ -1,6 +1,6 @@
 import { evaluateFormula, type Entry, type Column } from '../../lib/api';
-import { Calendar, ChevronDown, Image as ImageIcon, Mail, Phone, Globe, ListOrdered, IndianRupee } from 'lucide-react';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Calendar, ChevronDown, Image as ImageIcon, Mail, Phone, Globe, ListOrdered, IndianRupee, Maximize2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 // Format number with Indian currency style: ₹1,23,456.00
 function formatCurrency(val: string): string {
@@ -241,7 +241,8 @@ interface SpreadsheetRowProps {
   isMenuOpen: boolean;
   toggleMenu: (id: number) => void;
   registerColumns: Column[];
-  onRowDoubleClick?: (entry: Entry) => void;
+  onRowDetail?: (entry: Entry) => void;
+  onImagePreview?: (src: string) => void;
   frozenColumns?: Set<number>;
 }
 
@@ -256,13 +257,11 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     openDropdown,
     toggleMenu,
     registerColumns,
-    onRowDoubleClick,
+    onRowDetail,
+    onImagePreview,
     frozenColumns,
   } = props;
 
-  // Double-click detection on the serial (row number) cell
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clickCountRef = useRef(0);
 
   const handleCellKeyDown = useCallback((e: React.KeyboardEvent, colId: number | string, colIdx: number) => {
     if (e.key === 'Escape') {
@@ -322,23 +321,15 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
   }, [idx, visibleColumns, totalRows]);
 
   const handleSerialClick = useCallback(() => {
-    clickCountRef.current += 1;
-    if (clickCountRef.current >= 2) {
-      clickCountRef.current = 0;
-      if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
-      onRowDoubleClick?.(entry);
-      return;
-    }
-    clickTimerRef.current = setTimeout(() => {
-      clickCountRef.current = 0;
-    }, 400);
-  }, [entry, onRowDoubleClick]);
+    onRowDetail?.(entry);
+  }, [entry, onRowDetail]);
   return (
-    <tr onDoubleClick={() => onRowDoubleClick?.(entry)} title="Double-click row number to view all details">
-      <td className="serial" style={{ cursor: 'pointer' }} onClick={handleSerialClick} title="Double-click to view details">{idx + 1}</td>
+    <tr>
+      <td className="serial" style={{ cursor: 'pointer' }} onClick={handleSerialClick} title="Click to view details">{idx + 1}</td>
       {visibleColumns.map((col, colIdx) => {
+        const isImage = col.type === 'image';
         const cellVal = entry.cells?.[col.id.toString()] || '';
-        const tdMinWidth = `${Math.max(6, cellVal.length + 2)}ch`;
+        const tdMinWidth = isImage ? '100px' : `${Math.max(6, cellVal.length + 2)}ch`;
         
         // Frozen column sticky left for body cells
         const isFrozen = frozenColumns?.has(col.id);
@@ -383,11 +374,30 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
               ))}
             </div>
           ) : col.type === 'image' ? (
-            <div data-cell={`cell-${idx}-${col.id}`} tabIndex={0} className="cell-image-wrap" onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)}>
+            <div 
+              data-cell={`cell-${idx}-${col.id}`} 
+              tabIndex={0} 
+              className="cell-image-wrap" 
+              onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)}
+              onClick={() => {
+                const val = entry.cells?.[col.id.toString()];
+                if (val) onImagePreview?.(val);
+              }}
+              title={entry.cells?.[col.id.toString()] ? "Click to view full image" : "No image"}
+            >
               {entry.cells?.[col.id.toString()] ? (
-                <img src={entry.cells[col.id.toString()]} alt="img" className="cell-image-thumb" onClick={() => window.open(entry.cells[col.id.toString()], '_blank')} title="Open image" />
+                <div className="cell-image-inner">
+                  <img 
+                    src={entry.cells[col.id.toString()]} 
+                    alt="img" 
+                    className="cell-image-thumb" 
+                  />
+                  <div className="cell-image-overlay">
+                    <Maximize2 size={12} />
+                  </div>
+                </div>
               ) : (
-                <label className="cell-image-upload" title="Upload image">
+                <label className="cell-image-upload" title="Upload image" onClick={(e) => e.stopPropagation()}>
                   <ImageIcon size={11} /> Add
                   <input type="file" accept="image/*" className="hidden-file-input" tabIndex={-1} onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = (ev) => handleCellChange(entry.id, col.id.toString(), ev.target?.result as string); r.readAsDataURL(f); }} />
                 </label>
