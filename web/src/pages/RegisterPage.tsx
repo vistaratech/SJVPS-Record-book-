@@ -165,7 +165,9 @@ export default function RegisterPage() {
   }, [isSaving]);
 
   // Stabilize references so child components only re-render when the actual data changes
-  const columns = useMemo(() => register?.columns || [], [register?.columns]);
+  const columns = useMemo(() => {
+    return [...(register?.columns || [])].sort((a, b) => a.position - b.position);
+  }, [register?.columns]);
   const pages = useMemo(() => register?.pages || [{ id: 1, name: 'Page 1', index: 0 }], [register?.pages]);
 
   useEffect(() => {
@@ -347,28 +349,29 @@ export default function RegisterPage() {
       setNewColumnModal(false);
       return { prev, dummyId };
     },
-    onSuccess: (newCol, _vars, context) => {
-      // Replace the optimistic dummy column with the real server column
-      queryClient.setQueryData(['register', registerId], (old: any) => {
-        if (!old) return old;
-        return { ...old, columns: old.columns.map((c: any) => c.id === context?.dummyId ? newCol : c) };
-      });
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+      setLocalEntries(updatedReg.entries || []);
+      toast.success('Column added successfully');
     },
-    onError: (_err, _newCol, context) => {
+    onError: (_err, _vars, context) => {
       if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
+      toast.error('Failed to add column');
     },
     onSettled: () => { setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula(''); },
   });
 
   const deleteColumnMutation = useMutation({
     mutationFn: (colId: number) => deleteColumn(registerId, colId),
-    onSuccess: (_data, colId) => {
-      queryClient.setQueryData(['register', registerId], (old: any) => {
-        if (!old) return old;
-        return { ...old, columns: old.columns.filter((c: any) => c.id !== colId) };
-      });
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+      setLocalEntries(updatedReg.entries || []);
       setColMenuId(null);
+      toast.success('Column deleted');
     },
+    onError: () => toast.error('Failed to delete column'),
   });
 
   const renameColumnMutation = useMutation({
@@ -387,52 +390,41 @@ export default function RegisterPage() {
       setRenameColModal(false);
       return { prev };
     },
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+      toast.success('Column renamed');
+    },
     onError: (_err, _vars, context) => {
-      if (context?.prev) {
-        queryClient.setQueryData(['register', registerId], context.prev);
-      }
+      if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
+      toast.error('Failed to rename column');
     },
     onSettled: () => { setRenameColValue(''); setActiveModalColId(null); },
   });
 
   const updateDropdownMutation = useMutation({
     mutationFn: () => updateColumnDropdownOptions(registerId, activeModalColId!, dropdownConfigOptions.split(',').map((s) => s.trim()).filter(Boolean)),
-    onSuccess: (updatedCol) => {
-      queryClient.setQueryData(['register', registerId], (old: any) => {
-        if (!old) return old;
-        return { ...old, columns: old.columns.map((c: any) => c.id === updatedCol.id ? updatedCol : c) };
-      });
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       setDropdownConfigModal(false);
       setActiveModalColId(null);
+      toast.success('Dropdown options updated');
     },
+    onError: () => toast.error('Failed to update options'),
   });
 
   const duplicateColumnMutation = useMutation({
     mutationFn: (colId: number) => duplicateColumn(registerId, colId),
-    onSuccess: (newCol, colId) => {
-      queryClient.setQueryData(['register', registerId], (old: any) => {
-        if (!old) return old;
-        // Also copy entries data optimistic
-        const updatedEntries = old.entries.map((e: any) => {
-          const val = e.cells?.[colId.toString()];
-          if (val) {
-             const newCells = { ...e.cells, [newCol.id.toString()]: val };
-             return { ...e, cells: newCells };
-          }
-          return e;
-        });
-        return { ...old, columns: [...old.columns, newCol], entries: updatedEntries };
-      });
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       setColMenuId(null);
-      // Ensure UI local state refreshes right away to match local cache injection
-      setLocalEntries((prev) => prev.map((e) => {
-         const val = e.cells?.[colId.toString()];
-         if (val) return { ...e, cells: { ...e.cells, [newCol.id.toString()]: val } };
-         return e;
-      }));
+      setLocalEntries(updatedReg.entries || []);
+      toast.success('Column duplicated');
     },
+    onError: () => toast.error('Failed to duplicate column'),
   });
-
 
 
   const moveColumnMutation = useMutation({
@@ -452,8 +444,13 @@ export default function RegisterPage() {
       }
       return { prev };
     },
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+    },
     onError: (_err, _vars, context) => {
       if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
+      toast.error('Failed to move column');
     },
     onSettled: () => setColMenuId(null),
   });
@@ -476,8 +473,13 @@ export default function RegisterPage() {
       }
       return { prev };
     },
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+    },
     onError: (_err, _vars, context) => {
       if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
+      toast.error('Failed to reorder column');
     },
     onSettled: () => setColMenuId(null),
   });
@@ -759,40 +761,39 @@ export default function RegisterPage() {
   }, []);
 
   const changeColumnTypeMutation = useMutation({
-    mutationFn: () => changeColumnType(registerId, activeModalColId!, changeTypeValue, {
-      formula: changeTypeValue === 'formula' ? newColFormula : undefined,
-      dropdownOptions: changeTypeValue === 'dropdown' ? newColDropdownOpts.split(',').map(s => s.trim()).filter(Boolean) : undefined,
-    }),
-    onSuccess: (updatedCol) => {
-      queryClient.setQueryData(['register', registerId], (old: any) => {
-        if (!old) return old;
-        return { ...old, columns: old.columns.map((c: any) => c.id === updatedCol.id ? updatedCol : c) };
+    mutationFn: () => {
+      if (activeModalColId === null) throw new Error('No column selected');
+      return changeColumnType(registerId, activeModalColId, changeTypeValue, {
+        formula: changeTypeValue === 'formula' ? newColFormula : undefined,
+        dropdownOptions: changeTypeValue === 'dropdown' ? newColDropdownOpts.split(',').map(s => s.trim()).filter(Boolean) : undefined,
       });
+    },
+    onSuccess: (updatedReg) => {
+      // We now receive the full register from the backend to ensure entries are synced (e.g. for auto_increment)
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       setChangeTypeModal(false); 
       setActiveModalColId(null);
       setNewColFormula('');
       setNewColDropdownOpts('');
+      setLocalEntries(updatedReg.entries || []);
+      toast.success('Column type updated successfully');
     },
+    onError: (err: any) => {
+      console.error('Failed to change column type:', err);
+      toast.error('Failed to update column type. Please try again.');
+    }
   });
 
   const clearColumnDataMutation = useMutation({
     mutationFn: (colId: number) => clearColumnData(registerId, colId),
-    onSuccess: (_data, colId) => {
-      const colIdStr = colId.toString();
-      queryClient.setQueryData(['register', registerId], (old: any) => {
-        if (!old) return old;
-        return {
-          ...old,
-          entries: old.entries.map((e: any) => {
-            const cells = { ...e.cells };
-            delete cells[colIdStr];
-            return { ...e, cells };
-          }),
-        };
-      });
-      setLocalEntries(prev => prev.map(e => { const cells = { ...e.cells }; delete cells[colIdStr]; return { ...e, cells }; }));
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      setLocalEntries(updatedReg.entries || []);
       setColMenuId(null);
+      toast.success('Column data cleared');
     },
+    onError: () => toast.error('Failed to clear column data'),
   });
 
   const insertColumnMutation = useMutation({
@@ -839,15 +840,15 @@ export default function RegisterPage() {
       setActiveModalColId(null);
       return { prev, dummyId };
     },
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+      setLocalEntries(updatedReg.entries || []);
+      toast.success('Column inserted successfully');
+    },
     onError: (_err, _vars, context) => {
       if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
-    },
-    onSuccess: (newCol, _vars, context) => {
-      // Replace the optimistic dummy column with the real server column
-      queryClient.setQueryData(['register', registerId], (old: any) => {
-        if (!old) return old;
-        return { ...old, columns: old.columns.map((c: any) => c.id === (context as any)?.dummyId ? newCol : c) };
-      });
+      toast.error('Failed to insert column');
     },
     onSettled: () => { setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula(''); },
   });
@@ -934,6 +935,7 @@ export default function RegisterPage() {
         if (!old) return old;
         return { ...old, pages: [...(old.pages || []), newPage] };
       });
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       setCurrentPageIndex(newPage.index);
     },
   });
@@ -945,6 +947,7 @@ export default function RegisterPage() {
         if (!old) return old;
         return { ...old, pages: old.pages.map((p: any) => p.id === renamePageId ? { ...p, name: renamePageValue } : p) };
       });
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       setRenamePageModal(false);
     },
   });
@@ -958,6 +961,7 @@ export default function RegisterPage() {
         const entries = old.entries.filter((e: any) => e.pageIndex !== old.pages.find((p: any) => p.id === pageId)?.index);
         return { ...old, pages, entries, entryCount: entries.length };
       });
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       setCurrentPageIndex(0);
     },
   });
@@ -979,6 +983,42 @@ export default function RegisterPage() {
 
   // ── Handlers ──
   const handleCellChange = useCallback((entryId: number, columnId: string, value: string) => {
+    const col = columns.find(c => c.id.toString() === columnId);
+    if (!col) return;
+
+    // ── Type-Based Validation ──
+    if (value.trim() !== '') {
+      if (col.type === 'email') {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(value)) {
+          // toast.error('Invalid email format'); // Optional: show toast
+          // return; // We could block it, but for now let's just let it be if it's mid-typing
+        }
+      } else if (col.type === 'phone') {
+        const phoneRegex = /^[\d\s+()-]{7,20}$/;
+        if (!phoneRegex.test(value)) {
+          // toast.error('Invalid phone format');
+        }
+      } else if (col.type === 'date') {
+        // Only validate if it's a full date string
+        if (value.length >= 10) {
+          const dateRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+          if (!dateRegex.test(value)) {
+             toast.error('Use DD/MM/YYYY format');
+             return;
+          }
+        }
+      } else if (col.type === 'dropdown') {
+        if (col.dropdownOptions && col.dropdownOptions.length > 0 && !col.dropdownOptions.includes(value)) {
+          toast.error('Please select an option from the list');
+          return;
+        }
+      } else if (col.type === 'auto_increment') {
+        // Prevent any manual changes to auto_increment
+        return;
+      }
+    }
+
     // 1. Update local state instantly (optimistic)
     setLocalEntries((prev) => prev.map((e) => e.id === entryId ? { ...e, cells: { ...e.cells, [columnId]: value } } : e));
 
@@ -999,7 +1039,7 @@ export default function RegisterPage() {
         });
       });
     }, 600);
-  }, [registerId, queryClient]);
+  }, [registerId, queryClient, columns]);
 
   // Excel-like sort: permanently reorders localEntries and persists to Firestore
   const handleSort = useCallback((colId: number, direction: 'asc' | 'desc') => {
@@ -2108,17 +2148,18 @@ export default function RegisterPage() {
                             <span className="checkbox-label">{val === 'true' || val === 'Checked' ? 'Checked' : 'Unchecked'}</span>
                           </div>
                         ) : col.type === 'date' ? (
-                          <input
-                            type="date"
-                            className="row-detail-input"
-                            value={val}
+                          <div 
+                            className="row-detail-input cell-date" 
+                            tabIndex={0}
                             ref={(el) => {
                               if (el) detailInputRefs.current.set(col.id, el);
                               else detailInputRefs.current.delete(col.id);
                             }}
-                            onKeyDown={(e) => handleDetailKeyDown(e, col.id)}
-                            onChange={e => setDetailEdits(prev => ({ ...prev, [colKey]: e.target.value }))}
-                          />
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDatePicker(detailViewEntry.id, col.id, val); } else handleDetailKeyDown(e, col.id); }}
+                            onClick={() => openDatePicker(detailViewEntry.id, col.id, val)}
+                          >
+                            {val || 'Select date...'}
+                          </div>
                         ) : col.type === 'image' ? (
                           <div className="row-detail-image-field">
                             {val ? (
@@ -2179,6 +2220,11 @@ export default function RegisterPage() {
                             title="Click to edit formula"
                           >
                             {evaluateFormula(col.formula || '', detailViewEntry, columns)}
+                          </div>
+                        ) : col.type === 'auto_increment' ? (
+                          <div className="row-detail-input auto-increment-readonly">
+                            <ListOrdered size={14} style={{ opacity: 0.5 }} />
+                            <span>{val || '–'}</span>
                           </div>
                         ) : (
                           <input

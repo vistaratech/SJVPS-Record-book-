@@ -419,9 +419,26 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
               {entry.cells?.[col.id.toString()] && <a href={entry.cells[col.id.toString()]} target="_blank" rel="noreferrer" className="cell-url-link" title="Open" tabIndex={-1}><Globe size={11} /></a>}
             </div>
           ) : col.type === 'auto_increment' ? (
-            <div data-cell={`cell-${idx}-${col.id}`} className="cell-auto-increment" tabIndex={0} title="Auto-generated ID" onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)}>
-              <ListOrdered size={11} />
-              <span>{entry.cells?.[col.id.toString()] || ''}</span>
+            <div 
+              data-cell={`cell-${idx}-${col.id}`} 
+              className="cell-auto-increment-readonly" 
+              tabIndex={0} 
+              title="Auto-generated ID (Read-only)" 
+              onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)}
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                padding: '0 8px', 
+                color: '#64748b', 
+                background: '#f8fafc',
+                height: '100%',
+                fontSize: '12px',
+                fontWeight: 500
+              }}
+            >
+              <ListOrdered size={12} style={{ opacity: 0.6 }} />
+              <span>{entry.cells?.[col.id.toString()] || '–'}</span>
             </div>
           ) : col.type === 'currency' ? (
             <CurrencyCell idx={idx} col={col} entry={entry} colIdx={colIdx} handleCellChange={handleCellChange} visibleColumns={visibleColumns} totalRows={totalRows} />

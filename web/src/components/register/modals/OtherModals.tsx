@@ -128,20 +128,76 @@ export function OtherModals(props: OtherModalsProps) {
             <div className="date-picker-flex">
               <div className="date-picker-flex-1">
                 <label className="modal-label">Day</label>
-                <input className="modal-input" value={dateDay} onChange={(e) => setDateDay(e.target.value)} type="number" maxLength={2} placeholder="DD" />
+                <input 
+                  className="modal-input" 
+                  value={dateDay} 
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 31)) setDateDay(val);
+                  }} 
+                  type="number" 
+                  placeholder="DD" 
+                />
               </div>
               <div className="date-picker-flex-1">
                 <label className="modal-label">Month</label>
-                <input className="modal-input" value={dateMonth} onChange={(e) => setDateMonth(e.target.value)} type="number" maxLength={2} placeholder="MM" />
+                <input 
+                  className="modal-input" 
+                  value={dateMonth} 
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 12)) setDateMonth(val);
+                  }} 
+                  type="number" 
+                  placeholder="MM" 
+                />
               </div>
               <div className="date-picker-flex-1-5">
                 <label className="modal-label">Year</label>
-                <input className="modal-input" value={dateYear} onChange={(e) => setDateYear(e.target.value)} type="number" maxLength={4} placeholder="YYYY" />
+                <input 
+                  className="modal-input" 
+                  value={dateYear} 
+                  onChange={(e) => setDateYear(e.target.value)} 
+                  type="number" 
+                  placeholder="YYYY" 
+                />
               </div>
             </div>
             <div className="modal-actions">
+              <button 
+                className="modal-confirm-btn" 
+                style={{ background: '#f1f5f9', color: '#475569', flex: 1 }}
+                onClick={() => {
+                  const now = new Date();
+                  setDateDay(now.getDate().toString().padStart(2, '0'));
+                  setDateMonth((now.getMonth() + 1).toString().padStart(2, '0'));
+                  setDateYear(now.getFullYear().toString());
+                }}
+              >
+                Today
+              </button>
               <button className="modal-cancel-btn" onClick={() => setDateModal(false)}>Cancel</button>
-              <button className="modal-confirm-btn" onClick={handleDateSelect}>Set Date</button>
+              <button 
+                className="modal-confirm-btn" 
+                onClick={() => {
+                  const d = parseInt(dateDay);
+                  const m = parseInt(dateMonth);
+                  const y = parseInt(dateYear);
+                  if (isNaN(d) || isNaN(m) || isNaN(y) || y < 1900 || y > 2100) {
+                    alert("Please enter a valid date");
+                    return;
+                  }
+                  // Check days in month
+                  const daysInMonth = new Date(y, m, 0).getDate();
+                  if (d < 1 || d > daysInMonth) {
+                    alert(`Invalid day for the selected month (max ${daysInMonth})`);
+                    return;
+                  }
+                  handleDateSelect();
+                }}
+              >
+                Set Date
+              </button>
             </div>
           </div>
         </div>

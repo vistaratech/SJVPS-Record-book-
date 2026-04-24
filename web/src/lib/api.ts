@@ -152,17 +152,35 @@ function updateMutationCount(delta: number) {
   mutationListeners.forEach(cb => cb(pendingMutationsCount));
 }
 
-async function runQueuedMutation<T>(registerId: number, op: () => Promise<T>): Promise<T> {
-  const currentQueue = registerMutationQueues.get(registerId) || Promise.resolve();
+async function runQueuedMutation<T>(registerId: number | string, op: () => Promise<T>): Promise<T> {
+  const key = registerId.toString();
+  const currentQueue = registerMutationQueues.get(key) || Promise.resolve();
   updateMutationCount(1);
   const next = currentQueue.then(op).finally(() => {
     updateMutationCount(-1);
   }).catch((err) => {
-    console.error(`Mutation failed for register ${registerId}:`, err);
+    console.error(`Mutation failed for register ${key}:`, err);
     throw err;
   });
-  registerMutationQueues.set(registerId, next);
+  registerMutationQueues.set(key, next);
   return next;
+}
+
+/** Helper to populate auto-increment values for existing rows */
+function populateAutoIncrement(reg: RegisterDetail, columnId: number) {
+  const colIdStr = columnId.toString();
+  let maxVal = 0;
+  reg.entries.forEach(e => {
+    const v = parseInt(e.cells?.[colIdStr] || '0', 10);
+    if (!isNaN(v) && v > maxVal) maxVal = v;
+  });
+  reg.entries.forEach(e => {
+    if (!e.cells) e.cells = {};
+    if (!e.cells[colIdStr] || e.cells[colIdStr].trim() === '') {
+      maxVal++;
+      e.cells[colIdStr] = maxVal.toString();
+    }
+  });
 }
 
 async function getRegDoc(registerId: number): Promise<RegisterDetail> {
@@ -763,93 +781,102 @@ export function evaluateFormula(formula: string, entry: Entry, columns: Column[]
 
 // ─── Column Operations ──────────────────────────────────────────────────────
 
-export async function addColumn(registerId: number, data: { name: string; type: string; dropdownOptions?: string[]; formula?: string }): Promise<Column> {
+export async function addColumn(registerId: number, data: { name: string; type: string; dropdownOptions?: string[]; formula?: string }): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
+    const colId = generateId();
     const col: Column = {
-      id: generateId(), registerId, name: data.name, type: data.type,
+      id: colId, registerId, name: data.name, type: data.type,
       position: reg.columns.length, dropdownOptions: data.dropdownOptions, formula: data.formula,
     };
     reg.columns.push(col);
+    if (data.type === 'auto_increment') {
+      populateAutoIncrement(reg, colId);
+    }
     await saveRegDocImmediate(reg);
-    return col;
+    return reg;
   });
 }
 
-export async function deleteColumn(registerId: number, columnId: number): Promise<void> {
+export async function deleteColumn(registerId: number, columnId: number): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
-    reg.columns = reg.columns.filter((c) => c.id !== columnId);
+    reg.columns = reg.columns.filter((c) => c.id.toString() !== columnId.toString());
     reg.columns.forEach((c, i) => c.position = i);
     // Cleanup entry data
     reg.entries.forEach((e) => { if (e.cells) delete e.cells[columnId.toString()]; });
     await saveRegDocImmediate(reg);
+    return reg;
   });
 }
 
-export async function renameColumn(registerId: number, columnId: number, newName: string): Promise<Column> {
+export async function renameColumn(registerId: number, columnId: number, newName: string): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
-    const col = reg.columns.find((c) => c.id === columnId);
+    const col = reg.columns.find((c) => c.id.toString() === columnId.toString());
     if (!col) throw new Error('Column not found');
     col.name = newName;
     await saveRegDocImmediate(reg);
-    return col;
+    return reg;
   });
 }
 
-export async function updateColumnDropdownOptions(registerId: number, columnId: number, options: string[]): Promise<Column> {
+export async function updateColumnDropdownOptions(registerId: number, columnId: number, options: string[]): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
-    const col = reg.columns.find((c) => c.id === columnId);
+    const col = reg.columns.find((c) => c.id.toString() === columnId.toString());
     if (!col) throw new Error('Column not found');
     col.dropdownOptions = options;
     await saveRegDocImmediate(reg);
-    return col;
+    return reg;
   });
 }
 
-export async function duplicateColumn(registerId: number, columnId: number): Promise<Column> {
+export async function duplicateColumn(registerId: number, columnId: number): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
-    const original = reg.columns.find((c) => c.id === columnId);
+    const original = reg.columns.find((c) => c.id.toString() === columnId.toString());
     if (!original) throw new Error('Column not found');
+    const newColId = generateId();
     const newCol: Column = {
-      id: generateId(), registerId, name: `${original.name} (Copy)`, type: original.type,
-      position: reg.columns.length, dropdownOptions: original.dropdownOptions ? [...original.dropdownOptions] : undefined,
-      formula: original.formula,
+      ...original,
+      id: newColId,
+      name: `${original.name} (Copy)`,
+      position: reg.columns.length,
     };
     reg.columns.push(newCol);
     reg.entries.forEach((entry) => {
       const val = entry.cells?.[columnId.toString()];
-      if (val) {
+      if (val !== undefined) {
         if (!entry.cells) entry.cells = {};
-        entry.cells[newCol.id.toString()] = val;
+        entry.cells[newColId.toString()] = val;
       }
     });
     await saveRegDocImmediate(reg);
-    return newCol;
+    return reg;
   });
 }
 
-export async function moveColumn(registerId: number, columnId: number, direction: 'left' | 'right'): Promise<void> {
+export async function moveColumn(registerId: number, columnId: number, direction: 'left' | 'right'): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
-    const idx = reg.columns.findIndex((c) => c.id === columnId);
-    if (idx === -1) return;
+    const idx = reg.columns.findIndex((c) => c.id.toString() === columnId.toString());
+    if (idx === -1) throw new Error('Column not found');
     const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
-    if (targetIdx < 0 || targetIdx >= reg.columns.length) return;
-    [reg.columns[idx], reg.columns[targetIdx]] = [reg.columns[targetIdx], reg.columns[idx]];
-    reg.columns.forEach((c, i) => c.position = i);
-    await saveRegDocImmediate(reg);
+    if (targetIdx >= 0 && targetIdx < reg.columns.length) {
+      [reg.columns[idx], reg.columns[targetIdx]] = [reg.columns[targetIdx], reg.columns[idx]];
+      reg.columns.forEach((c, i) => c.position = i);
+      await saveRegDocImmediate(reg);
+    }
+    return reg;
   });
 }
 
-export async function reorderColumn(registerId: number, columnId: number, targetIndex: number): Promise<void> {
+export async function reorderColumn(registerId: number, columnId: number, targetIndex: number): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
-    const idx = reg.columns.findIndex((c) => c.id === columnId);
-    if (idx === -1) return;
+    const idx = reg.columns.findIndex((c) => c.id.toString() === columnId.toString());
+    if (idx === -1) throw new Error('Column not found');
     
     // Remove the column from its original position
     const [col] = reg.columns.splice(idx, 1);
@@ -871,11 +898,13 @@ export async function changeColumnType(
   columnId: number, 
   newType: string, 
   options?: { formula?: string; dropdownOptions?: string[] }
-): Promise<Column> {
+): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
-    const col = reg.columns.find((c) => c.id === columnId);
+    const col = reg.columns.find((c) => c.id.toString() === columnId.toString());
     if (!col) throw new Error('Column not found');
+    
+    const oldType = col.type;
     col.type = newType;
     
     if (newType === 'formula') {
@@ -890,12 +919,17 @@ export async function changeColumnType(
       col.dropdownOptions = undefined;
     }
 
+    // Auto-populate existing rows if switching TO auto_increment
+    if (newType === 'auto_increment' && oldType !== 'auto_increment') {
+      populateAutoIncrement(reg, columnId);
+    }
+
     await saveRegDocImmediate(reg);
-    return col;
+    return reg;
   });
 }
 
-export async function clearColumnData(registerId: number, columnId: number): Promise<void> {
+export async function clearColumnData(registerId: number, columnId: number): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
     const colIdStr = columnId.toString();
@@ -903,20 +937,25 @@ export async function clearColumnData(registerId: number, columnId: number): Pro
       if (entry.cells) delete entry.cells[colIdStr];
     });
     await saveRegDocImmediate(reg);
+    return reg;
   });
 }
 
-export async function insertColumn(registerId: number, data: { name: string; type: string; dropdownOptions?: string[]; formula?: string }, position: number): Promise<Column> {
+export async function insertColumn(registerId: number, data: { name: string; type: string; dropdownOptions?: string[]; formula?: string }, position: number): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
+    const colId = generateId();
     const col: Column = {
-      id: generateId(), registerId, name: data.name, type: data.type,
+      id: colId, registerId, name: data.name, type: data.type,
       position, dropdownOptions: data.dropdownOptions, formula: data.formula,
     };
     reg.columns.splice(position, 0, col);
     reg.columns.forEach((c, i) => c.position = i);
+    if (data.type === 'auto_increment') {
+      populateAutoIncrement(reg, colId);
+    }
     await saveRegDocImmediate(reg);
-    return col;
+    return reg;
   });
 }
 
@@ -980,7 +1019,14 @@ export async function updateEntry(registerId: number, entryId: number, cells: Re
     const reg = await getRegDoc(registerId);
     const entry = reg.entries.find((e) => e.id === entryId);
     if (!entry) throw new Error('Entry not found');
-    entry.cells = { ...entry.cells, ...cells };
+
+    // Security: Filter out any attempts to manually update auto_increment columns
+    const autoColIds = new Set(reg.columns.filter(c => c.type === 'auto_increment').map(c => c.id.toString()));
+    const safeCells = Object.fromEntries(
+      Object.entries(cells).filter(([colId]) => !autoColIds.has(colId))
+    );
+
+    entry.cells = { ...entry.cells, ...safeCells };
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
     return entry;
