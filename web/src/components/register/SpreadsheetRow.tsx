@@ -236,7 +236,7 @@ interface SpreadsheetRowProps {
   toggleSelectRow: (id: number) => void;
   totalRows: number;
   handleCellChange: (entryId: number, columnId: string, value: string) => void;
-  openDatePicker: (entryId: number, colId: number, currentVal: string) => void;
+  openDatePicker: (entryId: number, colId: number, currentVal: string, rect?: DOMRect) => void;
   openDropdown: (entryId: number, colId: number, options: string[], rect?: DOMRect) => void;
   isMenuOpen: boolean;
   toggleMenu: (id: number) => void;
@@ -348,8 +348,24 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
           {col.type === 'formula' ? (
             <FormulaCell idx={idx} col={col} entry={entry} registerColumns={registerColumns} onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} />
           ) : col.type === 'date' ? (
-            <div data-cell={`cell-${idx}-${col.id}`} tabIndex={0} className="cell-date" onClick={() => openDatePicker(entry.id, col.id, entry.cells?.[col.id.toString()] || '')} onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); openDatePicker(entry.id, col.id, entry.cells?.[col.id.toString()] || ''); } else handleCellKeyDown(e, col.id, colIdx); }}>
-              {entry.cells?.[col.id.toString()] || <span className="cell-placeholder"><Calendar size={12} /> Select date</span>}
+            <div className="cell-url-wrap">
+              <input 
+                id={`cell-${idx}-${col.id}`} 
+                className="cell-input" 
+                value={entry.cells?.[col.id.toString()] || ''} 
+                onChange={(e) => handleCellChange(entry.id, col.id.toString(), e.target.value)} 
+                onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} 
+                placeholder="DD/MM/YYYY" 
+                autoComplete="off"
+              />
+              <button 
+                className="cell-url-link" 
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={(e) => openDatePicker(entry.id, col.id, entry.cells?.[col.id.toString()] || '', e.currentTarget.getBoundingClientRect())}
+                tabIndex={-1}
+              >
+                <Calendar size={12} />
+              </button>
             </div>
           ) : col.type === 'dropdown' ? (
             <div data-cell={`cell-${idx}-${col.id}`} tabIndex={0} className="cell-dropdown" onClick={(e) => openDropdown(entry.id, col.id, col.dropdownOptions || ['Option 1', 'Option 2', 'Option 3'], e.currentTarget.getBoundingClientRect())} onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); openDropdown(entry.id, col.id, col.dropdownOptions || ['Option 1', 'Option 2', 'Option 3'], e.currentTarget.getBoundingClientRect()); } else handleCellKeyDown(e, col.id, colIdx); }}>

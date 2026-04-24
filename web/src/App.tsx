@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './lib/auth';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { saveToStorage } from './lib/api';
@@ -77,6 +78,7 @@ export default function App() {
           <ErrorBoundary>
             <AppRoutes />
             <SaveToast visible={showSaveToast} />
+            <Toaster position="top-center" />
           </ErrorBoundary>
         </BrowserRouter>
       </AuthProvider>

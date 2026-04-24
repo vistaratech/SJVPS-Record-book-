@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getRegister, addColumn, deleteColumn, renameColumn, updateColumnDropdownOptions,
-  duplicateColumn, moveColumn, reorderColumn, changeColumnType, clearColumnData, insertColumn,
+  duplicateColumn, moveColumn, reorderColumn, changeColumnType, clearColumnData, insertColumn, updateColumnWidth,
   freezeColumn, hideColumn,
   addEntry, updateEntry, deleteEntry, duplicateEntry, bulkDeleteEntries,
   addPage, renamePage, deletePage,
@@ -19,7 +20,7 @@ import {
   Plus, ChevronDown, Calendar,
   Hash, FlaskConical, ChevronRight, Pin, IndianRupee,
   Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
-  Search, Filter, Eye, Trash2, FileText, Download, ListOrdered, Maximize2,
+  Search, Filter, Eye, Trash2, FileText, Download, ListOrdered, Maximize2, AlertCircle,
 } from 'lucide-react';
 
 import { RegisterHeader } from '../components/register/RegisterHeader';
@@ -39,6 +40,13 @@ export default function RegisterPage() {
   const navigate = useNavigate();
   const registerId = Number(id);
   const queryClient = useQueryClient();
+  const { data: register, isLoading, error } = useQuery({
+    queryKey: ['register', registerId],
+    queryFn: () => getRegister(Number(registerId)),
+    enabled: !!registerId,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
 
   const cachedRegister = queryClient.getQueryData(['register', registerId]) as any;
 
@@ -81,6 +89,7 @@ export default function RegisterPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc' | null>(null);
   const [detailViewEntry, setDetailViewEntry] = useState<Entry | null>(null);
   const [detailEdits, setDetailEdits] = useState<Record<string, string>>({});
+  const [detailErrors, setDetailErrors] = useState<Record<string, string | null>>({});
   const detailInputRefs = useRef<Map<number, HTMLElement>>(new Map());
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
@@ -114,7 +123,8 @@ export default function RegisterPage() {
   const [dropdownOptions, setDropdownOptions] = useState<string[]>([]);
   const [dropdownEntryId, setDropdownEntryId] = useState<number | null>(null);
   const [dropdownColumnId, setDropdownColumnId] = useState<number | null>(null);
-  const [dropdownRect, setDropdownRect] = useState<{ top: number, left: number, width: number } | null>(null);
+  const [dropdownRect, setDropdownRect] = useState<{ top: number, bottom: number, left: number, width: number } | null>(null);
+  const [dateRect, setDateRect] = useState<{ top: number, bottom: number, left: number, width: number } | null>(null);
 
   // Share
   const [sharePhone, setSharePhone] = useState('');
@@ -134,13 +144,14 @@ export default function RegisterPage() {
   const [colWidths, setColWidths] = useState<Record<number, number>>({});
 
   // ── Data ──
-  const { data: register, isLoading } = useQuery({
-    queryKey: ['register', registerId],
-    queryFn: () => getRegister(registerId),
-    enabled: !!registerId,
-    staleTime: 5 * 60 * 1000,        // cache for 5 min — avoids re-fetch on revisit
-    refetchOnWindowFocus: false,
-  });
+  // Combined query above handles data fetching for the register
+  const errorRef = useRef<any>(null);
+  useEffect(() => {
+    if (error) {
+      errorRef.current = error;
+      toast.error('Failed to load register data');
+    }
+  }, [error]);
 
   // Note: cache busting removed — the in-memory cache is the source of truth.
   // Busting on every mount was causing data alteration on page refresh
@@ -179,7 +190,42 @@ export default function RegisterPage() {
     });
     setHiddenColumns(nextHidden);
     setFrozenColumns(nextFrozen);
+    // Keep refs in sync for handlers that need latest data in closures
+    columnsRef.current = columns;
+    visibleColumnsRef.current = columns.filter(c => !nextHidden.has(c.id));
   }, [columns]);
+
+  // Lock body scroll and handle back-button to close modal
+  const modalOpenRef = useRef(false);
+  useEffect(() => {
+    if (detailViewEntry && !modalOpenRef.current) {
+      modalOpenRef.current = true;
+      document.body.classList.add('modal-open');
+      // Push state to history so back button closes modal
+      window.history.pushState({ modal: 'row-detail' }, '');
+      
+      const handlePopState = () => {
+        // If we popped back and we were in a modal, close it
+        setDetailViewEntry(null);
+        setDetailEdits({});
+        setDetailErrors({});
+        modalOpenRef.current = false;
+      };
+      
+      window.addEventListener('popstate', handlePopState);
+      return () => {
+        document.body.classList.remove('modal-open');
+        window.removeEventListener('popstate', handlePopState);
+        // Clean up history if modal closed via 'X' or Save
+        if (modalOpenRef.current && window.history.state?.modal === 'row-detail') {
+          modalOpenRef.current = false;
+          window.history.back();
+        }
+      };
+    } else if (!detailViewEntry && modalOpenRef.current) {
+      modalOpenRef.current = false;
+    }
+  }, [detailViewEntry]);
 
   // Auto-initialize edit values when Row Detail view opens
   useEffect(() => {
@@ -198,10 +244,25 @@ export default function RegisterPage() {
     if (register && register !== lastRegisterData.current) {
       lastRegisterData.current = register;
       setLocalEntries(register.entries);
+      localEntriesRef.current = register.entries;
       // Auto-expand rowsToShow so all imported/loaded rows are visible immediately
       setRowsToShow((prev) => Math.max(prev, register.entries.length));
+      
+      // Initialize column widths from saved data
+      if (register.columns) {
+        const widths: Record<number, number> = {};
+        register.columns.forEach((col: any) => {
+          if (col.width) widths[col.id] = col.width;
+        });
+        setColWidths(widths);
+      }
     }
   }, [register]);
+
+  // Also sync localEntriesRef on every local state change
+  useEffect(() => {
+    localEntriesRef.current = localEntries;
+  }, [localEntries]);
 
   const handleCalcCellClick = (e: React.MouseEvent, colId: number) => {
     e.stopPropagation();
@@ -351,8 +412,9 @@ export default function RegisterPage() {
     },
     onSuccess: (updatedReg) => {
       queryClient.setQueryData(['register', registerId], updatedReg);
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       setLocalEntries(updatedReg.entries || []);
+      // Force a re-fetch to ensure all sequential logic (auto-increment) is synced from server
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       toast.success('Column added successfully');
     },
     onError: (_err, _vars, context) => {
@@ -413,6 +475,52 @@ export default function RegisterPage() {
     },
     onError: () => toast.error('Failed to update options'),
   });
+
+  const addDropdownOptionMutation = useMutation({
+    mutationFn: ({ colId, newValue }: { colId: number; newValue: string }) => {
+      const col = (register?.columns || []).find((c: any) => c.id === colId);
+      const existingOptions = col?.dropdownOptions || [];
+      const updatedOptions = [newValue, ...existingOptions];
+      return updateColumnDropdownOptions(registerId, colId, updatedOptions);
+    },
+    onMutate: async ({ colId, newValue }) => {
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const prev = queryClient.getQueryData(['register', registerId]) as any;
+      if (prev) {
+        queryClient.setQueryData(['register', registerId], {
+          ...prev,
+          columns: (prev.columns || []).map((c: any) => 
+            c.id === colId ? { ...c, dropdownOptions: [newValue, ...(c.dropdownOptions || [])] } : c
+          )
+        });
+      }
+      return { prev };
+    },
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+      toast.success('Option added');
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
+      toast.error('Failed to add option');
+    },
+  });
+
+  const onAddDropdownOption = (colId: number, newValue: string, entryId?: number) => {
+    addDropdownOptionMutation.mutate({ colId, newValue });
+    
+    // Also select it for the current entry immediately if entryId provided
+    if (entryId != null) {
+      setTimeout(() => {
+        const currentVal = localEntriesRef.current.find((e) => e.id === entryId)?.cells?.[colId.toString()] || '';
+        const selectedValues = currentVal ? currentVal.split(',').map(s => s.trim()).filter(Boolean) : [];
+        if (!selectedValues.includes(newValue)) {
+          handleCellChange(entryId, colId.toString(), [...selectedValues, newValue].join(', '));
+        }
+      }, 0);
+    }
+  };
 
   const duplicateColumnMutation = useMutation({
     mutationFn: (colId: number) => duplicateColumn(registerId, colId),
@@ -492,6 +600,7 @@ export default function RegisterPage() {
   // These refs will be populated after visibleColumns/columns are defined
   const visibleColumnsRef = useRef<typeof columns>([]);
   const columnsRef = useRef<typeof columns>([]);
+  const localEntriesRef = useRef<Entry[]>([]);
 
   const handleColDragMouseDown = useCallback((e: React.MouseEvent, colId: number) => {
     // Only left mouse button
@@ -696,6 +805,17 @@ export default function RegisterPage() {
     document.addEventListener('mouseup', onMouseUp);
   }, [reorderColumnMutation]);
 
+  const updateColumnWidthMutation = useMutation({
+    mutationFn: ({ colId, width }: { colId: number; width: number }) => updateColumnWidth(registerId, colId, width),
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+    },
+    onError: (err) => {
+      console.error('Failed to save column width:', err);
+      toast.error('Failed to save column width');
+    },
+  });
+
   const handleColResizeMouseDown = useCallback((e: React.MouseEvent, colId: number) => {
     e.preventDefault();
     e.stopPropagation();
@@ -746,6 +866,7 @@ export default function RegisterPage() {
       
       const newWidth = Math.max(40, startWidth + (ev.clientX - startX));
       setColWidths(prev => ({ ...prev, [colId]: newWidth }));
+      updateColumnWidthMutation.mutate({ colId, width: newWidth });
       
       if (styleTag) styleTag.textContent = ''; // Clear temp style
       
@@ -758,7 +879,8 @@ export default function RegisterPage() {
     
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
-  }, []);
+  }, [updateColumnWidthMutation, registerId]);
+
 
   const changeColumnTypeMutation = useMutation({
     mutationFn: () => {
@@ -771,12 +893,14 @@ export default function RegisterPage() {
     onSuccess: (updatedReg) => {
       // We now receive the full register from the backend to ensure entries are synced (e.g. for auto_increment)
       queryClient.setQueryData(['register', registerId], updatedReg);
+      setLocalEntries(updatedReg.entries || []);
+      // Invalidate to ensure any formula or sequential changes are fully propagated
       queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+      
       setChangeTypeModal(false); 
       setActiveModalColId(null);
       setNewColFormula('');
       setNewColDropdownOpts('');
-      setLocalEntries(updatedReg.entries || []);
       toast.success('Column type updated successfully');
     },
     onError: (err: any) => {
@@ -842,8 +966,8 @@ export default function RegisterPage() {
     },
     onSuccess: (updatedReg) => {
       queryClient.setQueryData(['register', registerId], updatedReg);
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       setLocalEntries(updatedReg.entries || []);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       toast.success('Column inserted successfully');
     },
     onError: (_err, _vars, context) => {
@@ -981,46 +1105,74 @@ export default function RegisterPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['register', registerId] }),
   });
 
+  // ── Validation Helper ──
+  const validateCellValue = useCallback((col: any, value: string): { isValid: boolean; error: string | null } => {
+    if (!value || value.trim() === '') return { isValid: true, error: null };
+
+    if (col.type === 'email') {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(value)) return { isValid: false, error: 'Invalid email format' };
+    } else if (col.type === 'phone') {
+      const phoneRegex = /^[\d\s+()-]{7,20}$/;
+      if (!phoneRegex.test(value)) return { isValid: false, error: 'Invalid phone format (e.g. +91 1234567890)' };
+    } else if (col.type === 'date') {
+      // Allow partial typing in grid, but full validation in modal or on blur
+      const dateRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+      if (!dateRegex.test(value)) return { isValid: false, error: 'Use DD/MM/YYYY format' };
+      
+      const parts = value.split('/');
+      const d = parseInt(parts[0]);
+      const m = parseInt(parts[1]);
+      const y = parseInt(parts[2]);
+      if (m < 1 || m > 12) return { isValid: false, error: 'Invalid month (1-12)' };
+      const daysInMonth = new Date(y, m, 0).getDate();
+      if (d < 1 || d > daysInMonth) return { isValid: false, error: `Invalid day for this month (max ${daysInMonth})` };
+      if (y < 1900 || y > 2100) return { isValid: false, error: 'Year must be between 1900-2100' };
+    } else if (col.type === 'number' || col.type === 'currency') {
+      const numericValue = value.replace(/[^0-9.-]/g, '');
+      if (numericValue === '' || isNaN(parseFloat(numericValue))) return { isValid: false, error: 'Must be a valid number' };
+    } else if (col.type === 'dropdown') {
+      if (col.dropdownOptions && col.dropdownOptions.length > 0) {
+         const selectedValues = value.split(',').map(s => s.trim()).filter(s => s !== '');
+         const invalid = selectedValues.find(v => !col.dropdownOptions.includes(v));
+         if (invalid) return { isValid: false, error: `'${invalid}' is not a valid option` };
+      }
+    } else if (col.type === 'auto_increment') {
+      return { isValid: false, error: 'System generated field' };
+    }
+
+    return { isValid: true, error: null };
+  }, []);
+
   // ── Handlers ──
   const handleCellChange = useCallback((entryId: number, columnId: string, value: string) => {
-    const col = columns.find(c => c.id.toString() === columnId);
+    const col = columnsRef.current.find(c => c.id.toString() === columnId);
     if (!col) return;
 
+    // ── System Columns Read-only ──
+    if (col.type === 'auto_increment' || col.type === 'formula') return;
+
     // ── Type-Based Validation ──
-    if (value.trim() !== '') {
-      if (col.type === 'email') {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(value)) {
-          // toast.error('Invalid email format'); // Optional: show toast
-          // return; // We could block it, but for now let's just let it be if it's mid-typing
+    const validation = validateCellValue(col, value);
+    if (!validation.isValid) {
+      if (value.trim() !== '') {
+        // For grid editing, we show a warning but allow the change (save as is)
+        if (col.type === 'date' && value.length >= 10) {
+          toast(validation.error, { icon: '⚠️' });
+        } else if (col.type === 'dropdown' || col.type === 'email' || col.type === 'phone' || col.type === 'number' || col.type === 'currency') {
+          toast(validation.error, { icon: '⚠️' });
         }
-      } else if (col.type === 'phone') {
-        const phoneRegex = /^[\d\s+()-]{7,20}$/;
-        if (!phoneRegex.test(value)) {
-          // toast.error('Invalid phone format');
-        }
-      } else if (col.type === 'date') {
-        // Only validate if it's a full date string
-        if (value.length >= 10) {
-          const dateRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
-          if (!dateRegex.test(value)) {
-             toast.error('Use DD/MM/YYYY format');
-             return;
-          }
-        }
-      } else if (col.type === 'dropdown') {
-        if (col.dropdownOptions && col.dropdownOptions.length > 0 && !col.dropdownOptions.includes(value)) {
-          toast.error('Please select an option from the list');
-          return;
-        }
-      } else if (col.type === 'auto_increment') {
-        // Prevent any manual changes to auto_increment
-        return;
       }
     }
 
     // 1. Update local state instantly (optimistic)
     setLocalEntries((prev) => prev.map((e) => e.id === entryId ? { ...e, cells: { ...e.cells, [columnId]: value } } : e));
+
+    // Sync with Row Detail Modal if open for this entry
+    if (detailViewEntry?.id === entryId) {
+      setDetailEdits(prev => ({ ...prev, [columnId]: value }));
+      if (detailErrors[columnId]) setDetailErrors(prev => ({ ...prev, [columnId]: null }));
+    }
 
     // 2. Debounce the Firestore write — no invalidateQueries, just patch the cache
     const key = `${entryId}-${columnId}`;
@@ -1039,7 +1191,7 @@ export default function RegisterPage() {
         });
       });
     }, 600);
-  }, [registerId, queryClient, columns]);
+  }, [registerId, queryClient, detailViewEntry, detailErrors]);
 
   // Excel-like sort: permanently reorders localEntries and persists to Firestore
   const handleSort = useCallback((colId: number, direction: 'asc' | 'desc') => {
@@ -1093,22 +1245,51 @@ export default function RegisterPage() {
     });
   }, [columns, currentPageIndex, registerId, queryClient]);
 
-  const openDatePicker = useCallback((entryId: number, colId: number, currentVal: string) => {
-    const parts = currentVal?.split('/') || [];
+  const openDatePicker = useCallback((entryId: number, colId: number, currentVal: string, rect?: DOMRect) => {
+    // Support various separators like /, . or - for parsing
+    const parts = (currentVal || '').split(/[./-]/);
     setDateDay(parts[0] || ''); setDateMonth(parts[1] || ''); setDateYear(parts[2] || '');
-    setDateEntryId(entryId); setDateColumnId(colId); setDateModal(true);
+    setDateEntryId(entryId); setDateColumnId(colId); 
+    if (rect) {
+      setDateRect({ top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width });
+    } else {
+      setDateRect(null);
+    }
+    setDateModal(true);
   }, []);
 
-  const handleDateSelect = () => {
-    const dateStr = `${dateDay.padStart(2, '0')}/${dateMonth.padStart(2, '0')}/${dateYear}`;
-    if (dateEntryId != null && dateColumnId != null) handleCellChange(dateEntryId, dateColumnId.toString(), dateStr);
+  const handleDateSelect = (d?: string, m?: string, y?: string) => {
+    // Basic day-month-year validation already happened in OtherModals or is passed in
+    const finalD = d || dateDay;
+    const finalM = m || dateMonth;
+    const finalY = y || dateYear;
+    
+    // Sync state in case we need it for other UI
+    if (d) setDateDay(d);
+    if (m) setDateMonth(m);
+    if (y) setDateYear(y);
+
+    const dateStr = `${finalD.padStart(2, '0')}/${finalM.padStart(2, '0')}/${finalY}`;
+    
+    if (dateEntryId != null && dateColumnId != null) {
+      const col = columns.find(c => c.id === dateColumnId);
+      const validation = validateCellValue(col, dateStr);
+      
+      if (!validation.isValid) {
+        toast(validation.error, { icon: '⚠️' });
+      }
+      
+      handleCellChange(dateEntryId, dateColumnId.toString(), dateStr);
+    }
     setDateModal(false);
   };
 
   const openDropdown = useCallback((entryId: number, colId: number, options: string[], rect?: DOMRect) => {
     setDropdownEntryId(entryId); setDropdownColumnId(colId); setDropdownOptions(options);
     if (rect) {
-      setDropdownRect({ top: rect.bottom, left: rect.left, width: rect.width });
+      setDropdownRect({ top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width });
+    } else {
+      setDropdownRect(null);
     }
     setDropdownModal(true);
   }, []);
@@ -1741,7 +1922,7 @@ export default function RegisterPage() {
       `}</style>
 
       {/* ── Spreadsheet ── */}
-      <div className="spreadsheet-wrapper">
+      <div className="spreadsheet-wrapper" key={`grid-${columns.length}-${columns.map(c => c.id).join('-')}`}>
         <table className="spreadsheet">
           <thead>
             <tr>
@@ -2019,12 +2200,13 @@ export default function RegisterPage() {
         calcModal={calcModal} setCalcModal={setCalcModal} calcTypes={calcTypes} setCalcTypes={setCalcTypes as any} calcColId={calcColId}
         dateModal={dateModal} setDateModal={setDateModal}
         dateDay={dateDay} setDateDay={setDateDay} dateMonth={dateMonth} setDateMonth={setDateMonth} dateYear={dateYear} setDateYear={setDateYear}
-        handleDateSelect={handleDateSelect}
+        handleDateSelect={handleDateSelect} dateRect={dateRect}
         dropdownModal={dropdownModal} setDropdownModal={setDropdownModal}
         dropdownOptions={dropdownOptions} dropdownEntryId={dropdownEntryId} dropdownColumnId={dropdownColumnId}
         dropdownRect={dropdownRect}
         localEntries={localEntries} handleCellChange={handleCellChange}
         columns={columns}
+        onAddDropdownOption={onAddDropdownOption}
       />
 
       {/* Row Detail View Modal (Direct Edit Mode) */}
@@ -2107,21 +2289,36 @@ export default function RegisterPage() {
                       
                       <div className="row-detail-input-wrapper">
                         {col.type === 'dropdown' ? (
-                          <select
-                            className="row-detail-input"
-                            value={val}
-                            ref={(el) => {
-                              if (el) detailInputRefs.current.set(col.id, el);
-                              else detailInputRefs.current.delete(col.id);
-                            }}
-                            onKeyDown={(e) => handleDetailKeyDown(e, col.id)}
-                            onChange={e => setDetailEdits(prev => ({ ...prev, [colKey]: e.target.value }))}
-                          >
-                            <option value="">Select Option...</option>
-                            {(col.dropdownOptions || []).map((opt: string) => (
-                              <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                          </select>
+                          <div className="row-detail-input-wrapper">
+                            <div 
+                              className={`row-detail-input cell-dropdown ${detailErrors[colKey] ? 'invalid' : ''}`}
+                              tabIndex={0}
+                              ref={(el) => {
+                                if (el) detailInputRefs.current.set(col.id, el);
+                                else detailInputRefs.current.delete(col.id);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                  openDropdown(detailViewEntry.id, col.id, col.dropdownOptions || [], rect as DOMRect);
+                                } else handleDetailKeyDown(e, col.id);
+                              }}
+                              onClick={(e) => {
+                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                openDropdown(detailViewEntry.id, col.id, col.dropdownOptions || [], rect as DOMRect);
+                                if (detailErrors[colKey]) setDetailErrors(prev => ({ ...prev, [colKey]: null }));
+                              }}
+                            >
+                              {val || 'Select options...'}
+                            </div>
+                            {detailErrors[colKey] && (
+                              <div className="row-detail-error-msg">
+                                <AlertCircle size={10} />
+                                {detailErrors[colKey]}
+                              </div>
+                            )}
+                          </div>
                         ) : col.type === 'checkbox' ? (
                           <div 
                             className="row-detail-checkbox-wrapper"
@@ -2148,17 +2345,40 @@ export default function RegisterPage() {
                             <span className="checkbox-label">{val === 'true' || val === 'Checked' ? 'Checked' : 'Unchecked'}</span>
                           </div>
                         ) : col.type === 'date' ? (
-                          <div 
-                            className="row-detail-input cell-date" 
-                            tabIndex={0}
-                            ref={(el) => {
-                              if (el) detailInputRefs.current.set(col.id, el);
-                              else detailInputRefs.current.delete(col.id);
-                            }}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDatePicker(detailViewEntry.id, col.id, val); } else handleDetailKeyDown(e, col.id); }}
-                            onClick={() => openDatePicker(detailViewEntry.id, col.id, val)}
-                          >
-                            {val || 'Select date...'}
+                          <div className="row-detail-input-wrapper">
+                            <input 
+                              type="text"
+                              className={`row-detail-input cell-date ${detailErrors[colKey] ? 'invalid' : ''}`} 
+                              value={val}
+                              placeholder="DD/MM/YYYY"
+                              autoComplete="off"
+                              onChange={(e) => {
+                                setDetailEdits(prev => ({ ...prev, [colKey]: e.target.value }));
+                                if (detailErrors[colKey]) setDetailErrors(prev => ({ ...prev, [colKey]: null }));
+                              }}
+                              onClick={(e) => {
+                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                openDatePicker(detailViewEntry.id, col.id, val, rect as DOMRect);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                  openDatePicker(detailViewEntry.id, col.id, val, rect as DOMRect);
+                                } else {
+                                  handleDetailKeyDown(e, col.id);
+                                }
+                              }}
+                              ref={(el) => {
+                                if (el) detailInputRefs.current.set(col.id, el);
+                                else detailInputRefs.current.delete(col.id);
+                              }}
+                            />
+                            {detailErrors[colKey] && (
+                              <div className="row-detail-error-msg">
+                                <AlertCircle size={10} />
+                                {detailErrors[colKey]}
+                              </div>
+                            )}
                           </div>
                         ) : col.type === 'image' ? (
                           <div className="row-detail-image-field">
@@ -2219,7 +2439,7 @@ export default function RegisterPage() {
                             }}
                             title="Click to edit formula"
                           >
-                            {evaluateFormula(col.formula || '', detailViewEntry, columns)}
+                            {evaluateFormula(col.formula || '', { ...detailViewEntry, cells: { ...detailViewEntry.cells, ...detailEdits } }, columns)}
                           </div>
                         ) : col.type === 'auto_increment' ? (
                           <div className="row-detail-input auto-increment-readonly">
@@ -2227,18 +2447,29 @@ export default function RegisterPage() {
                             <span>{val || '–'}</span>
                           </div>
                         ) : (
-                          <input
-                            className="row-detail-input"
-                            value={val}
-                            ref={(el) => {
-                              if (el) detailInputRefs.current.set(col.id, el);
-                              else detailInputRefs.current.delete(col.id);
-                            }}
-                            onKeyDown={(e) => handleDetailKeyDown(e, col.id)}
-                            onChange={e => setDetailEdits(prev => ({ ...prev, [colKey]: e.target.value }))}
-                            placeholder={`Enter ${col.name}…`}
-                            type={col.type === 'number' || col.type === 'currency' ? 'number' : 'text'}
-                          />
+                          <div className="row-detail-input-wrapper">
+                            <input
+                              className={`row-detail-input ${detailErrors[colKey] ? 'invalid' : ''}`}
+                              value={val}
+                              ref={(el) => {
+                                if (el) detailInputRefs.current.set(col.id, el);
+                                else detailInputRefs.current.delete(col.id);
+                              }}
+                              onKeyDown={(e) => handleDetailKeyDown(e, col.id)}
+                              onChange={e => {
+                                setDetailEdits(prev => ({ ...prev, [colKey]: e.target.value }));
+                                if (detailErrors[colKey]) setDetailErrors(prev => ({ ...prev, [colKey]: null }));
+                              }}
+                              placeholder={`Enter ${col.name}…`}
+                              type={col.type === 'number' || col.type === 'currency' ? 'number' : col.type === 'email' ? 'email' : col.type === 'phone' ? 'tel' : 'text'}
+                            />
+                            {detailErrors[colKey] && (
+                              <div className="row-detail-error-msg">
+                                <AlertCircle size={10} />
+                                {detailErrors[colKey]}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -2248,15 +2479,89 @@ export default function RegisterPage() {
             </div>
 
             <div className="row-detail-footer">
-              <button className="row-detail-btn-close" onClick={() => { setDetailViewEntry(null); setDetailEdits({}); }}>Cancel</button>
-              <button className="row-detail-btn-save" onClick={() => {
-                // Save all edited fields
-                Object.entries(detailEdits).forEach(([colId, value]) => {
-                  handleCellChange(detailViewEntry.id, colId, value);
-                });
-                setDetailViewEntry(null);
-                setDetailEdits({});
-              }}>Save Changes</button>
+              <button className="row-detail-btn-close" onClick={() => { setDetailViewEntry(null); setDetailEdits({}); setDetailErrors({}); }}>Cancel</button>
+              <button 
+                className="row-detail-btn-save" 
+                disabled={isSaving}
+                onClick={async () => {
+                  if (!detailViewEntry) return;
+
+                  const errors: Record<string, string | null> = {};
+                  let hasErrors = false;
+
+                  columns.forEach(col => {
+                    const val = detailEdits[col.id.toString()] || '';
+                    const validation = validateCellValue(col, val);
+                    if (!validation.isValid) {
+                      errors[col.id.toString()] = validation.error;
+                      hasErrors = true;
+                    }
+                  });
+
+                  // Check if we already showed these warnings
+                  const hadErrorsBefore = Object.keys(detailErrors || {}).length > 0;
+                  setDetailErrors(errors);
+
+                  if (hasErrors && !hadErrorsBefore) {
+                    toast("Some entries have formatting warnings. Click save again to confirm.", { icon: '⚠️' });
+                    return;
+                  }
+
+                  // Batch all changes from the modal
+                  const changedCells: Record<string, string> = {};
+                  Object.entries(detailEdits).forEach(([colId, value]) => {
+                    if (detailViewEntry.cells?.[colId] !== value) {
+                      changedCells[colId] = value;
+                    }
+                  });
+
+                  if (Object.keys(changedCells).length > 0) {
+                    // 1. Update local state instantly (optimistic)
+                    setLocalEntries(prev => prev.map(e => 
+                      e.id === detailViewEntry.id ? { ...e, cells: { ...e.cells, ...changedCells } } : e
+                    ));
+
+                    // 2. Clear any pending debounces for these specific cells
+                    Object.keys(changedCells).forEach(colId => {
+                      const key = `${detailViewEntry.id}-${colId}`;
+                      if (debounceTimers.current[key]) {
+                        clearTimeout(debounceTimers.current[key]);
+                        delete debounceTimers.current[key];
+                      }
+                    });
+
+                    // 3. Persist batch to Firestore (non-blocking for UI)
+                    setIsSaving(true);
+                    updateEntry(registerId, detailViewEntry.id, changedCells).then(() => {
+                      // 4. Patch queryClient cache
+                      queryClient.setQueryData(['register', registerId], (old: any) => {
+                        if (!old) return old;
+                        return {
+                          ...old,
+                          entries: old.entries.map((e: any) =>
+                            e.id === detailViewEntry.id ? { ...e, cells: { ...e.cells, ...changedCells } } : e
+                          ),
+                        };
+                      });
+                      toast.success("Changes saved successfully!");
+                    }).catch(err => {
+                      console.error("Failed to save:", err);
+                      toast.error("Failed to save changes. Please check your connection.");
+                    }).finally(() => {
+                      setIsSaving(false);
+                    });
+                  } else {
+                    toast.success("No changes to save.");
+                  }
+                  
+                  // Close modal IMMEDIATELY for instant feel
+                  setDetailViewEntry(null);
+                  setDetailEdits({});
+                  setDetailErrors({});
+                }}
+              >
+                Save Changes
+              </button>
             </div>
           </div>
         </div>

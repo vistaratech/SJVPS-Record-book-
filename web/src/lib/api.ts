@@ -103,7 +103,7 @@ export interface RegisterSummary {
 
 export interface Column {
   id: number; registerId: number; name: string; type: string; position: number;
-  dropdownOptions?: string[]; formula?: string;
+  dropdownOptions?: string[]; formula?: string; width?: number;
 }
 
 export interface Entry {
@@ -129,7 +129,7 @@ const regDoc = (id: number) => doc(db, 'registers', id.toString());
 // In-memory cache so reads never hit Firestore after the first load
 const firestoreRegisterCache = new Map<number, RegisterDetail>();
 // Mutation queue: ensures operations on the same register run serially to prevent race conditions
-const registerMutationQueues = new Map<number, Promise<any>>();
+const registerMutationQueues = new Map<string | number, Promise<any>>();
 // Tracks how many mutations are currently pending/running globally
 let pendingMutationsCount = 0;
 const mutationListeners = new Set<(count: number) => void>();
@@ -872,6 +872,18 @@ export async function moveColumn(registerId: number, columnId: number, direction
   });
 }
 
+export async function updateColumnWidth(registerId: number, columnId: number, width: number): Promise<RegisterDetail> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const col = reg.columns.find((c) => c.id.toString() === columnId.toString());
+    if (col) {
+      col.width = width;
+      await saveRegDocImmediate(reg);
+    }
+    return reg;
+  });
+}
+
 export async function reorderColumn(registerId: number, columnId: number, targetIndex: number): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
@@ -890,6 +902,7 @@ export async function reorderColumn(registerId: number, columnId: number, target
     reg.columns.forEach((c, i) => c.position = i);
     
     await saveRegDocImmediate(reg);
+    return reg;
   });
 }
 

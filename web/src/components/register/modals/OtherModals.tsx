@@ -1,4 +1,6 @@
-import { Check } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import { Check, Plus, Search, ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
 import { type Entry } from '../../../lib/api';
 
 interface OtherModalsProps {
@@ -29,7 +31,7 @@ interface OtherModalsProps {
   setDateMonth: (v: string) => void;
   dateYear: string;
   setDateYear: (v: string) => void;
-  handleDateSelect: () => void;
+  handleDateSelect: (d?: string, m?: string, y?: string) => void;
 
   // Dropdown Cell
   dropdownModal: boolean;
@@ -39,16 +41,58 @@ interface OtherModalsProps {
   dropdownColumnId: number | null;
   localEntries: Entry[];
   handleCellChange: (entryId: number, columnId: string, value: string) => void;
-  dropdownRect?: { top: number, left: number, width: number } | null;
+  dropdownRect?: { top: number, bottom: number, left: number, width: number } | null;
+  dateRect?: { top: number, bottom: number, left: number, width: number } | null;
+  onAddDropdownOption?: (colId: number, newValue: string, entryId?: number) => void;
 }
 
 export function OtherModals(props: OtherModalsProps) {
   const {
     renamePageModal, setRenamePageModal, renamePageValue, setRenamePageValue, renamePageId, pages, deletePageMutation, renamePageMutation,
     calcModal, setCalcModal, calcTypes, setCalcTypes, calcColId, columns,
-    dateModal, setDateModal, dateDay, setDateDay, dateMonth, setDateMonth, dateYear, setDateYear, handleDateSelect,
-    dropdownModal, setDropdownModal, dropdownOptions, dropdownEntryId, dropdownColumnId, localEntries, handleCellChange
+    dateModal, setDateModal, dateDay, dateMonth, dateYear, handleDateSelect,
+    dropdownModal, setDropdownModal, dropdownOptions, dropdownEntryId, dropdownColumnId, localEntries, handleCellChange, onAddDropdownOption
   } = props;
+
+  const [dropdownSearch, setDropdownSearch] = useState('');
+  const [viewMonth, setViewMonth] = useState(new Date().getMonth() + 1);
+  const [viewYear, setViewYear] = useState(new Date().getFullYear());
+
+  useEffect(() => {
+    if (dateModal) {
+      // Use defaults if props are not provided
+      const m = (new Date().getMonth() + 1);
+      const y = new Date().getFullYear();
+      setViewMonth(m);
+      setViewYear(y);
+    }
+  }, [dateModal]);
+
+  const daysInMonth = (m: number, y: number) => new Date(y, m, 0).getDate();
+  const firstDayOfMonth = (m: number, y: number) => new Date(y, m - 1, 1).getDay();
+
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  // Always use the latest options from the columns prop to ensure optimistic updates are reflected
+  const liveDropdownOptions = useMemo(() => {
+    if (dropdownColumnId == null || !columns) return dropdownOptions;
+    const col = columns.find(c => c.id === dropdownColumnId);
+    return col?.dropdownOptions || dropdownOptions;
+  }, [columns, dropdownColumnId, dropdownOptions]);
+
+  // Reset search when modal opens/closes
+  useEffect(() => {
+    if (!dropdownModal) setDropdownSearch('');
+  }, [dropdownModal]);
+
+  const filteredOptions = liveDropdownOptions.filter((opt: string) => 
+    opt.toLowerCase().includes(dropdownSearch.toLowerCase())
+  );
+
+  const exactMatch = liveDropdownOptions.some((opt: string) => opt.toLowerCase() === dropdownSearch.toLowerCase());
 
   const getCalcOptions = () => {
     if (!calcColId || !columns) return [];
@@ -65,7 +109,7 @@ export function OtherModals(props: OtherModalsProps) {
     return (col?.type === 'number' || col?.type === 'formula' || col?.type === 'currency') ? 'sum' : 'count';
   };
 
-  return (
+  return createPortal(
     <>
       {/* ── Rename Page ── */}
       {renamePageModal && (
@@ -122,82 +166,110 @@ export function OtherModals(props: OtherModalsProps) {
 
       {/* ── Date Picker ── */}
       {dateModal && (
-        <div className="modal-overlay" onClick={() => setDateModal(false)}>
-          <div className="modal-content modal-max-360" onClick={(e) => e.stopPropagation()}>
-            <h3 className="modal-title">Select Date</h3>
-            <div className="date-picker-flex">
-              <div className="date-picker-flex-1">
-                <label className="modal-label">Day</label>
-                <input 
-                  className="modal-input" 
-                  value={dateDay} 
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 31)) setDateDay(val);
-                  }} 
-                  type="number" 
-                  placeholder="DD" 
-                />
+        <div className={props.dateRect ? "popover-overlay" : "modal-overlay"} onClick={() => setDateModal(false)}>
+          <div 
+            className="popover-content date-popover modern-date-picker" 
+            onClick={(e) => e.stopPropagation()}
+            style={props.dateRect ? (() => {
+              const rect = props.dateRect;
+              const modalWidth = 280;
+              const estHeight = 320; 
+              const spaceBelow = window.innerHeight - rect.bottom - 12;
+              const spaceAbove = rect.top - 12;
+              const showAbove = spaceBelow < estHeight && spaceAbove > spaceBelow;
+              const maxHeight = showAbove ? spaceAbove : spaceBelow;
+
+              let left = rect.left + (rect.width / 2) - (modalWidth / 2);
+              left = Math.max(8, Math.min(left, window.innerWidth - modalWidth - 8));
+
+              return {
+                position: 'fixed',
+                left: left,
+                ...(showAbove 
+                  ? { bottom: (window.innerHeight - rect.top) + 6 } 
+                  : { top: rect.bottom + 6 }
+                ),
+                width: `${modalWidth}px`,
+                maxHeight: `${maxHeight}px`,
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                zIndex: 10005,
+                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                padding: '12px'
+              } as React.CSSProperties;
+            })() : {}}
+          >
+            <div className="calendar-header">
+              <button className="calendar-nav-btn" onClick={() => {
+                if (viewMonth === 1) {
+                  setViewMonth(12);
+                  setViewYear(viewYear - 1);
+                } else {
+                  setViewMonth(viewMonth - 1);
+                }
+              }}><ChevronLeft size={16} /></button>
+              
+              <div className="calendar-title">
+                <span className="calendar-month">{monthNames[viewMonth - 1]}</span>
+                <span className="calendar-year">{viewYear}</span>
               </div>
-              <div className="date-picker-flex-1">
-                <label className="modal-label">Month</label>
-                <input 
-                  className="modal-input" 
-                  value={dateMonth} 
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 12)) setDateMonth(val);
-                  }} 
-                  type="number" 
-                  placeholder="MM" 
-                />
-              </div>
-              <div className="date-picker-flex-1-5">
-                <label className="modal-label">Year</label>
-                <input 
-                  className="modal-input" 
-                  value={dateYear} 
-                  onChange={(e) => setDateYear(e.target.value)} 
-                  type="number" 
-                  placeholder="YYYY" 
-                />
-              </div>
+
+              <button className="calendar-nav-btn" onClick={() => {
+                if (viewMonth === 12) {
+                  setViewMonth(1);
+                  setViewYear(viewYear + 1);
+                } else {
+                  setViewMonth(viewMonth + 1);
+                }
+              }}><ChevronRight size={16} /></button>
             </div>
-            <div className="modal-actions">
+
+            <div className="calendar-weekdays">
+              {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => (
+                <div key={d} className="calendar-weekday">{d}</div>
+              ))}
+            </div>
+
+            <div className="calendar-grid">
+              {Array.from({ length: firstDayOfMonth(viewMonth, viewYear) }).map((_, i) => (
+                <div key={`empty-${i}`} className="calendar-day empty" />
+              ))}
+              {Array.from({ length: daysInMonth(viewMonth, viewYear) }).map((_, i) => {
+                const d = i + 1;
+                const isSelected = d.toString() === dateDay && viewMonth.toString() === dateMonth && viewYear.toString() === dateYear;
+                const isToday = d === new Date().getDate() && viewMonth === (new Date().getMonth() + 1) && viewYear === new Date().getFullYear();
+                
+                return (
+                  <button 
+                    key={d} 
+                    className={`calendar-day ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
+                    onClick={() => {
+                      handleDateSelect(d.toString(), viewMonth.toString(), viewYear.toString());
+                    }}
+                  >
+                    {d}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="calendar-footer">
               <button 
-                className="modal-confirm-btn" 
-                style={{ background: '#f1f5f9', color: '#475569', flex: 1 }}
+                className="calendar-today-btn" 
                 onClick={() => {
-                  const now = new Date();
-                  setDateDay(now.getDate().toString().padStart(2, '0'));
-                  setDateMonth((now.getMonth() + 1).toString().padStart(2, '0'));
-                  setDateYear(now.getFullYear().toString());
+                  const today = new Date();
+                  handleDateSelect(
+                    today.getDate().toString(), 
+                    (today.getMonth() + 1).toString(), 
+                    today.getFullYear().toString()
+                  );
                 }}
               >
+                <CalendarIcon size={12} style={{ marginRight: 6 }} />
                 Today
               </button>
-              <button className="modal-cancel-btn" onClick={() => setDateModal(false)}>Cancel</button>
-              <button 
-                className="modal-confirm-btn" 
-                onClick={() => {
-                  const d = parseInt(dateDay);
-                  const m = parseInt(dateMonth);
-                  const y = parseInt(dateYear);
-                  if (isNaN(d) || isNaN(m) || isNaN(y) || y < 1900 || y > 2100) {
-                    alert("Please enter a valid date");
-                    return;
-                  }
-                  // Check days in month
-                  const daysInMonth = new Date(y, m, 0).getDate();
-                  if (d < 1 || d > daysInMonth) {
-                    alert(`Invalid day for the selected month (max ${daysInMonth})`);
-                    return;
-                  }
-                  handleDateSelect();
-                }}
-              >
-                Set Date
-              </button>
+              <button className="calendar-cancel-btn" onClick={() => setDateModal(false)}>Cancel</button>
             </div>
           </div>
         </div>
@@ -205,77 +277,128 @@ export function OtherModals(props: OtherModalsProps) {
 
       {/* ── Dropdown Cell ── */}
       {dropdownModal && (
-        <>
-          <div className="dropdown-overlay-transparent" onClick={() => setDropdownModal(false)} style={{ position: 'fixed', inset: 0, zIndex: 1000 }} />
+        <div className={props.dropdownRect ? "popover-overlay" : "modal-overlay"} onClick={() => setDropdownModal(false)}>
           <div 
-            className="dropdown-popover"
-            style={(props as any).dropdownRect ? {
-              position: 'fixed',
-              top: (props as any).dropdownRect.top + 4,
-              left: (props as any).dropdownRect.left,
-              minWidth: Math.max((props as any).dropdownRect.width, 150),
-              background: '#fff',
-              border: '1px solid var(--border)',
-              borderRadius: '6px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-              zIndex: 1001,
-              maxHeight: '250px',
-              overflowY: 'auto',
-              padding: '4px 0'
-            } : {
-              position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-              width: '300px', background: '#fff', border: '1px solid var(--border)', borderRadius: '8px',
-              boxShadow: '0 10px 25px rgba(0,0,0,0.1)', zIndex: 1001, padding: '12px'
-            }}
+            className={props.dropdownRect ? "popover-content dropdown-popover" : "modal-content"} 
+            onClick={(e) => e.stopPropagation()}
+            style={props.dropdownRect ? (() => {
+              const rect = props.dropdownRect;
+              const modalWidth = Math.max(rect.width, 220);
+              const spaceBelow = window.innerHeight - rect.bottom - 12;
+              const spaceAbove = rect.top - 12;
+              
+              // Estimate height of search (40px) + footer (40px) + items
+              const estContentHeight = Math.min(liveDropdownOptions.length * 40 + 80, 400);
+              
+              // Decide placement
+              const showAbove = spaceBelow < estContentHeight && spaceAbove > spaceBelow;
+              const maxHeight = showAbove ? spaceAbove : spaceBelow;
+
+              let left = rect.left;
+              if (left + modalWidth > window.innerWidth - 8) {
+                left = window.innerWidth - modalWidth - 8;
+              }
+              left = Math.max(8, left);
+
+              return {
+                position: 'fixed',
+                left: left,
+                ...(showAbove 
+                  ? { bottom: (window.innerHeight - rect.top) + 6 } 
+                  : { top: rect.bottom + 6 }
+                ),
+                width: `${modalWidth}px`,
+                maxWidth: '320px',
+                maxHeight: `${maxHeight}px`,
+                display: 'flex',
+                flexDirection: 'column',
+                zIndex: 10005,
+                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)'
+              } as React.CSSProperties;
+            })() : {}}
           >
-            {(!(props as any).dropdownRect) && <h3 style={{ margin: '0 0 10px 8px', fontSize: '14px' }}>Select Options</h3>}
-            <div className="dropdown-options-container" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              {dropdownOptions.map((opt, idx) => {
-                const currentVal = dropdownEntryId ? localEntries.find((e) => e.id === dropdownEntryId)?.cells?.[dropdownColumnId?.toString() || ''] : '';
-                const selectedValues = currentVal ? currentVal.split(',').map(s => s.trim()) : [];
-                const isSelected = selectedValues.includes(opt);
-                
-                return (
-                  <div
-                    key={idx}
-                    className={`dropdown-option ${isSelected ? 'selected' : ''}`}
-                    style={{ 
-                      padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
-                      cursor: 'pointer', fontSize: '13px', borderRadius: '4px', margin: '0 4px',
-                      background: isSelected ? 'var(--blue-light)' : 'transparent',
-                      color: isSelected ? 'var(--primary)' : 'inherit'
-                    }}
-                    onClick={() => {
-                      if (dropdownEntryId != null && dropdownColumnId != null) {
-                        let newValues;
-                        if (isSelected) {
-                          newValues = selectedValues.filter(v => v !== opt);
-                        } else {
-                          newValues = [...selectedValues, opt];
-                        }
-                        handleCellChange(dropdownEntryId, dropdownColumnId.toString(), newValues.join(', '));
-                      }
-                    }}
-                  >
-                    <span>{opt}</span>
-                    {isSelected && <Check size={14} color="var(--primary)" />}
-                  </div>
-                );
-              })}
+            {!props.dropdownRect && <h3 className="modal-title">Select Options</h3>}
+            
+            <div className="dropdown-search-container">
+              <Search size={14} className="search-icon" />
+              <input 
+                className="dropdown-search-input" 
+                placeholder="Search or add..." 
+                value={dropdownSearch}
+                onChange={(e) => setDropdownSearch(e.target.value)}
+                autoFocus
+              />
             </div>
-            <div style={{ padding: '4px 8px', marginTop: '6px', borderTop: '1px solid var(--border-light)' }}>
+
+            <div className="dropdown-modal-list">
+              {filteredOptions.length > 0 ? (
+                filteredOptions.map((opt: string, idx: number) => {
+                  const currentVal = dropdownEntryId ? localEntries.find((e) => e.id === dropdownEntryId)?.cells?.[dropdownColumnId?.toString() || ''] : '';
+                  const selectedValues = currentVal ? currentVal.split(',').map(s => s.trim()) : [];
+                  const isSelected = selectedValues.includes(opt);
+                  
+                  return (
+                    <button
+                      key={idx}
+                      className={`dropdown-modal-item ${isSelected ? 'selected' : ''}`}
+                      onClick={() => {
+                        if (dropdownEntryId != null && dropdownColumnId != null) {
+                          let newValues;
+                          if (isSelected) {
+                            newValues = selectedValues.filter(v => v !== opt);
+                          } else {
+                            newValues = [...selectedValues, opt];
+                          }
+                          handleCellChange(dropdownEntryId, dropdownColumnId.toString(), newValues.join(', '));
+                          setDropdownModal(false);
+                        }
+                      }}
+                    >
+                      <span>{opt}</span>
+                      {isSelected && <Check size={14} className="check-icon" />}
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="dropdown-no-results">No matches found</div>
+              )}
+
+              {dropdownSearch.trim() && !exactMatch && (
+                <button 
+                  className="dropdown-modal-item add-new-opt"
+                  onClick={() => {
+                    if (dropdownColumnId != null && onAddDropdownOption) {
+                      onAddDropdownOption(dropdownColumnId, dropdownSearch.trim(), dropdownEntryId || undefined);
+                      setDropdownSearch('');
+                      setDropdownModal(false);
+                    }
+                  }}
+                >
+                  <Plus size={14} className="plus-icon" />
+                  <span>Add "{dropdownSearch}"</span>
+                </button>
+              )}
+            </div>
+            <div className="dropdown-popover-footer">
               <button 
-                style={{ width: '100%', padding: '6px', background: 'none', border: 'none', color: 'var(--danger)', fontSize: '12px', cursor: 'pointer', borderRadius: '4px' }}
+                className="dropdown-clear-btn"
                 onClick={() => {
-                  if (dropdownEntryId != null && dropdownColumnId != null) handleCellChange(dropdownEntryId, dropdownColumnId.toString(), '');
+                  if (dropdownEntryId != null && dropdownColumnId != null) {
+                    handleCellChange(dropdownEntryId, dropdownColumnId.toString(), '');
+                    setDropdownModal(false);
+                  }
                 }}
               >
                 Clear Selection
               </button>
+              {props.dropdownRect && (
+                <button className="dropdown-done-btn" onClick={() => setDropdownModal(false)}>Done</button>
+              )}
             </div>
           </div>
-        </>
+        </div>
       )}
-    </>
+    </>,
+    document.body
   );
 }
