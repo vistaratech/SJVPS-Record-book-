@@ -116,6 +116,26 @@ function FormulaBuilder({ formula, onChange, columns, entries, outputName, exclu
     generateFormula(presetType, selectedCols, colA, id);
   };
 
+  const [previewResult, setPreviewResult] = useState<string>('0');
+  const debounceTimer = useRef<any>(null);
+
+  useEffect(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    if (!formula || !entries || entries.length === 0) {
+      setPreviewResult('0');
+      return;
+    }
+
+    debounceTimer.current = setTimeout(() => {
+      const result = evaluateFormula(formula, entries[0], columns);
+      setPreviewResult(result || '0');
+    }, 200);
+
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, [formula, entries, columns]);
+
   return (
     <div className="formula-builder" style={{ marginTop: '12px', padding: '12px', background: 'var(--bg-light)', borderRadius: '8px', border: '1px solid var(--border)' }}>
       <div className="formula-mode-tabs" style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
@@ -356,7 +376,7 @@ function FormulaBuilder({ formula, onChange, columns, entries, outputName, exclu
               <div style={{ textAlign: 'right', borderLeft: '1px solid var(--border)', paddingLeft: '16px' }}>
                 <span style={{ fontSize: '10px', color: 'var(--muted)', display: 'block', fontWeight: 600 }}>Result:</span>
                 <span style={{ fontSize: '22px', fontWeight: 900, color: 'var(--navy)', lineHeight: 1 }}>
-                  {evaluateFormula(formula, entries[0], columns) || '0'}
+                  {previewResult}
                 </span>
               </div>
             </div>

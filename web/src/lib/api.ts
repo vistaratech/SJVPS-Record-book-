@@ -736,45 +736,64 @@ function parseAndEval(expr: string): number {
   return parseExpr();
 }
 
-// WeakMap so the sort is computed once per columns-array identity and GC'd automatically
-const _sortedColumnsCache = new WeakMap<Column[], Column[]>();
+const _sortedColumnsCache = new WeakMap<any[], any[]>();
+const _regexCache = new Map<string, RegExp>();
+function getColumnRegex(name: string): RegExp {
+  const cached = _regexCache.get(name);
+  if (cached) return cached;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp('\\{' + escaped + '\\}', 'gi');
+  _regexCache.set(name, regex);
+  return regex;
+}
 
 export function evaluateFormula(formula: string, entry: Entry, columns: Column[]): string {
   if (!formula || formula.trim() === '') return '';
   try {
-    // Re-use the already-sorted array when columns hasn't changed (Fix #9)
     let sorted = _sortedColumnsCache.get(columns);
     if (!sorted) {
       sorted = [...columns].sort((a, b) => b.name.length - a.name.length);
       _sortedColumnsCache.set(columns, sorted);
     }
+    
     let expression = formula;
+    // Check if formula contains any curly braces before doing expensive replacements
+    if (!expression.includes('{')) {
+      const result = parseAndEval(expression);
+      return (typeof result === 'number' && isFinite(result)) ? result.toString() : '';
+    }
+
     for (const col of sorted) {
-      const escaped = col.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp('\\{' + escaped + '\\}', 'gi');
+      const colPlaceholder = `{${col.name}}`;
+      if (!expression.toLowerCase().includes(colPlaceholder.toLowerCase())) continue;
+
+      const regex = getColumnRegex(col.name);
       const rawVal = entry.cells?.[col.id.toString()] ?? '';
       let numStr: string;
+      
       if (col.type === 'formula' && col.formula) {
         const nested = evaluateFormula(col.formula, entry, columns);
-        numStr = (nested === 'ERR' || nested === '') ? '0' : nested;
+        numStr = (nested === '') ? '0' : nested;
       } else {
         const parsed = parseFloat(rawVal.replace(/[₹$,]/g, ''));
         numStr = isNaN(parsed) ? '0' : parsed.toString();
       }
       expression = expression.replace(regex, numStr);
     }
+    
     expression = expression.replace(/\{[^}]*\}/g, '0');
     expression = expression.trim();
     if (expression === '') return '';
+    
     const result = parseAndEval(expression);
-    if (typeof result === 'number' && !isNaN(result) && isFinite(result)) {
+    if (typeof result === 'number' && isFinite(result)) {
       if (Number.isInteger(result)) return result.toString();
       const fixed = parseFloat(result.toFixed(2));
       return fixed.toString();
     }
-    return 'ERR';
+    return '';
   } catch {
-    return 'ERR';
+    return '';
   }
 }
 

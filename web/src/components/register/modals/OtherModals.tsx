@@ -78,9 +78,25 @@ export function OtherModals(props: OtherModalsProps) {
 
   // Always use the latest options from the columns prop to ensure optimistic updates are reflected
   const liveDropdownOptions = useMemo(() => {
-    if (dropdownColumnId == null || !columns) return dropdownOptions;
-    const col = columns.find(c => c.id === dropdownColumnId);
-    return col?.dropdownOptions || dropdownOptions;
+    let rawOptions = dropdownOptions;
+    if (dropdownColumnId != null && columns) {
+      const col = columns.find(c => c.id === dropdownColumnId);
+      if (col?.dropdownOptions) rawOptions = col.dropdownOptions;
+    }
+    // Normalize and remove duplicates (case-insensitive for uniqueness check, but preserve first casing found)
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    rawOptions.forEach(opt => {
+      if (typeof opt !== 'string') return;
+      const trimmed = opt.trim();
+      if (!trimmed) return;
+      const lower = trimmed.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        unique.push(trimmed);
+      }
+    });
+    return unique;
   }, [columns, dropdownColumnId, dropdownOptions]);
 
   // Reset search when modal opens/closes
@@ -334,8 +350,8 @@ export function OtherModals(props: OtherModalsProps) {
               {filteredOptions.length > 0 ? (
                 filteredOptions.map((opt: string, idx: number) => {
                   const currentVal = dropdownEntryId ? localEntries.find((e) => e.id === dropdownEntryId)?.cells?.[dropdownColumnId?.toString() || ''] : '';
-                  const selectedValues = currentVal ? currentVal.split(',').map(s => s.trim()) : [];
-                  const isSelected = selectedValues.includes(opt);
+                  // Strict single choice: compare directly with currentVal
+                  const isSelected = currentVal === opt;
                   
                   return (
                     <button
@@ -343,13 +359,10 @@ export function OtherModals(props: OtherModalsProps) {
                       className={`dropdown-modal-item ${isSelected ? 'selected' : ''}`}
                       onClick={() => {
                         if (dropdownEntryId != null && dropdownColumnId != null) {
-                          let newValues;
-                          if (isSelected) {
-                            newValues = selectedValues.filter(v => v !== opt);
-                          } else {
-                            newValues = [...selectedValues, opt];
-                          }
-                          handleCellChange(dropdownEntryId, dropdownColumnId.toString(), newValues.join(', '));
+                          // Single select behavior: clicking a new option replaces the current one.
+                          // If clicking the already selected option, we deselect it.
+                          const newVal = isSelected ? '' : opt;
+                          handleCellChange(dropdownEntryId, dropdownColumnId.toString(), newVal);
                           setDropdownModal(false);
                         }
                       }}

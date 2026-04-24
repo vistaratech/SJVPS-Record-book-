@@ -20,9 +20,9 @@ import {
   Plus, ChevronDown, Calendar,
   Hash, FlaskConical, ChevronRight, Pin, IndianRupee,
   Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
-  Search, Filter, Eye, Trash2, FileText, Download, ListOrdered, Maximize2, AlertCircle,
+  Search, Filter, Eye, Trash2, FileText, Download, ListOrdered, Maximize2, AlertCircle
 } from 'lucide-react';
-
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { RegisterHeader } from '../components/register/RegisterHeader';
 import { SpreadsheetRow } from '../components/register/SpreadsheetRow';
 
@@ -34,6 +34,27 @@ import { RegisterContextMenus } from '../components/register/menus/RegisterConte
 import { COL_TYPES } from '../lib/constants';
 
 type CalcType = 'sum' | 'average' | 'count' | 'min' | 'max' | 'filled' | 'empty' | 'distinct' | 'none';
+
+// Format number with Indian currency style: ₹1,23,456.00
+function formatCurrency(val: string): string {
+  const n = parseFloat(val);
+  if (isNaN(n)) return val || '';
+  const [intPart, decPart] = Math.abs(n).toFixed(2).split('.');
+  // Indian grouping: last 3 digits, then every 2 digits
+  let formatted = '';
+  if (intPart.length <= 3) {
+    formatted = intPart;
+  } else {
+    formatted = intPart.slice(-3);
+    let remaining = intPart.slice(0, -3);
+    while (remaining.length > 2) {
+      formatted = remaining.slice(-2) + ',' + formatted;
+      remaining = remaining.slice(0, -2);
+    }
+    if (remaining) formatted = remaining + ',' + formatted;
+  }
+  return `${n < 0 ? '-' : ''}₹${formatted}.${decPart}`;
+}
 
 export default function RegisterPage() {
   const { id } = useParams();
@@ -57,7 +78,6 @@ export default function RegisterPage() {
 
   const [calcTypes, setCalcTypes] = useState<Record<number, CalcType>>({});
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
-  const [rowsToShow, setRowsToShow] = useState(50);
   const [isSaving, setIsSaving] = useState(false);
 
   // Modals
@@ -245,9 +265,6 @@ export default function RegisterPage() {
       lastRegisterData.current = register;
       setLocalEntries(register.entries);
       localEntriesRef.current = register.entries;
-      // Auto-expand rowsToShow so all imported/loaded rows are visible immediately
-      setRowsToShow((prev) => Math.max(prev, register.entries.length));
-      
       // Initialize column widths from saved data
       if (register.columns) {
         const widths: Record<number, number> = {};
@@ -385,12 +402,27 @@ export default function RegisterPage() {
 
     return entries;
   }, [localEntries, currentPageIndex, search, activeFilters, columns]);
+  
+  // ── Helpers ──
+  const cleanOptions = (opts: string[]) => {
+    const seen = new Set<string>();
+    return opts
+      .map(s => s.trim())
+      .filter(Boolean)
+      .filter(s => {
+        const lower = s.toLowerCase();
+        if (seen.has(lower)) return false;
+        seen.add(lower);
+        return true;
+      });
+  };
+
 
   // ── Mutations ──
   const addColumnMutation = useMutation({
     mutationFn: () => addColumn(registerId, {
       name: newColName, type: newColType,
-      dropdownOptions: newColType === 'dropdown' ? newColDropdownOpts.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+      dropdownOptions: newColType === 'dropdown' ? cleanOptions(newColDropdownOpts.split(',')) : undefined,
       formula: newColType === 'formula' ? newColFormula : undefined,
     }),
     onMutate: async () => {
@@ -401,7 +433,7 @@ export default function RegisterPage() {
         const newCol = {
           id: dummyId, registerId, name: newColName, type: newColType,
           position: prev.columns ? prev.columns.length : 0,
-          dropdownOptions: newColType === 'dropdown' ? newColDropdownOpts.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+          dropdownOptions: newColType === 'dropdown' ? cleanOptions(newColDropdownOpts.split(',')) : undefined,
           formula: newColType === 'formula' ? newColFormula : undefined,
           createdAt: new Date().toISOString()
         };
@@ -465,7 +497,7 @@ export default function RegisterPage() {
   });
 
   const updateDropdownMutation = useMutation({
-    mutationFn: () => updateColumnDropdownOptions(registerId, activeModalColId!, dropdownConfigOptions.split(',').map((s) => s.trim()).filter(Boolean)),
+    mutationFn: () => updateColumnDropdownOptions(registerId, activeModalColId!, cleanOptions(dropdownConfigOptions.split(','))),
     onSuccess: (updatedReg) => {
       queryClient.setQueryData(['register', registerId], updatedReg);
       queryClient.invalidateQueries({ queryKey: ['register', registerId] });
@@ -480,7 +512,7 @@ export default function RegisterPage() {
     mutationFn: ({ colId, newValue }: { colId: number; newValue: string }) => {
       const col = (register?.columns || []).find((c: any) => c.id === colId);
       const existingOptions = col?.dropdownOptions || [];
-      const updatedOptions = [newValue, ...existingOptions];
+      const updatedOptions = cleanOptions([newValue, ...existingOptions]);
       return updateColumnDropdownOptions(registerId, colId, updatedOptions);
     },
     onMutate: async ({ colId, newValue }) => {
@@ -490,7 +522,7 @@ export default function RegisterPage() {
         queryClient.setQueryData(['register', registerId], {
           ...prev,
           columns: (prev.columns || []).map((c: any) => 
-            c.id === colId ? { ...c, dropdownOptions: [newValue, ...(c.dropdownOptions || [])] } : c
+            c.id === colId ? { ...c, dropdownOptions: cleanOptions([newValue, ...(c.dropdownOptions || [])]) } : c
           )
         });
       }
@@ -513,11 +545,7 @@ export default function RegisterPage() {
     // Also select it for the current entry immediately if entryId provided
     if (entryId != null) {
       setTimeout(() => {
-        const currentVal = localEntriesRef.current.find((e) => e.id === entryId)?.cells?.[colId.toString()] || '';
-        const selectedValues = currentVal ? currentVal.split(',').map(s => s.trim()).filter(Boolean) : [];
-        if (!selectedValues.includes(newValue)) {
-          handleCellChange(entryId, colId.toString(), [...selectedValues, newValue].join(', '));
-        }
+        handleCellChange(entryId, colId.toString(), newValue);
       }, 0);
     }
   };
@@ -887,7 +915,7 @@ export default function RegisterPage() {
       if (activeModalColId === null) throw new Error('No column selected');
       return changeColumnType(registerId, activeModalColId, changeTypeValue, {
         formula: changeTypeValue === 'formula' ? newColFormula : undefined,
-        dropdownOptions: changeTypeValue === 'dropdown' ? newColDropdownOpts.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+        dropdownOptions: changeTypeValue === 'dropdown' ? cleanOptions(newColDropdownOpts.split(',')) : undefined,
       });
     },
     onSuccess: (updatedReg) => {
@@ -926,7 +954,7 @@ export default function RegisterPage() {
       const pos = col ? (insertColModal === 'left' ? col.position : col.position + 1) : columns.length;
       return insertColumn(registerId, {
         name: newColName, type: newColType,
-        dropdownOptions: newColType === 'dropdown' ? newColDropdownOpts.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+        dropdownOptions: newColType === 'dropdown' ? cleanOptions(newColDropdownOpts.split(',')) : undefined,
         formula: newColType === 'formula' ? newColFormula : undefined,
       }, pos);
     },
@@ -944,7 +972,7 @@ export default function RegisterPage() {
           name: newColName,
           type: newColType,
           position: pos,
-          dropdownOptions: newColType === 'dropdown' ? newColDropdownOpts.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+          dropdownOptions: newColType === 'dropdown' ? cleanOptions(newColDropdownOpts.split(',')) : undefined,
           formula: newColType === 'formula' ? newColFormula : undefined,
           createdAt: new Date().toISOString()
         };
@@ -991,7 +1019,6 @@ export default function RegisterPage() {
         pageIndex: currentPageIndex,
       };
       setLocalEntries((prev) => [...prev, tempEntry]);
-      setRowsToShow((prev) => Math.max(prev, currentPageRows + 1));
       return { tempId: tempEntry.id };
     },
     onSuccess: (newEntry, _vars, context) => {
@@ -1133,9 +1160,9 @@ export default function RegisterPage() {
       if (numericValue === '' || isNaN(parseFloat(numericValue))) return { isValid: false, error: 'Must be a valid number' };
     } else if (col.type === 'dropdown') {
       if (col.dropdownOptions && col.dropdownOptions.length > 0) {
-         const selectedValues = value.split(',').map(s => s.trim()).filter(s => s !== '');
-         const invalid = selectedValues.find(v => !col.dropdownOptions.includes(v));
-         if (invalid) return { isValid: false, error: `'${invalid}' is not a valid option` };
+         // Strict single choice: value must exactly match one of the options
+         const isValidOption = col.dropdownOptions.includes(value);
+         if (value.trim() !== '' && !isValidOption) return { isValid: false, error: `'${value}' is not a valid option` };
       }
     } else if (col.type === 'auto_increment') {
       return { isValid: false, error: 'System generated field' };
@@ -1166,7 +1193,14 @@ export default function RegisterPage() {
     }
 
     // 1. Update local state instantly (optimistic)
-    setLocalEntries((prev) => prev.map((e) => e.id === entryId ? { ...e, cells: { ...e.cells, [columnId]: value } } : e));
+    setLocalEntries((prev) => prev.map((e) => {
+      if (e.id === entryId) {
+        // If it's a dropdown, ensure we only store the new value (strict single choice)
+        const updatedCells = { ...e.cells, [columnId]: value };
+        return { ...e, cells: updatedCells };
+      }
+      return e;
+    }));
 
     // Sync with Row Detail Modal if open for this entry
     if (detailViewEntry?.id === entryId) {
@@ -1746,9 +1780,76 @@ export default function RegisterPage() {
   columnsRef.current = columns;
 
   // Defer formula/stats recalculation so it doesn't block keystrokes (Fix #3)
+  const columnStats = useMemo(() => {
+    if (!register || columns.length === 0) return {};
+    
+    const stats: Record<number, string | number> = {};
+    const entriesToCalc = selectedRows.size > 0 
+      ? displayEntries.filter(e => selectedRows.has(e.id)) 
+      : displayEntries;
 
+    if (entriesToCalc.length === 0) return {};
 
+    columns.forEach(col => {
+      const isNumeric = col.type === 'number' || col.type === 'formula' || col.type === 'currency';
+      const calcType = calcTypes[col.id] || (isNumeric ? 'sum' : 'count');
+      
+      if (calcType === 'none') {
+        stats[col.id] = '-';
+        return;
+      }
 
+      const values = entriesToCalc.map(e => {
+        if (col.type === 'formula') return evaluateFormula(col.formula || '', e, columns);
+        return e.cells?.[col.id.toString()] || '';
+      });
+
+      if (calcType === 'empty') {
+        stats[col.id] = values.filter(v => v.trim() === '').length;
+      } else if (calcType === 'filled' || calcType === 'count') {
+        stats[col.id] = values.filter(v => v.trim() !== '').length;
+      } else if (calcType === 'distinct') {
+        stats[col.id] = new Set(values.filter(v => v.trim() !== '')).size;
+      } else {
+        // Numeric calcs
+        const nums = values.map(v => {
+          if (v === 'true') return 1;
+          if (v === 'false') return 0;
+          const parsed = parseFloat(v.toString().replace(/[₹$,]/g, ''));
+          return isNaN(parsed) ? 0 : parsed;
+        });
+
+        if (calcType === 'sum') {
+          const sum = nums.reduce((a, b) => a + b, 0);
+          stats[col.id] = Number.isInteger(sum) ? sum : parseFloat(sum.toFixed(2));
+        } else if (calcType === 'average') {
+          const sum = nums.reduce((a, b) => a + b, 0);
+          const avg = sum / (nums.length || 1);
+          stats[col.id] = Number.isInteger(avg) ? avg : parseFloat(avg.toFixed(2));
+        } else if (calcType === 'min') {
+          stats[col.id] = Math.min(...nums);
+        } else if (calcType === 'max') {
+          stats[col.id] = Math.max(...nums);
+        }
+      }
+    });
+    return stats;
+  }, [register, columns, displayEntries, selectedRows, calcTypes]);
+
+  // ── Virtualization ──
+  const parentRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: displayEntries.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 41, // Default row height
+    overscan: 10,
+  });
+
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const totalVirtualHeight = rowVirtualizer.getTotalSize();
+  
+  const paddingTop = virtualRows.length > 0 ? virtualRows[0].start : 0;
+  const paddingBottom = virtualRows.length > 0 ? totalVirtualHeight - virtualRows[virtualRows.length - 1].end : 0;
 
   const getFrozenLeftOffset = useCallback((colId: number) => {
     let offset = 50; // S.No column width
@@ -1762,9 +1863,6 @@ export default function RegisterPage() {
     return offset;
   }, [frozenColumns, visibleColumns]);
 
-
-
-  const visibleEntries = useMemo(() => displayEntries.slice(0, rowsToShow), [displayEntries, rowsToShow]);
 
   if (isLoading) return (
     <div className="content-area">
@@ -1922,7 +2020,11 @@ export default function RegisterPage() {
       `}</style>
 
       {/* ── Spreadsheet ── */}
-      <div className="spreadsheet-wrapper" key={`grid-${columns.length}-${columns.map(c => c.id).join('-')}`}>
+      <div 
+        ref={parentRef}
+        className="spreadsheet-wrapper" 
+        key={`grid-${columns.length}-${columns.map(c => c.id).join('-')}`}
+      >
         <table className="spreadsheet">
           <thead>
             <tr>
@@ -2011,39 +2113,40 @@ export default function RegisterPage() {
               <th className="actions" />
             </tr>
           </thead>
-          <tbody>
-            {visibleEntries.map((entry, idx) => (
-              <SpreadsheetRow 
-                key={entry.id}
-                entry={entry}
-                idx={idx}
-                visibleColumns={visibleColumns}
-                isSelected={selectedRows.has(entry.id)}
-                toggleSelectRow={toggleSelectRow}
-                handleCellChange={handleCellChange}
-                openDatePicker={openDatePicker}
-                openDropdown={openDropdown}
-                isMenuOpen={rowMenuId === entry.id}
-                toggleMenu={toggleMenu}
-                registerColumns={columns}
-                onRowDetail={setDetailViewEntry}
-                onImagePreview={setPreviewImage}
-                frozenColumns={frozenColumns}
-                totalRows={displayEntries.length}
-              />
-            ))}
-
-            {displayEntries.length > rowsToShow && (
+          <tbody style={{ height: `${totalVirtualHeight}px` }}>
+            {paddingTop > 0 && (
               <tr>
-                <td colSpan={visibleColumns.length + 2} className="load-more-container">
-                  <button className="load-more-btn" onClick={() => setRowsToShow(prev => prev + 100)}>
-                    Load More Rows ({displayEntries.length - rowsToShow} remaining)
-                  </button>
-                </td>
+                <td style={{ height: `${paddingTop}px` }} colSpan={visibleColumns.length + 2} />
               </tr>
             )}
-
-            {/* Mock rows for empty template registers */}
+            {virtualRows.map((virtualRow) => {
+              const entry = displayEntries[virtualRow.index];
+              return (
+                <SpreadsheetRow 
+                  key={entry.id}
+                  entry={entry}
+                  idx={virtualRow.index}
+                  visibleColumns={visibleColumns}
+                  isSelected={selectedRows.has(entry.id)}
+                  toggleSelectRow={toggleSelectRow}
+                  handleCellChange={handleCellChange}
+                  openDatePicker={openDatePicker}
+                  openDropdown={openDropdown}
+                  isMenuOpen={rowMenuId === entry.id}
+                  toggleMenu={toggleMenu}
+                  registerColumns={columns}
+                  onRowDetail={setDetailViewEntry}
+                  onImagePreview={setPreviewImage}
+                  frozenColumns={frozenColumns}
+                  totalRows={displayEntries.length}
+                />
+              );
+            })}
+            {paddingBottom > 0 && (
+              <tr>
+                <td style={{ height: `${paddingBottom}px` }} colSpan={visibleColumns.length + 2} />
+              </tr>
+            )}
             {displayEntries.length === 0 && columns.length > 0 && [1, 2, 3].map((n) => (
               <tr key={`mock-${n}`} className="mock" onClick={() => addEntryMutation.mutate()}>
                 <td className="serial">{n}</td>
@@ -2053,7 +2156,7 @@ export default function RegisterPage() {
                 <td className="actions" />
               </tr>
             ))}
-            </tbody>
+          </tbody>
             {displayEntries.length > 0 && (
               <tfoot>
                 <tr className="calc-row">
@@ -2066,46 +2169,10 @@ export default function RegisterPage() {
                     const isFrozen = frozenColumns.has(col.id);
                     const leftOffset = isFrozen ? getFrozenLeftOffset(col.id) : 0;
                     
-                    const entriesToCalculate = selectedRows.size > 0 
-                      ? displayEntries.filter(e => selectedRows.has(e.id)) 
-                      : displayEntries;
-                      
-                    let calcValue: number | string = '-';
-                    const values = entriesToCalculate.map(e => {
-                      if (col.type === 'formula') return evaluateFormula(col.formula || '', e, columns);
-                      return e.cells?.[col.id.toString()] || '';
-                    });
-                    
-                    if (calcType === 'empty') {
-                      calcValue = values.filter(v => v.trim() === '').length;
-                    } else if (calcType === 'filled' || calcType === 'count') {
-                      calcValue = values.filter(v => v.trim() !== '').length;
-                    } else if (calcType === 'distinct') {
-                      calcValue = new Set(values.filter(v => v.trim() !== '')).size;
-                    } else if (isNumeric || calcType === 'sum' || calcType === 'average' || calcType === 'min' || calcType === 'max') {
-                      const nums = values.map(v => {
-                        if (v === 'true') return 1;
-                        if (v === 'false') return 0;
-                        // Handle potential currency symbols or commas
-                        const clean = v.replace(/[₹,]/g, '');
-                        return parseFloat(clean);
-                      }).filter(v => !isNaN(v));
-
-                      if (nums.length === 0) {
-                        calcValue = 0;
-                      } else {
-                        if (calcType === 'sum') calcValue = nums.reduce((a, b) => a + b, 0);
-                        else if (calcType === 'average') calcValue = nums.reduce((a, b) => a + b, 0) / nums.length;
-                        else if (calcType === 'min') calcValue = Math.min(...nums);
-                        else if (calcType === 'max') calcValue = Math.max(...nums);
-                      }
-                      
-                      if (typeof calcValue === 'number') {
-                         calcValue = Number.isInteger(calcValue) ? calcValue : parseFloat(calcValue.toFixed(2));
-                      }
-                    }
-                    
-                    if (calcType === 'none') calcValue = '-';
+                    const calcValue = columnStats[col.id] ?? '-';
+                    const displayValue = (col.type === 'currency' && typeof calcValue === 'number') 
+                      ? formatCurrency(calcValue.toString()) 
+                      : calcValue;
 
                     return (
                       <td
@@ -2124,7 +2191,7 @@ export default function RegisterPage() {
                             {calcType === 'average' && 'μ '}
                             {calcType === 'none' ? 'CALC' : calcType.toUpperCase()}:
                           </span>
-                          <span className="calc-value">{calcValue}</span>
+                          <span className="calc-value">{displayValue}</span>
                         </div>
                       </td>
                     );

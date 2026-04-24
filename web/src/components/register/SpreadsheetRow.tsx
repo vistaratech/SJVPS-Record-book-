@@ -32,7 +32,7 @@ const FormulaCell = React.memo(({ idx, col, entry, registerColumns, onKeyDown }:
     <div
       data-cell={`cell-${idx}-${col.id}`}
       tabIndex={0}
-      className={`cell-formula${result === 'ERR' ? ' error' : ''}`}
+      className="cell-formula"
       onKeyDown={onKeyDown}
     >
       {result || '–'}
