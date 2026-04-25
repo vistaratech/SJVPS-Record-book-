@@ -26,6 +26,15 @@ export interface TemplateColumn {
   dropdownOptions?: string[];
 }
 
+export const DEFAULT_BLANK_COLUMNS: TemplateColumn[] = [
+  { name: 'Column 1', type: 'text' },
+  { name: 'Column 2', type: 'text' },
+  { name: 'Column 3', type: 'text' },
+  { name: 'Column 4', type: 'text' },
+  { name: 'Column 5', type: 'text' },
+  { name: 'Column 6', type: 'text' },
+];
+
 export interface Template {
   name: string;
   columns: TemplateColumn[];
@@ -73,7 +82,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Status', type: 'dropdown', dropdownOptions: ['Upcoming', 'Completed', 'Cancelled'] },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── School ───────────────────────────────────────────────────
@@ -148,7 +157,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Status',       type: 'dropdown', dropdownOptions: ['Paid', 'Pending'] },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Property ─────────────────────────────────────────────────
@@ -193,7 +202,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Remarks',  type: 'text' },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Shop ─────────────────────────────────────────────────────
@@ -237,7 +246,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Remarks',       type: 'text' },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Transport ────────────────────────────────────────────────
@@ -269,7 +278,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'KM Reading', type: 'number' },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Hospitals ────────────────────────────────────────────────
@@ -302,7 +311,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Supplier',   type: 'text' },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Distributors ─────────────────────────────────────────────
@@ -335,7 +344,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Status',     type: 'dropdown', dropdownOptions: ['Pending', 'Partial', 'Cleared'] },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Event Management ─────────────────────────────────────────
@@ -377,7 +386,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Paid By',  type: 'text' },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Restaurant / Canteen ─────────────────────────────────────
@@ -407,7 +416,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Payment Mode',  type: 'dropdown', dropdownOptions: ['Cash', 'UPI', 'Card', 'Credit'] },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Health & Fitness ─────────────────────────────────────────
@@ -438,7 +447,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Status',    type: 'dropdown', dropdownOptions: ['Paid', 'Pending', 'Overdue'] },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Apartment ────────────────────────────────────────────────
@@ -469,7 +478,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Status',    type: 'dropdown', dropdownOptions: ['Paid', 'Pending', 'Overdue'] },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Insurance Agent ──────────────────────────────────────────
@@ -500,7 +509,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Remarks',     type: 'text' },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Farming ──────────────────────────────────────────────────
@@ -531,7 +540,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Notes',    type: 'text' },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Travel ───────────────────────────────────────────────────
@@ -562,7 +571,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Notes',    type: 'text' },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
   // ─── Wholesaler ───────────────────────────────────────────────
@@ -594,7 +603,7 @@ export const TEMPLATES: Record<string, Template[]> = {
         { name: 'Payment Mode', type: 'dropdown', dropdownOptions: ['Cash', 'UPI', 'Card', 'Credit', 'Cheque'] },
       ],
     },
-    { name: 'Blank Register', columns: [], icon: 'file', description: 'Start from scratch' },
+    { name: 'Blank Register', columns: DEFAULT_BLANK_COLUMNS, icon: 'file', description: 'Start from scratch' },
   ],
 
 };

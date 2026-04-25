@@ -1,20 +1,20 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-/* ═══════════════════════════════════════════════════════════
-   AG TRUST RECORD BOOK — Design Tokens
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   AG TRUST RECORD BOOK â€” Design Tokens
    Primary: Navy Blue #1E2D78  |  Accent: Red #E63012  |  Green #4CAF1A
-═══════════════════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 :root {
-  /* Primary palette — AG Trust Navy Blue */
+  /* Primary palette â€” AG Trust Navy Blue */
   --navy:          #1E2D78;   /* Deep navy blue (from AG Trust text)    */
   --navy-light:    #2B3D9A;   /* Lighter navy                            */
   --navy-dark:     #141E55;   /* Darkest navy                            */
 
-  /* Accent — Brand Red from right figure/leaf */
+  /* Accent â€” Brand Red from right figure/leaf */
   --accent:        #E63012;
   --accent-dark:   #C0250E;
 
-  /* Brand Green — from left figure/leaf */
+  /* Brand Green â€” from left figure/leaf */
   --brand-green:   #4CAF1A;
   --brand-green-dark: #3A8A12;
 
@@ -26,7 +26,7 @@
   --success:       #4CAF1A;
   --warning:       #F59E0B;
 
-  /* Backgrounds — clean blue-tinted white */
+  /* Backgrounds â€” clean blue-tinted white */
   --background:    #F8F9FF;
   --surface:       #FFFFFF;
   --border-light:  #EEF0F8;
@@ -73,7 +73,7 @@ button { cursor: pointer; border: none; outline: none; font-family: inherit; }
 input, select, textarea { font-family: inherit; outline: none; }
 a { text-decoration: none; color: inherit; }
 
-/* ═══════════ SCROLLBAR ═══════════ */
+/* â•â•â•â•â•â•â•â•â•â•â• SCROLLBAR â•â•â•â•â•â•â•â•â•â•â• */
 /* High-visibility, chunky, and easy-to-drag scrollbars */
 ::-webkit-scrollbar { 
   width: 14px; 
@@ -116,10 +116,10 @@ a { text-decoration: none; color: inherit; }
   scrollbar-color: #64748b #e2e8f0;
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    LOGIN PAGE
    Navy blue gradient background with clean card, AG Trust logo
-═══════════════════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .login-page {
   min-height: 100vh;
   display: flex;
@@ -129,7 +129,7 @@ a { text-decoration: none; color: inherit; }
   position: relative;
   overflow: hidden;
 }
-/* Decorative radial glow — carries red accent */
+/* Decorative radial glow â€” carries red accent */
 .login-page::before {
   content: '';
   position: absolute;
@@ -294,16 +294,16 @@ a { text-decoration: none; color: inherit; }
 .login-resend { font-size: 13px; color: var(--muted); text-align: center; margin-bottom: 16px; }
 .login-resend button { color: var(--navy); font-weight: 600; background: none; }
 
-/* ═══════════ LAYOUT ═══════════ */
+/* â•â•â•â•â•â•â•â•â•â•â• LAYOUT â•â•â•â•â•â•â•â•â•â•â• */
 .app-layout {
   display: flex;
-  height: 100vh;          /* lock to viewport — only spreadsheet-wrapper scrolls */
+  height: 100vh;          /* lock to viewport â€” only spreadsheet-wrapper scrolls */
   overflow: hidden;
 }
 
-/* ══════════════════════════════════════════════
-   SIDEBAR — White with green accents
-══════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   SIDEBAR â€” White with green accents
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .sidebar {
   width: 260px;
   min-width: 220px;
@@ -315,9 +315,10 @@ a { text-decoration: none; color: inherit; }
   flex-direction: column;
   height: 100%;            /* fill parent, not duplicate 100vh */
   overflow: hidden;          /* prevent any child from bleeding outside */
+  position: relative;
 }
 
-/* ── Sidebar drag-to-resize handle ── */
+/* â”€â”€ Sidebar drag-to-resize handle â”€â”€ */
 .sidebar-resize-handle {
   width: 6px;
   flex-shrink: 0;
@@ -351,7 +352,7 @@ a { text-decoration: none; color: inherit; }
   background: var(--primary);
 }
 
-/* Sidebar top brand strip — deep green */
+/* Sidebar top brand strip â€” deep green */
 .sidebar-brand {
   background: linear-gradient(135deg, var(--navy-dark), var(--navy));
   padding: 16px 20px;
@@ -382,6 +383,12 @@ a { text-decoration: none; color: inherit; }
   font-weight: 500;
   letter-spacing: 0.5px;
   text-transform: uppercase;
+}
+.sidebar-close-btn { 
+  display: none; 
+  background: transparent; 
+  color: white; 
+  margin-left: 8px;
 }
 
 .sidebar-header { padding: 12px 20px 0; }
@@ -448,7 +455,7 @@ a { text-decoration: none; color: inherit; }
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin: 0 20px 12px;
+  margin-bottom: 12px;
   height: 40px;
   background: linear-gradient(135deg, var(--navy), var(--navy-light));
   color: white;
@@ -457,10 +464,11 @@ a { text-decoration: none; color: inherit; }
   border-radius: var(--radius-md);
   transition: transform 0.1s, box-shadow 0.1s;
   box-shadow: var(--shadow-button);
+  width: 100%;
 }
 .sidebar-add-btn:hover { transform: translateY(-1px); box-shadow: var(--shadow-elevated); }
 
-/* ── Sidebar New Register section ── */
+/* â”€â”€ Sidebar New Register section â”€â”€ */
 .sidebar-new-section { padding: 16px 20px 10px; }
 .sidebar-new-btn {
   width: 100%;
@@ -591,9 +599,9 @@ a { text-decoration: none; color: inherit; }
 .local-folder-header:hover .register-item-menu { opacity: 1; }
 .local-folder-header.active .folder-item-menu { opacity: 1; background: var(--border-light); color: var(--navy); }
 
-/* ══════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SIDEBAR FOOTER
-══════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .sidebar-footer {
   padding: 12px 20px;
   border-top: 1px solid var(--border);
@@ -616,9 +624,9 @@ a { text-decoration: none; color: inherit; }
   font-weight: 500;
 }
 
-/* ══════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    CONTENT AREA
-══════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .content-area {
   flex: 1 1 0%;            /* grow to fill all remaining space */
   display: flex;
@@ -629,7 +637,7 @@ a { text-decoration: none; color: inherit; }
   height: 100%;            /* fill parent, not duplicate 100vh */
 }
 
-/* ═══════════ REGISTER VIEW ═══════════ */
+/* â•â•â•â•â•â•â•â•â•â•â• REGISTER VIEW â•â•â•â•â•â•â•â•â•â•â• */
 .register-header {
   background: linear-gradient(to right, #f0f4ff, #f8faff);
   border-bottom: 1px solid #dce4f5;
@@ -679,14 +687,14 @@ a { text-decoration: none; color: inherit; }
   border-color: var(--navy);
 }
 
-/* ── Register Header Actions (Share + Download) ── */
+/* â”€â”€ Register Header Actions (Share + Download) â”€â”€ */
 .register-header-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-/* ── Export Dropdown ── */
+/* â”€â”€ Export Dropdown â”€â”€ */
 .export-dropdown-wrap {
   position: relative;
   z-index: 50;
@@ -862,7 +870,7 @@ a { text-decoration: none; color: inherit; }
 }
 .toolbar-search-input::placeholder { color: var(--placeholder); }
 
-/* Stats — left side, minimal */
+/* Stats â€” left side, minimal */
 .toolbar-stats {
   font-size: 11px;
   color: var(--muted);
@@ -895,7 +903,7 @@ a { text-decoration: none; color: inherit; }
 .toolbar-btn.danger { color: var(--destructive); border-color: var(--destructive); }
 .toolbar-btn.danger:hover { background: var(--destructive-bg); }
 
-/* ── Combined Pages + Actions Bar ── */
+/* â”€â”€ Combined Pages + Actions Bar â”€â”€ */
 .pages-actions-bar {
   display: flex;
   align-items: center;
@@ -1108,9 +1116,9 @@ a { text-decoration: none; color: inherit; }
 
 
 
-/* ══════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SPREADSHEET
-══════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .spreadsheet-wrapper { flex: 1; overflow: auto; position: relative; }
 .spreadsheet { table-layout: fixed; border-collapse: collapse; min-width: 100%; }
 .spreadsheet th {
@@ -1176,7 +1184,7 @@ a { text-decoration: none; color: inherit; }
 }
 
 
-/* Column header name — truncate with ellipsis */
+/* Column header name â€” truncate with ellipsis */
 .col-header-name {
   flex: 1;
   overflow: hidden;
@@ -1211,7 +1219,7 @@ a { text-decoration: none; color: inherit; }
 }
 
 
-/* Column being dragged — dim it */
+/* Column being dragged â€” dim it */
 .spreadsheet th.dragging {
   opacity: 0.35;
   background: var(--border-light);
@@ -1324,17 +1332,17 @@ a { text-decoration: none; color: inherit; }
 }
 .cell-formula.error { color: var(--destructive); }
 
-/* ── Checkbox Cell ── */
+/* â”€â”€ Checkbox Cell â”€â”€ */
 .cell-checkbox-wrap { display: flex; align-items: center; justify-content: center; height: 100%; }
 .cell-checkbox { width: 16px; height: 16px; cursor: pointer; accent-color: var(--navy); }
 
-/* ── Rating Cell ── */
+/* â”€â”€ Rating Cell â”€â”€ */
 .cell-rating { display: flex; align-items: center; padding: 0 8px; gap: 2px; height: 100%; }
 .star-btn { background: none; border: none; cursor: pointer; font-size: 16px; color: var(--border); padding: 0; transition: color 0.1s, transform 0.1s; line-height: 1; }
 .star-btn.active { color: #f59e0b; }
 .star-btn:hover { color: #f59e0b; transform: scale(1.2); }
 
-/* ── Image Cell ── */
+/* â”€â”€ Image Cell â”€â”€ */
 .cell-image-wrap { display: flex; align-items: center; padding: 4px 8px; height: 100%; }
 .cell-image-inner { position: relative; width: 34px; height: 34px; border-radius: 4px; overflow: hidden; }
 .cell-image-thumb { width: 100%; height: 100%; object-fit: cover; cursor: pointer; border: 1px solid var(--border); transition: transform 0.2s; }
@@ -1348,13 +1356,13 @@ a { text-decoration: none; color: inherit; }
 .cell-image-upload { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); cursor: pointer; padding: 4px 6px; border: 1px dashed var(--border); border-radius: 4px; transition: all 0.15s; white-space: nowrap; }
 .cell-image-upload:hover { border-color: var(--navy); color: var(--navy); background: rgba(20,83,45,0.04); }
 
-/* ── URL / Email / Phone Cell ── */
+/* â”€â”€ URL / Email / Phone Cell â”€â”€ */
 .cell-url-wrap { display: flex; align-items: center; height: 100%; width: 100%; }
 .cell-url-wrap .cell-input { flex: 1; }
 .cell-url-link { flex-shrink: 0; display: flex; align-items: center; padding: 0 8px; color: var(--navy); opacity: 0.7; transition: opacity 0.15s; }
 .cell-url-link:hover { opacity: 1; }
 
-/* ── Auto-Increment Cell ── */
+/* â”€â”€ Auto-Increment Cell â”€â”€ */
 .cell-auto-increment {
   display: flex;
   align-items: center;
@@ -1371,7 +1379,7 @@ a { text-decoration: none; color: inherit; }
 }
 .cell-auto-increment svg { opacity: 0.5; flex-shrink: 0; }
 
-/* ── Currency Cell ── */
+/* â”€â”€ Currency Cell â”€â”€ */
 .cell-currency {
   display: flex;
   align-items: center;
@@ -1405,7 +1413,7 @@ a { text-decoration: none; color: inherit; }
 }
 .currency-editing { -moz-appearance: textfield; }
 
-/* ── Sort Indicator ── */
+/* â”€â”€ Sort Indicator â”€â”€ */
 .sort-indicator {
   font-size: 9px;
   color: var(--navy);
@@ -1415,7 +1423,7 @@ a { text-decoration: none; color: inherit; }
   line-height: 1;
 }
 
-/* ── Frozen Column Visual ── */
+/* â”€â”€ Frozen Column Visual â”€â”€ */
 .spreadsheet th.frozen-col,
 .spreadsheet td.frozen-col {
   border-right: 2px solid var(--navy) !important;
@@ -1440,7 +1448,7 @@ a { text-decoration: none; color: inherit; }
 }
 .row-menu-btn:hover { background: var(--border-light); color: var(--navy); }
 
-/* ── Calc Row (Inside Table) ── */
+/* â”€â”€ Calc Row (Inside Table) â”€â”€ */
 .calc-row {
   height: 36px;
   background: var(--border-light);
@@ -1464,7 +1472,7 @@ a { text-decoration: none; color: inherit; }
 .calc-cell-td:hover { background: var(--border); }
 .calc-label { color: var(--muted); font-size: 10px; margin-right: 4px; }
 
-/* ═══════════ EMPTY STATE ═══════════ */
+/* â•â•â•â•â•â•â•â•â•â•â• EMPTY STATE â•â•â•â•â•â•â•â•â•â•â• */
 .empty-state {
   flex: 1;
   display: flex;
@@ -1518,9 +1526,9 @@ a { text-decoration: none; color: inherit; }
 }
 .empty-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-elevated); }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    MODALS
-═══════════════════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -1602,7 +1610,7 @@ a { text-decoration: none; color: inherit; }
 .modal-confirm-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .modal-confirm-btn.danger { background: var(--destructive); }
 
-/* ── Context Menu ── */
+/* â”€â”€ Context Menu â”€â”€ */
 .context-menu {
   background: var(--surface);
   border-radius: var(--radius-lg);
@@ -1687,7 +1695,7 @@ a { text-decoration: none; color: inherit; }
 .context-item.danger:hover { background: var(--destructive-bg); }
 .context-check { margin-left: auto; color: var(--navy); }
 
-/* ── Row menu items with descriptions ── */
+/* â”€â”€ Row menu items with descriptions â”€â”€ */
 .context-item-info {
   display: flex;
   flex-direction: column;
@@ -1747,9 +1755,9 @@ a { text-decoration: none; color: inherit; }
   box-shadow: 0 4px 6px rgba(0,0,0,0.05);
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    TEMPLATE PICKER
-═══════════════════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .template-modal-header {
   border-radius: var(--radius-xxl) var(--radius-xxl) 0 0;
   padding: 24px 28px;
@@ -1826,7 +1834,7 @@ a { text-decoration: none; color: inherit; }
 .tpl-use-btn:hover { transform: translateY(-1px); box-shadow: var(--shadow-elevated); }
 .tpl-use-btn:disabled { opacity: 0.6; }
 
-/* ── Type Chips (Add Column) ── */
+/* â”€â”€ Type Chips (Add Column) â”€â”€ */
 .type-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
 .type-chip {
   display: flex;
@@ -1845,7 +1853,7 @@ a { text-decoration: none; color: inherit; }
 .type-chip.active { border-color: var(--navy); background: var(--navy); color: white; }
 .type-chip:hover:not(.active) { border-color: var(--navy); color: var(--navy); background: rgba(20,83,45,0.04); }
 
-/* ── Dropdown Options ── */
+/* â”€â”€ Dropdown Options â”€â”€ */
 .dropdown-option {
   display: flex;
   align-items: center;
@@ -1862,7 +1870,7 @@ a { text-decoration: none; color: inherit; }
 .dropdown-option:hover { border-color: var(--navy); background: rgba(20,83,45,0.03); }
 .dropdown-option.selected { border-color: var(--navy); background: rgba(20,83,45,0.06); font-weight: 600; color: var(--navy); }
 
-/* ── Formula Hint ── */
+/* â”€â”€ Formula Hint â”€â”€ */
 .formula-hint {
   display: flex;
   align-items: flex-start;
@@ -1875,7 +1883,7 @@ a { text-decoration: none; color: inherit; }
 }
 .formula-hint-text { font-size: 12px; color: var(--muted); line-height: 1.4; }
 
-/* ── Guidance Banner ── */
+/* â”€â”€ Guidance Banner â”€â”€ */
 .guidance-banner {
   display: flex;
   align-items: center;
@@ -1914,7 +1922,7 @@ a { text-decoration: none; color: inherit; }
   flex-shrink: 0;
 }
 
-/* ═══════════ CATEGORIES GRID ═══════════ */
+/* â•â•â•â•â•â•â•â•â•â•â• CATEGORIES GRID â•â•â•â•â•â•â•â•â•â•â• */
 .categories-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -1953,7 +1961,7 @@ a { text-decoration: none; color: inherit; }
 .category-name { font-size: 14px; font-weight: 700; color: var(--foreground); }
 .category-count { font-size: 12px; color: var(--muted); }
 
-/* ═══════════ FILTER CHIPS ═══════════ */
+/* â•â•â•â•â•â•â•â•â•â•â• FILTER CHIPS â•â•â•â•â•â•â•â•â•â•â• */
 .filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .filter-chip {
   padding: 6px 14px;
@@ -1969,7 +1977,7 @@ a { text-decoration: none; color: inherit; }
 .filter-chip.active { border-color: var(--navy); background: var(--navy); color: white; }
 .filter-chip:hover:not(.active) { border-color: var(--navy); color: var(--navy); }
 
-/* ═══════════ SHARE SECTION ═══════════ */
+/* â•â•â•â•â•â•â•â•â•â•â• SHARE SECTION â•â•â•â•â•â•â•â•â•â•â• */
 .share-link-row { display: flex; gap: 8px; margin-bottom: 20px; }
 .share-link-box {
   flex: 1;
@@ -2021,10 +2029,10 @@ a { text-decoration: none; color: inherit; }
   flex-shrink: 0;
 }
 
-/* ══════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    ACCENT HIGHLIGHT ELEMENTS
    Yellow accent for special badges/pills
-══════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .badge-accent {
   display: inline-flex;
   align-items: center;
@@ -2045,9 +2053,9 @@ a { text-decoration: none; color: inherit; }
   display: inline-block;
 }
 
-/* ═══════════ RESPONSIVE  (old block removed – see bottom of file) ═══════════ */
+/* â•â•â•â•â•â•â•â•â•â•â• RESPONSIVE  (old block removed â€“ see bottom of file) â•â•â•â•â•â•â•â•â•â•â• */
 
-/* ═══════════ LOADING SPINNER ═══════════ */
+/* â•â•â•â•â•â•â•â•â•â•â• LOADING SPINNER â•â•â•â•â•â•â•â•â•â•â• */
 .spinner {
   width: 20px;
   height: 20px;
@@ -2059,13 +2067,13 @@ a { text-decoration: none; color: inherit; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .spinner.dark { border-color: rgba(20,83,45,0.1); border-top-color: var(--navy); }
 
-/* ─── Utility ─── */
+/* â”€â”€â”€ Utility â”€â”€â”€ */
 .text-navy   { color: var(--navy); }
 .text-accent { color: var(--accent-dark); }
 .bg-navy     { background: var(--navy); }
 .bg-accent   { background: var(--accent); }
 
-/* ─── Login: error banner ─── */
+/* â”€â”€â”€ Login: error banner â”€â”€â”€ */
 .login-error {
   padding: 10px 14px;
   background: var(--destructive-bg);
@@ -2077,7 +2085,7 @@ a { text-decoration: none; color: inherit; }
   border-left: 3px solid var(--destructive);
 }
 
-/* ─── Login: dev mode note ─── */
+/* â”€â”€â”€ Login: dev mode note â”€â”€â”€ */
 .login-devnote {
   font-size: 11px;
   color: var(--muted-light);
@@ -2085,7 +2093,7 @@ a { text-decoration: none; color: inherit; }
   margin-top: 24px;
 }
 
-/* ─── HomePage: registers list layout ─── */
+/* â”€â”€â”€ HomePage: registers list layout â”€â”€â”€ */
 .registers-content {
   padding: 40px;
   /* prevent content overflowing on small screens */
@@ -2104,28 +2112,28 @@ a { text-decoration: none; color: inherit; }
   margin-bottom: 24px;
 }
 
-/* ─── categories-grid modifier: no extra padding inside ─── */
+/* â”€â”€â”€ categories-grid modifier: no extra padding inside â”€â”€â”€ */
 .categories-grid--no-pad {
   padding: 0;
 }
 
-/* ─── category-card modifier: dashed "Add new" card ─── */
+/* â”€â”€â”€ category-card modifier: dashed "Add new" card â”€â”€â”€ */
 .category-card--dashed {
   border-style: dashed;
 }
 
-/* ─── category-icon modifier: muted (Add new placeholder) ─── */
+/* â”€â”€â”€ category-icon modifier: muted (Add new placeholder) â”€â”€â”€ */
 .category-icon--muted {
   background: var(--muted-light);
 }
 
-/* ─── modal-content modifier: wider (template picker) ─── */
+/* â”€â”€â”€ modal-content modifier: wider (template picker) â”€â”€â”€ */
 .modal-content--wide {
   max-width: 520px;
   max-height: 85vh;
 }
 
-/* ─── New helper classes ─── */
+/* â”€â”€â”€ New helper classes â”€â”€â”€ */
 .empty-actions {
   display: flex;
   gap: 12px;
@@ -2144,7 +2152,7 @@ a { text-decoration: none; color: inherit; }
   pointer-events: none;
 }
 
-/* ─── new utility classes extracted from RegisterPage ─── */
+/* â”€â”€â”€ new utility classes extracted from RegisterPage â”€â”€â”€ */
 .center-loader {
   display: flex;
   flex-direction: column;
@@ -2182,7 +2190,7 @@ a { text-decoration: none; color: inherit; }
 .modal-header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .modal-title-no-margin { margin: 0; }
 .clear-all-btn { background: none; border: none; color: var(--destructive); font-size: 13px; font-weight: 600; cursor: pointer; }
-/* ── Filter Modal ── */
+/* â”€â”€ Filter Modal â”€â”€ */
 .filter-modal { max-width: 440px; max-height: 85vh; overflow-y: auto; }
 
 /* Active filter chips */
@@ -2368,7 +2376,7 @@ a { text-decoration: none; color: inherit; }
 .frozen-pin { margin-left: 4px; }
 .serial-header-checkbox { width: 40px; }
 
-/* ── Templates Page ───────────────────────────────────────── */
+/* â”€â”€ Templates Page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .templates-page-root { min-height: 100vh; background: var(--background); }
 .templates-page-body { padding: 32px 40px; }
 .templates-heading { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
@@ -2376,7 +2384,7 @@ a { text-decoration: none; color: inherit; }
 .categories-grid--no-pad { padding: 0 !important; }
 .modal-content--tpl { max-width: 520px; max-height: 85vh; }
 
-/* ── Category color classes (used by TemplatesPage) ──────── */
+/* â”€â”€ Category color classes (used by TemplatesPage) â”€â”€â”€â”€â”€â”€â”€â”€ */
 .bg-cat-property     { background-color: #3B82F6; }
 .bg-cat-school       { background-color: #10B981; }
 .bg-cat-shop         { background-color: #F59E0B; }
@@ -2394,7 +2402,7 @@ a { text-decoration: none; color: inherit; }
 .bg-cat-travel       { background-color: #D946EF; }
 .bg-cat-default      { background-color: var(--navy); }
 
-/* ── HomePage sidebar last-activity ──────────────────────── */
+/* â”€â”€ HomePage sidebar last-activity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .register-item-activity {
   font-size: 11px;
   color: var(--muted);
@@ -2406,17 +2414,17 @@ a { text-decoration: none; color: inherit; }
   margin-top: 2px;
 }
 
-/* ── File input hidden (replaces inline display:none) ────── */
+/* â”€â”€ File input hidden (replaces inline display:none) â”€â”€â”€â”€â”€â”€ */
 .hidden-file-input { display: none; }
 
-/* ═══════════════════════════════════════════════════════════
-   RESPONSIVE — Complete Mobile/Tablet System
-   Mobile  : ≤ 768px
-   Tablet  : 769px – 1024px
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   RESPONSIVE â€” Complete Mobile/Tablet System
+   Mobile  : â‰¤ 768px
+   Tablet  : 769px â€“ 1024px
    Desktop : > 1024px (default styles)
-═══════════════════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-/* ── Elements hidden by default on desktop ─────────────── */
+/* â”€â”€ Elements hidden by default on desktop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .mobile-topbar   { display: none; }
 .sidebar-overlay { display: none; }
 .sidebar-close-btn {
@@ -2433,9 +2441,9 @@ a { text-decoration: none; color: inherit; }
   flex-shrink: 0;
 }
 
-/* ══════════════════════════════════════════════════════════
-   TABLET  769px – 1024px — sidebar narrows, slight scaling
-══════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   TABLET  769px â€“ 1024px â€” sidebar narrows, slight scaling
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 @media (max-width: 1024px) {
   .sidebar { width: 230px; min-width: 200px; }
   .register-toolbar { padding: 8px 16px; gap: 6px; }
@@ -2450,19 +2458,19 @@ a { text-decoration: none; color: inherit; }
   .registers-content   { padding: 28px; }
 }
 
-/* ══════════════════════════════════════════════════════════
-   MOBILE  ≤ 768px — full drawer + stack layout
-══════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   MOBILE  â‰¤ 768px â€” full drawer + stack layout
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 @media (max-width: 768px) {
 
-  /* ── Root layout ──────────────────────────────────────── */
+  /* â”€â”€ Root layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .app-layout {
     flex-direction: column;
     height: 100dvh;          /* use dvh on mobile to account for browser chrome */
     overflow: hidden;
   }
 
-  /* ── Register page: auto height (not 100vh) on mobile ─── */
+  /* â”€â”€ Register page: auto height (not 100vh) on mobile â”€â”€â”€ */
   /* This prevents the page from being taller than the screen */
   .register-layout {
     height: 100dvh;
@@ -2470,7 +2478,7 @@ a { text-decoration: none; color: inherit; }
     overflow: hidden;
   }
 
-  /* ── Mobile top bar ──────────────────────────────────── */
+  /* â”€â”€ Mobile top bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .mobile-topbar {
     display: flex;
     align-items: center;
@@ -2519,7 +2527,7 @@ a { text-decoration: none; color: inherit; }
     flex-shrink: 0;
   }
 
-  /* ── Sidebar — slide-in drawer ───────────────────────── */
+  /* â”€â”€ Sidebar â€” slide-in drawer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .sidebar {
     position: fixed;
     top: 0; left: 0;
@@ -2542,10 +2550,10 @@ a { text-decoration: none; color: inherit; }
   .sidebar-close-btn { display: flex; }
   .sidebar-resize-handle { display: none; }  /* no drag-resize on mobile */
 
-  /* ── Content area fills remaining space ─────────────── */
+  /* â”€â”€ Content area fills remaining space â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .content-area { flex: 1; overflow: hidden; min-height: 0; }
 
-  /* ── Login page ──────────────────────────────────────── */
+  /* â”€â”€ Login page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .login-page { padding: 16px; }
   .login-card {
     padding: 28px 20px;
@@ -2556,7 +2564,7 @@ a { text-decoration: none; color: inherit; }
   .login-title    { font-size: 20px; }
   .otp-box        { width: 40px; height: 46px; font-size: 18px; }
 
-  /* ── Register header (the navy title bar in register view) */
+  /* â”€â”€ Register header (the navy title bar in register view) */
   .register-header {
     padding: 0 10px;
     height: 46px;
@@ -2580,7 +2588,7 @@ a { text-decoration: none; color: inherit; }
     flex-shrink: 0;
   }
 
-  /* ── Toolbar — horizontally scrollable row ───────────── */
+  /* â”€â”€ Toolbar â€” horizontally scrollable row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .register-toolbar {
     padding: 6px 10px;
     gap: 5px;
@@ -2606,7 +2614,7 @@ a { text-decoration: none; color: inherit; }
     display: none; /* hide stats on mobile to save space */
   }
 
-  /* ── Pages bar ───────────────────────────────────────── */
+  /* â”€â”€ Pages bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .pages-bar {
     padding: 5px 10px;
     overflow-x: auto;
@@ -2617,7 +2625,7 @@ a { text-decoration: none; color: inherit; }
   .page-tab      { font-size: 11px; padding: 4px 10px; flex-shrink: 0; }
   .page-add-btn  { flex-shrink: 0; }
 
-  /* ── Spreadsheet — horizontal scroll ────────────────── */
+  /* â”€â”€ Spreadsheet â€” horizontal scroll â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .spreadsheet-wrapper {
     overflow-x: auto;
     overflow-y: auto;
@@ -2642,15 +2650,15 @@ a { text-decoration: none; color: inherit; }
   .cell-input  { padding: 0 6px; font-size: 12px; }
   .cell-date, .cell-dropdown, .cell-formula { padding: 0 6px; font-size: 12px; }
 
-  /* ── Guidance banner ────────────────────────────────── */
+  /* â”€â”€ Guidance banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .guidance-banner { margin: 8px 10px; padding: 10px 14px; gap: 10px; }
   .guidance-title  { font-size: 13px; }
   .guidance-sub    { font-size: 11px; }
 
-  /* ── Calc Row ────────────────────────────────────────── */
+  /* â”€â”€ Calc Row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .calc-cell-td { padding: 0 10px; font-size: 10px; }
 
-  /* ── Modals — slide up from bottom ──────────────────── */
+  /* â”€â”€ Modals â€” slide up from bottom â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .modal-overlay {
     padding: 0;
     align-items: flex-end;
@@ -2671,7 +2679,7 @@ a { text-decoration: none; color: inherit; }
   .modal-cancel-btn,
   .modal-confirm-btn { width: 100%; justify-content: center; }
 
-  /* Context menu: snap to bottom ─────────────────────── */
+  /* Context menu: snap to bottom â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .context-menu {
     position: fixed !important;
     left:   0 !important;
@@ -2686,7 +2694,7 @@ a { text-decoration: none; color: inherit; }
     animation: slideUp 0.2s ease;
   }
 
-  /* ── Templates page ─────────────────────────────────── */
+  /* â”€â”€ Templates page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .templates-page-body  { padding: 16px 12px; }
   .templates-heading    { font-size: 18px; }
   .templates-subheading { font-size: 13px; }
@@ -2698,7 +2706,7 @@ a { text-decoration: none; color: inherit; }
   .category-card { padding: 16px 12px; }
   .category-icon { width: 44px; height: 44px; }
 
-  /* ── Home page main content ──────────────────────────── */
+  /* â”€â”€ Home page main content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .registers-content { padding: 16px 12px; }
   .registers-heading { font-size: 18px; }
   .registers-subheading { font-size: 13px; margin-bottom: 16px; }
@@ -2724,9 +2732,9 @@ a { text-decoration: none; color: inherit; }
   .share-phone-input { width: 100%; }
 }
 
-/* ══════════════════════════════════════════════════════════
-   SMALL MOBILE  ≤ 400px
-══════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   SMALL MOBILE  â‰¤ 400px
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 @media (max-width: 400px) {
   .login-card    { padding: 22px 14px; }
   .otp-input-row { gap: 5px; }
@@ -2743,9 +2751,9 @@ a { text-decoration: none; color: inherit; }
   }
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    ERROR BOUNDARY
-═══════════════════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .error-boundary-container {
   display: flex;
   align-items: center;
@@ -2800,9 +2808,9 @@ a { text-decoration: none; color: inherit; }
   background: var(--navy-dark);
 }
 
-/* ═══════════════════════════════════════════════════════════
-   Save Toast — Ctrl+S feedback
-═══════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   Save Toast â€” Ctrl+S feedback
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .save-toast {
   position: fixed;
   bottom: 24px;
@@ -2826,14 +2834,14 @@ a { text-decoration: none; color: inherit; }
   to   { transform: translateY(0);    opacity: 1; }
 }
 
-/* ── Utility ─────────────────────────────────────────────── */
+/* â”€â”€ Utility â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .sr-only {
   position: absolute; width: 1px; height: 1px;
   padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0,0,0,0); white-space: nowrap; border: 0;
 }
 
-/* ── RegisterToolbar row-count stat ─────────────────────── */
+/* â”€â”€ RegisterToolbar row-count stat â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .toolbar-stat--row-count {
   display: flex;
   align-items: center;
@@ -2851,7 +2859,7 @@ a { text-decoration: none; color: inherit; }
   min-width: 1ch;
 }
 
-/* ── FolderNode CSS classes (replaces inline styles) ────── */
+/* â”€â”€ FolderNode CSS classes (replaces inline styles) â”€â”€â”€â”€â”€â”€ */
 .local-folder-header {
   display: flex;
   align-items: center;
@@ -2900,15 +2908,15 @@ a { text-decoration: none; color: inherit; }
 .file-item-icon              { margin-right: 8px; flex-shrink: 0; }
 .file-item-name              { color: #1f2937; font-size: 13px; }
 
-/* ── Sidebar local folder list ──────────────────────────── */
+/* â”€â”€ Sidebar local folder list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .sidebar-list--local         { padding: 0 0 20px 0; }
 
-/* ── TemplatesPage scroll ───────────────────────────────── */
+/* â”€â”€ TemplatesPage scroll â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .templates-page-scroll       { overflow-y: auto; }
 
-/* ══════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    ROW DETAIL MODAL
-══════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .row-detail-overlay {
   position: fixed;
   inset: 0;
@@ -3187,7 +3195,7 @@ body.modal-open {
 }
 .row-detail-btn-save:hover { opacity: 0.88; transform: translateY(-1px); }
 
-/* ── Modern Date Picker (Calendar) ── */
+/* â”€â”€ Modern Date Picker (Calendar) â”€â”€ */
 .modern-date-picker {
   background: #ffffff;
   border-radius: 12px;
@@ -3340,7 +3348,7 @@ body.modal-open {
   color: #1e293b;
 }
 
-/* ── Calculation Cell Interactive ── */
+/* â”€â”€ Calculation Cell Interactive â”€â”€ */
 .calc-cell-content {
   display: inline-flex;
   align-items: center;
@@ -3391,7 +3399,7 @@ body.modal-open {
   border-radius: var(--radius-lg);
 }
 
-/* ── Popover Overlay & Content ── */
+/* â”€â”€ Popover Overlay & Content â”€â”€ */
 .popover-overlay {
   position: fixed;
   inset: 0;
@@ -3530,12 +3538,12 @@ body.modal-open {
   cursor: pointer;
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    FLOATING NAVIGATION CONTROLLER
    - Fixed bottom right
    - Glassmorphism + Accent Colors
    - Layout: Cross pattern
-═══════════════════════════════════════════════════════════ */
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .floating-nav-controller {
   position: fixed;
   bottom: 80px;
@@ -3675,7 +3683,7 @@ body.modal-open {
   cursor: pointer !important;
 }
 
-/* ── Image Preview Modal Styles ── */
+/* â”€â”€ Image Preview Modal Styles â”€â”€ */
 .img-preview-overlay {
   position: fixed;
   top: 0;
@@ -3782,7 +3790,7 @@ body.modal-open {
   box-shadow: 0 0 20px rgba(0,0,0,0.5);
 }
 
-/* ── Row Detail Image Styles ── */
+/* â”€â”€ Row Detail Image Styles â”€â”€ */
 .row-detail-image-field {
   padding: 12px;
   background: #f8fafc;
@@ -3899,7 +3907,7 @@ body.modal-open {
   to { transform: scale(1); opacity: 1; }
 }
 
-/* ── Image Cell Styles ── */
+/* â”€â”€ Image Cell Styles â”€â”€ */
 .cell-image-wrap {
   width: 100%;
   height: 100%;
@@ -3980,3 +3988,214 @@ body.modal-open {
 .hidden-file-input {
   display: none;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   SIDE PANEL (History/Profile)
+═══════════════════════════════════════════════════════════ */
+.side-panel-container {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.side-panel-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.3s ease;
+}
+
+.side-panel {
+  position: relative;
+  width: 100%;
+  max-width: 500px;
+  height: 100%;
+  background: white;
+  box-shadow: -10px 0 40px rgba(0,0,0,0.15);
+  display: flex;
+  flex-direction: column;
+  animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.side-panel .history-page {
+  height: 100%;
+  border-radius: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.side-panel .history-header {
+  padding: 20px 24px;
+}
+
+.side-panel .history-content {
+  padding: 0 24px 24px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.side-panel-close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--muted);
+  transition: all 0.2s;
+  border: none;
+  background: transparent;
+}
+
+.side-panel-close:hover {
+  background: var(--border-light);
+  color: var(--foreground);
+}
+
+
+/* ── Sidebar Add Button ── */
+.sidebar-add-btn {
+  width: 100%;
+  height: 44px;
+  background: var(--navy);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(27,42,74,0.2);
+}
+
+.sidebar-add-btn:hover {
+  background: var(--navy-light);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(27,42,74,0.3);
+}
+
+.sidebar-add-btn:active {
+  transform: translateY(0);
+}
+
+.sidebar-add-dropdown {
+  animation: slideDownFade 0.2s ease-out;
+  z-index: 100;
+}
+
+@keyframes slideDownFade {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+
+.sidebar-brand {
+  padding: 24px 20px;
+  background: var(--navy);
+  color: white;
+  margin-bottom: 8px;
+}
+
+.sidebar-brand-logo {
+  width: 32px;
+  height: 32px;
+  background: white;
+  border-radius: 50%;
+  padding: 3px;
+}
+
+.sidebar-brand-name {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.sidebar-brand-sub {
+  font-size: 11px;
+  color: rgba(255,255,255,0.6);
+  font-weight: 600;
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 16px;
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.sidebar-footer-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--navy);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sidebar-footer-btn:hover {
+  background: var(--border-light);
+  transform: rotate(90deg);
+}
+
+.actions-menu-popup {
+  position: absolute;
+  bottom: 60px;
+  left: 16px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  padding: 8px;
+  min-width: 160px;
+  z-index: 110;
+  animation: slideUpFade 0.2s ease-out;
+}
+
+@keyframes slideUpFade {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+
+.sidebar-add-section {
+  padding: 12px 12px 8px;
+}
+
+
+.sidebar-brand-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-brand-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+

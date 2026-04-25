@@ -1,5 +1,5 @@
 import { useCallback, memo, useState } from 'react';
-import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2 } from 'lucide-react';
+import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2, History, PlusCircle, FolderPlus, User } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import type { RegisterSummary, Business } from '../../lib/api';
@@ -47,6 +47,8 @@ export const Sidebar = memo(function Sidebar({
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [folderMenuId, setFolderMenuId] = useState<number | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
 
   const businessId = businesses?.[0]?.id;
 
@@ -195,18 +197,15 @@ export const Sidebar = memo(function Sidebar({
         </div>
       )}
 
-      {/* Mobile top bar */}
       <div className="mobile-topbar">
         <button className="mobile-menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
           <Menu size={20} />
         </button>
         <div className="mobile-topbar-brand">
           <img src="/logo-transparent.png" alt="AG Trust" className="mobile-topbar-logo" />
-          <span>AG Trust</span>
+          <span style={{ fontWeight: 700 }}>AG Trust</span>
         </div>
-        <button className="mobile-topbar-add" onClick={() => navigate('/templates')} aria-label="Add register">
-          <Plus size={20} />
-        </button>
+        <div style={{ width: 40 }} /> {/* Spacer for balance */}
       </div>
 
       {/* ── Sidebar ── */}
@@ -214,27 +213,58 @@ export const Sidebar = memo(function Sidebar({
         className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''}`}
         style={sidebarWidth ? { width: sidebarWidth, minWidth: sidebarWidth } : undefined}
       >
+        {/* AG Trust Blue Header */}
         <div className="sidebar-brand">
-          <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-brand-logo" />
-          <div>
-            <div className="sidebar-brand-name">AG Trust</div>
+          <div className="sidebar-brand-group" style={{ display: 'flex', flexDirection: 'column' }}>
+            <div className="sidebar-brand-name" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-brand-logo" />
+              <span>AG Trust</span>
+            </div>
             <div className="sidebar-brand-sub">Trusted Partners</div>
           </div>
-          <button className="sidebar-close-btn" onClick={closeSidebar} aria-label="Close sidebar">
-            <X size={18} />
+        </div>
+
+        {/* Sidebar Add Button */}
+        <div className="sidebar-add-section" style={{ padding: '12px 12px 8px' }}>
+          <button 
+            className="sidebar-add-btn"
+            onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
+          >
+            <Plus size={18} /> Add
           </button>
+
+          {isAddMenuOpen && (
+            <div 
+              className="sidebar-add-dropdown"
+              style={{
+                marginTop: '8px',
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                overflow: 'hidden',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+              }}
+            >
+              <button className="context-item" style={{ padding: '10px 16px' }} onClick={() => { navigate('/templates'); setIsAddMenuOpen(false); }}>
+                <PlusCircle size={16} color="var(--navy)" />New Register
+              </button>
+              <button className="context-item" style={{ padding: '10px 16px' }} onClick={() => { setIsCreatingFolder(true); setIsAddMenuOpen(false); }}>
+                <FolderPlus size={16} color="var(--navy)" />New File
+              </button>
+              <label className="context-item" style={{ padding: '10px 16px', cursor: 'pointer' }}>
+                <FileSpreadsheet size={16} color="#107c41" />Input Excel
+                <input type="file" accept=".xlsx, .xls, .csv" className="hidden-file-input" onChange={(e) => { onInputExcel?.(e); setIsAddMenuOpen(false); }} />
+              </label>
+              <button className="context-item" style={{ padding: '10px 16px' }} onClick={() => { onInputFolder?.(); setIsAddMenuOpen(false); }}>
+                <Folder size={16} fill="#fbbf24" color="#f59e0b" />Input File
+              </button>
+            </div>
+          )}
         </div>
 
-        <div className="sidebar-header">
-          <div className="sidebar-business">
-            <div className="sidebar-avatar">{businesses?.[0]?.name?.[0] || 'B'}</div>
-            <span className="sidebar-bname">{businesses?.[0]?.name || 'My Business'}</span>
-          </div>
-        </div>
-
-        {/* New Register section */}
-        <div className="sidebar-new-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {isCreatingFolder ? (
+        {/* Folder creation input moved to a modal or handled via menu */}
+        {isCreatingFolder && (
+          <div className="sidebar-new-section" style={{ padding: '8px 20px' }}>
             <div className="sidebar-action-row" style={{ display: 'flex', gap: '4px' }}>
               <input 
                 type="text" 
@@ -258,31 +288,8 @@ export const Sidebar = memo(function Sidebar({
                 <X size={14} />
               </button>
             </div>
-          ) : (
-            <div className="sidebar-action-row">
-              <button className="sidebar-action-btn" onClick={() => navigate('/templates')} style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }}>
-                <Plus size={16} />
-                New Register
-              </button>
-              <button className="sidebar-action-btn" onClick={() => setIsCreatingFolder(true)}>
-                <Folder size={16} />
-                New Folder
-              </button>
-            </div>
-          )}
-          
-          <div className="sidebar-action-row">
-            <label className="sidebar-action-btn">
-              <FileSpreadsheet size={16} color="#107c41" />
-              Input Excel
-              <input type="file" accept=".xlsx, .xls, .csv" className="hidden-file-input" onChange={onInputExcel} />
-            </label>
-            <button className="sidebar-action-btn" onClick={onInputFolder}>
-              <Folder size={16} fill="#fbbf24" color="#f59e0b" />
-              Input Folder
-            </button>
           </div>
-        </div>
+        )}
         
         {importSession && (
           <div className="sidebar-import-session" style={{ margin: '0 1rem', padding: '0.75rem', background: 'var(--bg-secondary)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -426,10 +433,10 @@ export const Sidebar = memo(function Sidebar({
             <span className="sidebar-footer-text">AG Trust · Record Book</span>
           </div>
           <button 
-            onClick={() => setIsSearchOpen(!isSearchOpen)}
+            onClick={() => setIsActionsMenuOpen(true)}
             style={{
-              background: isSearchOpen ? 'var(--primary)' : 'var(--bg-secondary)',
-              color: isSearchOpen ? '#fff' : 'var(--muted)',
+              background: 'var(--bg-secondary)',
+              color: 'var(--muted)',
               border: '1px solid var(--border)',
               width: '28px', height: '28px',
               borderRadius: '50%',
@@ -437,11 +444,36 @@ export const Sidebar = memo(function Sidebar({
               cursor: 'pointer',
               transition: 'all 0.15s'
             }}
-            aria-label="Toggle search"
+            aria-label="Actions menu"
           >
-            <Search size={14} />
+            <Menu size={14} />
           </button>
         </div>
+
+        {/* ── Actions Menu ── */}
+        {isActionsMenuOpen && (
+          <>
+            <div className="modal-overlay" style={{ background: 'transparent' }} onClick={() => setIsActionsMenuOpen(false)} />
+            <div 
+              className="context-menu" 
+              onClick={(e) => e.stopPropagation()} 
+              style={{ 
+                position: 'absolute',
+                bottom: '50px', 
+                right: '12px', 
+                zIndex: 1001,
+                minWidth: '150px' 
+              }}
+            >
+              <button className="context-item" onClick={() => { setIsActionsMenuOpen(false); navigate('/history'); }}>
+                <History size={16} color="var(--navy)" />History
+              </button>
+              <button className="context-item" onClick={() => { setIsActionsMenuOpen(false); alert('Profile logic here'); }}>
+                <User size={16} color="var(--navy)" />Profile
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </>
   );

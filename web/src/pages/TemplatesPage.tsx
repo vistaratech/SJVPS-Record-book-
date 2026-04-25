@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { listBusinesses, createBusiness, createRegister, type RegisterSummary } from '../lib/api';
-import { CATEGORIES, TEMPLATES, type Template } from '../lib/templates';
+import { CATEGORIES, TEMPLATES, type Template, DEFAULT_BLANK_COLUMNS } from '../lib/templates';
 import {
   ArrowLeft, FileText, Hash, Calendar, ChevronDown, FlaskConical, Type,
   Building, GraduationCap, Store, Bus, Warehouse, Package, CalendarIcon, HeartPulse,
@@ -120,7 +120,7 @@ export default function TemplatesPage() {
                   setCreatingTemplate('Blank Register');
                   createMutation.mutate({
                     name: 'Blank Register',
-                    columns: [],
+                    columns: DEFAULT_BLANK_COLUMNS,
                     icon: 'file',
                     description: 'Start from scratch'
                   });

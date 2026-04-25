@@ -110,7 +110,8 @@ const CurrencyCell = React.memo(({ idx, col, entry, colIdx, totalRows, visibleCo
       <input
         id={`cell-${idx}-${col.id}`}
         className="cell-input currency-editing"
-        type="number"
+        type="text"
+        inputMode="decimal"
         value={val}
         autoFocus
         onChange={(e) => { setVal(e.target.value); handleCellChange(entry.id, col.id.toString(), e.target.value); }}
@@ -223,7 +224,8 @@ const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colI
       value={val}
       onChange={onChange}
       onKeyDown={onKeyDown}
-      type={col.type === 'number' ? 'number' : 'text'}
+      type="text"
+      inputMode={col.type === 'number' ? 'decimal' : undefined}
     />
   );
 });

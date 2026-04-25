@@ -47,6 +47,7 @@ export async function listBusinesses(): Promise<Business[]> {
 export async function createBusiness(name: string): Promise<Business> {
   const bus: Business = { id: generateId(), name, ownerId: 1, createdAt: new Date().toISOString() };
   await setDoc(doc(db, 'businesses', bus.id.toString()), bus);
+  await logAction(bus.id, 'Create Business', `Created business: ${name}`);
   return bus;
 }
 
@@ -70,6 +71,7 @@ export async function listFolders(businessId: number): Promise<Folder[]> {
 export async function createFolder(businessId: number, name: string): Promise<Folder> {
   const folder: Folder = { id: generateId(), businessId, name, createdAt: new Date().toISOString() };
   await setDoc(folderDoc(folder.id), folder);
+  await logAction(businessId, 'Create File', `Created file: ${name}`);
   return folder;
 }
 
@@ -88,8 +90,10 @@ export async function renameFolder(folderId: number, newName: string): Promise<F
   const snap = await getDoc(folderDoc(folderId));
   if (!snap.exists()) throw new Error('Folder not found');
   const folder = snap.data() as Folder;
+  const oldName = folder.name;
   folder.name = newName;
   await setDoc(folderDoc(folderId), folder);
+  await logAction(folder.businessId, 'Rename File', `Renamed file from "${oldName}" to "${newName}"`);
   return folder;
 }
 
@@ -120,6 +124,17 @@ export interface RegisterDetail extends RegisterSummary {
 
 export interface SharedUser {
   id: number; name: string; phone: string; permission: 'view' | 'edit'; addedAt: string;
+}
+
+export interface HistoryEntry {
+  id: number;
+  businessId: number;
+  action: string;
+  details: string;
+  timestamp: string;
+  userName?: string;
+  registerName?: string;
+  registerId?: number;
 }
 
 // ── Firestore helpers ─────────────────────────────────────────────────────────
@@ -308,13 +323,13 @@ export async function createRegister(data: {
     entries: [], pages: [{ id: 1, name: 'Page 1', index: 0 }], sharedWith: [],
   };
   if (newReg.columns.length > 0) {
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 10; i++) {
       newReg.entries.push({
         id: newId + 5000 + i, registerId: newId, rowNumber: i + 1,
         cells: {}, createdAt: new Date().toISOString(), pageIndex: 0,
       });
     }
-    newReg.entryCount = 3;
+    newReg.entryCount = 10;
   }
   // Store in memory-cache immediately so in-memory reads see it right away
   firestoreRegisterCache.set(newId, newReg);
@@ -323,19 +338,25 @@ export async function createRegister(data: {
   // We use JSON.parse(JSON.stringify) to strip any undefined values (like optional iconColor or formula)
   // which Firebase v9+ natively rejects unless ignoreUndefinedProperties is globally configured.
   await setDoc(regDoc(newId), JSON.parse(JSON.stringify(newReg)));
+  await logAction(data.businessId, 'Create Register', `Created register: ${data.name}`, { registerId: newId, registerName: data.name });
   return newReg;
 }
 
 export async function deleteRegister(registerId: number): Promise<void> {
+  const reg = await getRegDoc(registerId);
   await deleteDoc(regDoc(registerId));
+  firestoreRegisterCache.delete(registerId);
+  await logAction(reg.businessId, 'Delete Register', `Deleted register: ${reg.name}`, { registerId, registerName: reg.name });
 }
 
-export async function renameRegister(registerId: number, newName: string): Promise<RegisterSummary> {
+export async function renameRegister(registerId: number, newName: string): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
+    const oldName = reg.name;
     reg.name = newName;
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
+    await logAction(reg.businessId, 'Rename Register', `Renamed register from "${oldName}" to "${newName}"`, { registerId, registerName: newName });
     return reg;
   });
 }
@@ -833,6 +854,7 @@ export async function addColumn(registerId: number, data: { name: string; type: 
       populateAutoIncrement(reg, colId);
     }
     await saveRegDocImmediate(reg);
+    await logAction(reg.businessId, 'Add Column', `Added column "${data.name}" to "${reg.name}"`, { registerId, registerName: reg.name });
     return reg;
   });
 }
@@ -840,11 +862,15 @@ export async function addColumn(registerId: number, data: { name: string; type: 
 export async function deleteColumn(registerId: number, columnId: number): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
+    const col = reg.columns.find(c => c.id.toString() === columnId.toString());
     reg.columns = reg.columns.filter((c) => c.id.toString() !== columnId.toString());
     reg.columns.forEach((c, i) => c.position = i);
     // Cleanup entry data
     reg.entries.forEach((e) => { if (e.cells) delete e.cells[columnId.toString()]; });
     await saveRegDocImmediate(reg);
+    if (col) {
+      await logAction(reg.businessId, 'Delete Column', `Deleted column "${col.name}" from "${reg.name}"`, { registerId, registerName: reg.name });
+    }
     return reg;
   });
 }
@@ -1062,6 +1088,7 @@ export async function addEntry(registerId: number, cells: Record<string, string>
     reg.entryCount = reg.entries.length;
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
+    await logAction(reg.businessId, 'Add Row', `Added a new row to "${reg.name}"`, { registerId, registerName: reg.name });
     return entry;
   });
 }
@@ -1101,6 +1128,7 @@ export async function deleteEntry(registerId: number, entryId: number): Promise<
     reg.entries = reg.entries.filter((e) => e.id !== entryId);
     reg.entryCount = reg.entries.length;
     await saveRegDocImmediate(reg);
+    await logAction(reg.businessId, 'Delete Row', `Deleted a row from "${reg.name}"`, { registerId, registerName: reg.name });
   });
 }
 
@@ -1234,4 +1262,34 @@ export function calculateColumnStats(entries: Entry[], columnId: string): Column
     max: numbers.length > 0 ? Math.max(...numbers) : 0, filled: values.length,
     empty: entries.length - values.length
   };
+}
+
+export async function logAction(
+  businessId: number,
+  action: string,
+  details: string,
+  meta?: { registerId?: number; registerName?: string }
+): Promise<void> {
+  try {
+    const entry: HistoryEntry = {
+      id: generateId(),
+      businessId,
+      action,
+      details,
+      timestamp: new Date().toISOString(),
+      userName: 'Test User',
+      ...meta,
+    };
+    await setDoc(doc(db, 'history', entry.id.toString()), entry);
+  } catch (err) {
+    console.error('Failed to log action:', err);
+  }
+}
+
+export async function listHistory(businessId: number): Promise<HistoryEntry[]> {
+  const q = query(collection(db, 'history'), where('businessId', '==', businessId));
+  const snap = await getDocs(q);
+  return snap.docs
+    .map(d => d.data() as HistoryEntry)
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }

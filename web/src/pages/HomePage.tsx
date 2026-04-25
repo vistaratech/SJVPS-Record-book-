@@ -13,6 +13,7 @@ import { DashboardContent } from '../components/home/DashboardContent';
 import { Sidebar } from '../components/home/Sidebar';
 import RegisterPage from './RegisterPage';
 import TemplatesPage from './TemplatesPage';
+import HistoryPage from './HistoryPage';
 
 const RegisterPageWrapper = () => {
   const { id } = useParams();
@@ -234,6 +235,7 @@ export default function HomePage() {
         <Route path="register/:id" element={<RegisterPageWrapper />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="templates/:categoryId" element={<TemplatesPage />} />
+        <Route path="history" element={<HistoryPage />} />
       </Routes>
 
       {/* ── Register Context Menu ── */}

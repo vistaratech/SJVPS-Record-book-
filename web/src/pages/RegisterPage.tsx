@@ -188,6 +188,205 @@ export default function RegisterPage() {
 
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
+  // ── History (Undo/Redo) ──
+  const undoStack = useRef<any[]>([]);
+  const redoStack = useRef<any[]>([]);
+  const isHistoryAction = useRef(false);
+  const initialValues = useRef<Record<string, string>>({});
+
+  const pushToUndoStack = useCallback((action: any) => {
+    if (isHistoryAction.current) return;
+    undoStack.current.push(action);
+    redoStack.current = [];
+    if (undoStack.current.length > 50) undoStack.current.shift();
+  }, []);
+
+  const undo = useCallback(async () => {
+    const action = undoStack.current.pop();
+    if (!action) {
+      toast('Nothing to undo', { icon: 'ℹ️' });
+      return;
+    }
+
+    isHistoryAction.current = true;
+    try {
+      if (action.type === 'EDIT_CELL') {
+        await updateEntry(registerId, action.entryId, { [action.columnId]: action.oldValue });
+        
+        // Update local state and cache
+        const patch = (prev: any) => prev.map((e: any) => 
+          e.id === action.entryId ? { ...e, cells: { ...e.cells, [action.columnId]: action.oldValue } } : e
+        );
+        setLocalEntries(prev => patch(prev));
+        queryClient.setQueryData(['register', registerId], (old: any) => {
+          if (!old) return old;
+          return { ...old, entries: patch(old.entries) };
+        });
+
+        redoStack.current.push(action);
+        toast.success('Undone cell edit');
+      } else if (action.type === 'BULK_EDIT_CELLS') {
+        const updates: Record<string, string> = {};
+        action.changes.forEach((c: any) => { updates[c.columnId] = c.oldValue; });
+        await updateEntry(registerId, action.entryId, updates);
+
+        const patch = (prev: any) => prev.map((e: any) => 
+          e.id === action.entryId ? { ...e, cells: { ...e.cells, ...updates } } : e
+        );
+        setLocalEntries(prev => patch(prev));
+        queryClient.setQueryData(['register', registerId], (old: any) => {
+          if (!old) return old;
+          return { ...old, entries: patch(old.entries) };
+        });
+
+        redoStack.current.push(action);
+        toast.success('Undone bulk edit');
+      } else if (action.type === 'REORDER_COLUMN') {
+        await reorderColumn(registerId, action.columnId, action.oldIndex);
+        queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+        redoStack.current.push(action);
+        toast.success('Undone column move');
+      } else if (action.type === 'RENAME_COLUMN') {
+        await renameColumn(registerId, action.columnId, action.oldName);
+        queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+        redoStack.current.push(action);
+        toast.success('Undone rename');
+      } else if (action.type === 'ADD_ENTRY') {
+        await deleteEntry(registerId, action.entryId);
+        
+        setLocalEntries(prev => prev.filter(e => e.id !== action.entryId));
+        queryClient.setQueryData(['register', registerId], (old: any) => {
+          if (!old) return old;
+          const entries = old.entries.filter((e: any) => e.id !== action.entryId);
+          return { ...old, entries, entryCount: entries.length };
+        });
+
+        redoStack.current.push(action);
+        toast.success('Undone row addition');
+      } else if (action.type === 'DELETE_ENTRY') {
+        const restored = await addEntry(registerId, action.entry.cells, action.entry.pageIndex);
+        // Note: restored entry will have a new ID. We should ideally update future history actions 
+        // that might refer to the old ID, but for now we'll just restore it.
+        
+        // To make redo work for DELETE_ENTRY, we'd need to store the new ID.
+        const redoAction = { ...action, newEntryId: restored.id };
+        redoStack.current.push(redoAction);
+        
+        // Re-fetch to ensure order is correct and IDs are synced
+        queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+        toast.success('Undone row deletion');
+      }
+    } catch (err) {
+      console.error('Undo failed:', err);
+      toast.error('Failed to undo');
+    } finally {
+      isHistoryAction.current = false;
+    }
+  }, [registerId, queryClient]);
+
+  const redo = useCallback(async () => {
+    const action = redoStack.current.pop();
+    if (!action) {
+      toast('Nothing to redo', { icon: 'ℹ️' });
+      return;
+    }
+
+    isHistoryAction.current = true;
+    try {
+      if (action.type === 'EDIT_CELL') {
+        await updateEntry(registerId, action.entryId, { [action.columnId]: action.newValue });
+        
+        const patch = (prev: any) => prev.map((e: any) => 
+          e.id === action.entryId ? { ...e, cells: { ...e.cells, [action.columnId]: action.newValue } } : e
+        );
+        setLocalEntries(prev => patch(prev));
+        queryClient.setQueryData(['register', registerId], (old: any) => {
+          if (!old) return old;
+          return { ...old, entries: patch(old.entries) };
+        });
+
+        undoStack.current.push(action);
+        toast.success('Redone cell edit');
+      } else if (action.type === 'BULK_EDIT_CELLS') {
+        const updates: Record<string, string> = {};
+        action.changes.forEach((c: any) => { updates[c.columnId] = c.newValue; });
+        await updateEntry(registerId, action.entryId, updates);
+
+        const patch = (prev: any) => prev.map((e: any) => 
+          e.id === action.entryId ? { ...e, cells: { ...e.cells, ...updates } } : e
+        );
+        setLocalEntries(prev => patch(prev));
+        queryClient.setQueryData(['register', registerId], (old: any) => {
+          if (!old) return old;
+          return { ...old, entries: patch(old.entries) };
+        });
+
+        undoStack.current.push(action);
+        toast.success('Redone bulk edit');
+      } else if (action.type === 'REORDER_COLUMN') {
+        await reorderColumn(registerId, action.columnId, action.newIndex);
+        queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+        undoStack.current.push(action);
+        toast.success('Redone column move');
+      } else if (action.type === 'RENAME_COLUMN') {
+        await renameColumn(registerId, action.columnId, action.newName);
+        queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+        undoStack.current.push(action);
+        toast.success('Redone rename');
+      } else if (action.type === 'ADD_ENTRY') {
+        // Redo adding a row: we need to re-add it. 
+        // If we deleted it during undo, we just add it back.
+        const newEntry = await addEntry(registerId, {}, action.pageIndex);
+        // Update the action with the new ID for future undo
+        action.entryId = newEntry.id;
+        undoStack.current.push(action);
+        
+        queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+        toast.success('Redone row addition');
+      } else if (action.type === 'DELETE_ENTRY') {
+        // Redo deleting a row: use the ID from the restore or the original
+        const idToDelete = action.newEntryId || action.entry.id;
+        await deleteEntry(registerId, idToDelete);
+        
+        setLocalEntries(prev => prev.filter(e => e.id !== idToDelete));
+        queryClient.setQueryData(['register', registerId], (old: any) => {
+          if (!old) return old;
+          const entries = old.entries.filter((e: any) => e.id !== idToDelete);
+          return { ...old, entries, entryCount: entries.length };
+        });
+
+        undoStack.current.push(action);
+        toast.success('Redone row deletion');
+      }
+    } catch (err) {
+      console.error('Redo failed:', err);
+      toast.error('Failed to redo');
+    } finally {
+      isHistoryAction.current = false;
+    }
+  }, [registerId, queryClient]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in a modal or something? 
+      // Actually, standard spreadsheet behavior is to undo even if focused.
+      
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo]);
+
   // Column widths state for custom resizing
   const [colWidths, setColWidths] = useState<Record<number, number>>({});
 
@@ -578,6 +777,14 @@ export default function RegisterPage() {
       await queryClient.cancelQueries({ queryKey: ['register', registerId] });
       const prev = queryClient.getQueryData(['register', registerId]) as any;
       if (prev && activeModalColId !== null) {
+        const oldName = prev.columns.find((c: any) => c.id === activeModalColId)?.name || '';
+        pushToUndoStack({
+          type: 'RENAME_COLUMN',
+          columnId: activeModalColId,
+          oldName,
+          newName: renameColValue
+        });
+
         queryClient.setQueryData(['register', registerId], {
           ...prev,
           columns: (prev.columns || []).map((c: any) => 
@@ -704,6 +911,14 @@ export default function RegisterPage() {
         const cols = prev.columns.map((c: any) => ({ ...c }));
         const idx = cols.findIndex((c: any) => c.id === colId);
         if (idx !== -1) {
+          // Push to undo stack
+          pushToUndoStack({
+            type: 'REORDER_COLUMN',
+            columnId: colId,
+            oldIndex: idx,
+            newIndex: targetIndex
+          });
+
           const [col] = cols.splice(idx, 1);
           const clampedTarget = Math.max(0, Math.min(targetIndex, cols.length));
           cols.splice(clampedTarget, 0, col);
@@ -1126,6 +1341,9 @@ export default function RegisterPage() {
       return { tempId: tempEntry.id };
     },
     onSuccess: (newEntry, _vars, context) => {
+      // Push to undo stack
+      pushToUndoStack({ type: 'ADD_ENTRY', entryId: newEntry.id, pageIndex: currentPageIndex });
+
       // Replace temp entry with real entry from server
       setLocalEntries((prev) => prev.map((e) => e.id === context?.tempId ? newEntry : e));
       // Patch the cache: replace temp if present, otherwise append (upsert)
@@ -1146,6 +1364,14 @@ export default function RegisterPage() {
 
   const deleteEntryMutation = useMutation({
     mutationFn: (entryId: number) => deleteEntry(registerId, entryId),
+    onMutate: async (entryId) => {
+      // Capture entry for undo before it's deleted
+      const entry = localEntries.find(e => e.id === entryId);
+      const index = localEntries.findIndex(e => e.id === entryId);
+      if (entry) {
+        pushToUndoStack({ type: 'DELETE_ENTRY', entry, index });
+      }
+    },
     onSuccess: (_data, entryId) => {
       queryClient.setQueryData(['register', registerId], (old: any) => {
         if (!old) return old;
@@ -1314,8 +1540,30 @@ export default function RegisterPage() {
 
     // 2. Debounce the Firestore write — no invalidateQueries, just patch the cache
     const key = `${entryId}-${columnId}`;
+    
+    // Capture initial value before the first keystroke of this session
+    if (!debounceTimers.current[key]) {
+      const entry = localEntriesRef.current.find(e => e.id === entryId);
+      initialValues.current[key] = entry?.cells?.[columnId] || '';
+    }
+
     if (debounceTimers.current[key]) clearTimeout(debounceTimers.current[key]);
     debounceTimers.current[key] = setTimeout(() => {
+      const oldVal = initialValues.current[key];
+      // Only push to undo stack if the value actually changed
+      if (oldVal !== value) {
+        pushToUndoStack({
+          type: 'EDIT_CELL',
+          entryId,
+          columnId,
+          oldValue: oldVal,
+          newValue: value
+        });
+      }
+      // Session finished, clear initial value
+      delete initialValues.current[key];
+      delete debounceTimers.current[key];
+
       updateEntry(registerId, entryId, { [columnId]: value }).then(() => {
         // Only patch the cache entry, never re-fetch the whole register
         queryClient.setQueryData(['register', registerId], (old: any) => {
@@ -1329,7 +1577,7 @@ export default function RegisterPage() {
         });
       });
     }, 600);
-  }, [registerId, queryClient, detailViewEntry, detailErrors]);
+  }, [registerId, queryClient, detailViewEntry, detailErrors, pushToUndoStack]);
 
   // Excel-like sort: permanently reorders localEntries and persists to Firestore
   const handleSort = useCallback((colId: number, direction: 'asc' | 'desc') => {
@@ -2667,7 +2915,8 @@ export default function RegisterPage() {
                                 if (detailErrors[colKey]) setDetailErrors(prev => ({ ...prev, [colKey]: null }));
                               }}
                               placeholder={`Enter ${col.name}…`}
-                              type={col.type === 'number' || col.type === 'currency' ? 'number' : col.type === 'email' ? 'email' : col.type === 'phone' ? 'tel' : 'text'}
+                              type={col.type === 'email' ? 'email' : col.type === 'phone' ? 'tel' : 'text'}
+                              inputMode={col.type === 'number' || col.type === 'currency' ? 'decimal' : undefined}
                             />
                             {detailErrors[colKey] && (
                               <div className="row-detail-error-msg">
@@ -2722,6 +2971,18 @@ export default function RegisterPage() {
                   });
 
                   if (Object.keys(changedCells).length > 0) {
+                    // Push to undo stack
+                    const bulkChanges = Object.entries(changedCells).map(([colId, newVal]) => ({
+                      columnId: colId,
+                      oldValue: detailViewEntry.cells?.[colId] || '',
+                      newValue: newVal
+                    }));
+                    pushToUndoStack({
+                      type: 'BULK_EDIT_CELLS',
+                      entryId: detailViewEntry.id,
+                      changes: bulkChanges
+                    });
+
                     // 1. Update local state instantly (optimistic)
                     setLocalEntries(prev => prev.map(e => 
                       e.id === detailViewEntry.id ? { ...e, cells: { ...e.cells, ...changedCells } } : e
