@@ -244,6 +244,7 @@ interface SpreadsheetRowProps {
   onRowDetail?: (entry: Entry) => void;
   onImagePreview?: (src: string) => void;
   frozenColumns?: Set<number>;
+  frozenLeftOffsets?: Record<number, number>;
 }
 
 export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: SpreadsheetRowProps) {
@@ -260,6 +261,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     onRowDetail,
     onImagePreview,
     frozenColumns,
+    frozenLeftOffsets,
   } = props;
 
 
@@ -327,24 +329,15 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     <tr>
       <td className="serial" style={{ cursor: 'pointer' }} onClick={handleSerialClick} title="Click to view details">{idx + 1}</td>
       {visibleColumns.map((col, colIdx) => {
-        const isImage = col.type === 'image';
-        const cellVal = entry.cells?.[col.id.toString()] || '';
-        const tdMinWidth = isImage ? '100px' : `${Math.max(6, cellVal.length + 2)}ch`;
-        
-        // Frozen column sticky left for body cells
         const isFrozen = frozenColumns?.has(col.id);
         let frozenStyle: React.CSSProperties | undefined;
         if (isFrozen) {
-          let left = 50; // S.No. column width
-          for (const vc of visibleColumns) {
-            if (vc.id === col.id) break;
-            if (frozenColumns?.has(vc.id)) left += 120; // approx header width
-          }
-          frozenStyle = { position: 'sticky', left, zIndex: 5, background: '#fafbff', minWidth: tdMinWidth };
+          const left = frozenLeftOffsets?.[col.id] || 50;
+          frozenStyle = { position: 'sticky', left, zIndex: 5, background: '#fafbff' };
         }
         
         return (
-        <td key={col.id} className={isFrozen ? 'frozen-col' : ''} style={frozenStyle || { minWidth: tdMinWidth }}>
+        <td key={col.id} className={isFrozen ? 'frozen-col' : ''} style={frozenStyle}>
           {col.type === 'formula' ? (
             <FormulaCell idx={idx} col={col} entry={entry} registerColumns={registerColumns} onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} />
           ) : col.type === 'date' ? (

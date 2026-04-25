@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo, useDeferredValue } from 'react';
 import toast from 'react-hot-toast';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -56,6 +56,22 @@ function formatCurrency(val: string): string {
   return `${n < 0 ? '-' : ''}₹${formatted}.${decPart}`;
 }
 
+// Helper to normalize DD/MM/YYYY to YYYY-MM-DD for comparison
+function parseDateString(dStr: string) {
+  if (!dStr) return '';
+  if (dStr.includes('/') || dStr.includes('-')) {
+    const parts = dStr.split(/[/-]/);
+    if (parts.length === 3) {
+      // Ensure DD and MM are padded if they come in as 1 or 2 digits
+      const d = parts[0].padStart(2, '0');
+      const m = parts[1].padStart(2, '0');
+      const y = parts[2];
+      return `${y}-${m}-${d}`;
+    }
+  }
+  return dStr;
+}
+
 export default function RegisterPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -72,8 +88,11 @@ export default function RegisterPage() {
   const cachedRegister = queryClient.getQueryData(['register', registerId]) as any;
 
   // ── State ──
-  const [search, setSearch] = useState('');
-  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  const [search, setSearch] = useState(() => localStorage.getItem(`rb_search_${registerId}`) || '');
+  const [currentPageIndex, setCurrentPageIndex] = useState(() => {
+    const saved = localStorage.getItem(`rb_page_${registerId}`);
+    return saved ? parseInt(saved, 10) : 0;
+  });
   const [localEntries, setLocalEntries] = useState<Entry[]>(cachedRegister?.entries || []);
 
   const [calcTypes, setCalcTypes] = useState<Record<number, CalcType>>({});
@@ -129,8 +148,17 @@ export default function RegisterPage() {
   const [dropdownConfigOptions, setDropdownConfigOptions] = useState('');
 
   // Filter
-  const [filters, setFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>([]);
-  const [activeFilters, setActiveFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>([]);
+  const [filters, setFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>(() => {
+    const saved = localStorage.getItem(`rb_filters_${registerId}`);
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [activeFilters, setActiveFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>(() => {
+    const saved = localStorage.getItem(`rb_active_filters_${registerId}`);
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const deferredSearch = useDeferredValue(search);
+  const deferredActiveFilters = useDeferredValue(activeFilters);
 
   // Date picker for cell
   const [dateDay, setDateDay] = useState('');
@@ -332,76 +360,152 @@ export default function RegisterPage() {
     }
   }, [calcMenu]);
 
+  // Persist filter state to localStorage
+  useEffect(() => {
+    if (!registerId) return;
+    localStorage.setItem(`rb_search_${registerId}`, search);
+    localStorage.setItem(`rb_page_${registerId}`, currentPageIndex.toString());
+    localStorage.setItem(`rb_filters_${registerId}`, JSON.stringify(filters));
+    localStorage.setItem(`rb_active_filters_${registerId}`, JSON.stringify(activeFilters));
+  }, [search, currentPageIndex, filters, activeFilters, registerId]);
+
+  // Reset page to 0 when filters or search change to avoid being stuck on an empty page
+  useEffect(() => {
+    setCurrentPageIndex(0);
+  }, [deferredSearch, deferredActiveFilters]);
+
+  // Index entries by page index for O(1) page access
+  const entriesByPage = useMemo(() => {
+    const map: Record<number, Entry[]> = {};
+    const len = localEntries.length;
+    for (let i = 0; i < len; i++) {
+      const e = localEntries[i];
+      const p = e.pageIndex || 0;
+      if (!map[p]) map[p] = [];
+      map[p].push(e);
+    }
+    return map;
+  }, [localEntries]);
+
   // Filter + sort entries — memoized so it only recomputes when inputs change
   const displayEntries = useMemo(() => {
-    let entries = localEntries.filter((e) => (e.pageIndex || 0) === currentPageIndex);
+    const s = deferredSearch.toLowerCase().trim();
+    
+    // Pre-calculate filter values once before the loop
+    const preparedFilters = deferredActiveFilters.map(f => ({
+      ...f,
+      lFilter: (f.value || '').toLowerCase(),
+      nValue: parseFloat(f.value),
+      nValue2: parseFloat(f.value2 || '0'),
+      dValue: f.value, // Date filters use YYYY-MM-DD string
+      dValue2: f.value2 || '',
+    }));
 
-    if (search) {
-      entries = entries.filter((e) =>
-        Object.values(e.cells || {}).some((v) => v?.toLowerCase().includes(search.toLowerCase()))
-      );
+    let result = [];
+    const filterLen = preparedFilters.length;
+    const isSearching = !!s || filterLen > 0;
+    const entriesToFilter = isSearching ? localEntries : (entriesByPage[currentPageIndex] || []);
+    const localLen = entriesToFilter.length;
+
+    for (let i = 0; i < localLen; i++) {
+      const e = entriesToFilter[i];
+
+      // 2. Search filtering
+      if (s) {
+        let match = false;
+        const cells = e.cells || {};
+        for (const key in cells) {
+          const val = cells[key];
+          if (val && typeof val === 'string' && val.toLowerCase().includes(s)) {
+            match = true;
+            break;
+          }
+        }
+        if (!match) continue;
+      }
+
+      // 3. Active Filters
+      if (filterLen > 0) {
+        let passFilters = true;
+        for (let j = 0; j < filterLen; j++) {
+          const f = preparedFilters[j];
+          const val = e.cells?.[f.columnId.toString()] || '';
+          const lVal = val.toLowerCase();
+
+          let condition = true;
+          switch (f.operator) {
+            case 'contains': condition = lVal.includes(f.lFilter); break;
+            case 'not_contains': condition = !lVal.includes(f.lFilter); break;
+            case 'equals': condition = lVal === f.lFilter; break;
+            case 'not_equals': condition = lVal !== f.lFilter; break;
+            case 'starts_with': condition = lVal.startsWith(f.lFilter); break;
+            case 'ends_with': condition = lVal.endsWith(f.lFilter); break;
+            case 'eq': condition = parseFloat(val) === f.nValue; break;
+            case 'gt': condition = parseFloat(val) > f.nValue; break;
+            case 'gte': condition = parseFloat(val) >= f.nValue; break;
+            case 'lt': condition = parseFloat(val) < f.nValue; break;
+            case 'lte': condition = parseFloat(val) <= f.nValue; break;
+            case 'between': {
+              const n = parseFloat(val);
+              condition = n >= f.nValue && n <= f.nValue2;
+              break;
+            }
+            case 'not_between': {
+              const n = parseFloat(val);
+              condition = n < f.nValue || n > f.nValue2;
+              break;
+            }
+            case 'date_is': condition = parseDateString(val) === f.dValue; break;
+            case 'date_not': condition = parseDateString(val) !== f.dValue; break;
+            case 'date_before': condition = parseDateString(val) < f.dValue; break;
+            case 'date_after': condition = parseDateString(val) > f.dValue; break;
+            case 'date_between': {
+              const dVal = parseDateString(val);
+              condition = dVal >= f.dValue && dVal <= f.dValue2;
+              break;
+            }
+            case 'date_not_between': {
+              const dVal = parseDateString(val);
+              condition = dVal < f.dValue || dVal > f.dValue2;
+              break;
+            }
+            case 'empty': condition = !val; break;
+            case 'not_empty': condition = !!val; break;
+          }
+          if (!condition) {
+            passFilters = false;
+            break;
+          }
+        }
+        if (!passFilters) continue;
+      }
+
+      result.push(e);
     }
 
-    const parseDateString = (dStr: string) => {
-      if (!dStr) return '';
-      if (dStr.includes('/') || dStr.includes('-')) {
-        const parts = dStr.split(/[/-]/);
-        if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
-      }
-      return dStr;
-    };
-
-    for (const f of activeFilters) {
-      entries = entries.filter((e) => {
-        const val = e.cells?.[f.columnId.toString()] || '';
-        const lVal = val.toLowerCase();
-        const lFilter = (f.value || '').toLowerCase();
-
-        switch (f.operator) {
-          // Text
-          case 'contains': return lVal.includes(lFilter);
-          case 'not_contains': return !lVal.includes(lFilter);
-          case 'equals': return lVal === lFilter;
-          case 'not_equals': return lVal !== lFilter;
-          case 'starts_with': return lVal.startsWith(lFilter);
-          case 'ends_with': return lVal.endsWith(lFilter);
-          // Number
-          case 'eq': return parseFloat(val) === parseFloat(f.value);
-          case 'gt': return parseFloat(val) > parseFloat(f.value);
-          case 'gte': return parseFloat(val) >= parseFloat(f.value);
-          case 'lt': return parseFloat(val) < parseFloat(f.value);
-          case 'lte': return parseFloat(val) <= parseFloat(f.value);
-          case 'between': {
-            const n = parseFloat(val);
-            return n >= parseFloat(f.value) && n <= parseFloat(f.value2 || '');
-          }
-          case 'not_between': {
-            const n = parseFloat(val);
-            return n < parseFloat(f.value) || n > parseFloat(f.value2 || '');
-          }
-          // Date
-          case 'date_is': return parseDateString(val) === f.value;
-          case 'date_not': return parseDateString(val) !== f.value;
-          case 'date_before': return parseDateString(val) < f.value;
-          case 'date_after': return parseDateString(val) > f.value;
-          case 'date_between': {
-            const dVal = parseDateString(val);
-            return dVal >= f.value && dVal <= (f.value2 || '');
-          }
-          case 'date_not_between': {
-            const dVal = parseDateString(val);
-            return dVal < f.value || dVal > (f.value2 || '');
-          }
-          // Universal
-          case 'empty': return !val;
-          case 'not_empty': return !!val;
-          default: return true;
+    // 4. Client-side Sorting (ensures visual consistency even if backend hasn't updated)
+    if (sortColId && sortDir) {
+      const colDef = columns.find(c => c.id === sortColId);
+      const colIdStr = sortColId.toString();
+      result.sort((a, b) => {
+        const aVal = a.cells?.[colIdStr] || '';
+        const bVal = b.cells?.[colIdStr] || '';
+        if (colDef?.type === 'date') {
+          const dA = parseDateString(aVal);
+          const dB = parseDateString(bVal);
+          return sortDir === 'asc' ? dA.localeCompare(dB) : dB.localeCompare(dA);
         }
+        if (colDef?.type === 'number' || colDef?.type === 'currency' || colDef?.type === 'formula') {
+          const nA = parseFloat(aVal) || 0;
+          const nB = parseFloat(bVal) || 0;
+          return sortDir === 'asc' ? nA - nB : nB - nA;
+        }
+        return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
       });
     }
 
-    return entries;
-  }, [localEntries, currentPageIndex, search, activeFilters, columns]);
+    return result;
+  }, [localEntries, columns, deferredSearch, deferredActiveFilters, sortColId, sortDir, entriesByPage, currentPageIndex]);
   
   // ── Helpers ──
   const cleanOptions = (opts: string[]) => {
@@ -1231,14 +1335,6 @@ export default function RegisterPage() {
   const handleSort = useCallback((colId: number, direction: 'asc' | 'desc') => {
     setSortColId(colId);
     setSortDir(direction);
-    const parseDateString = (dStr: string) => {
-      if (!dStr) return '';
-      if (dStr.includes('/') || dStr.includes('-')) {
-        const parts = dStr.split(/[/-]/);
-        if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
-      }
-      return dStr;
-    };
 
     const colDef = columns.find(c => c.id === colId);
     const colIdStr = colId.toString();
@@ -1780,69 +1876,127 @@ export default function RegisterPage() {
   columnsRef.current = columns;
 
   // Defer formula/stats recalculation so it doesn't block keystrokes (Fix #3)
+  // Optimized single-pass statistics calculation (Fix performance #4)
   const columnStats = useMemo(() => {
     if (!register || columns.length === 0) return {};
     
-    const stats: Record<number, string | number> = {};
     const entriesToCalc = selectedRows.size > 0 
       ? displayEntries.filter(e => selectedRows.has(e.id)) 
       : displayEntries;
 
     if (entriesToCalc.length === 0) return {};
 
+    // Initialize stats accumulators for all columns
+    const colStatsData: Record<number, { type: CalcType; sum: number; count: number; min: number; max: number; distinct: Set<string> }> = {};
+    const visibleColIds = new Set(visibleColumns.map(c => c.id));
+    
     columns.forEach(col => {
+      // Only calc if column is visible to save cycles
+      if (!visibleColIds.has(col.id)) return;
+
       const isNumeric = col.type === 'number' || col.type === 'formula' || col.type === 'currency';
       const calcType = calcTypes[col.id] || (isNumeric ? 'sum' : 'count');
       
-      if (calcType === 'none') {
-        stats[col.id] = '-';
-        return;
-      }
+      if (calcType === 'none') return;
 
-      const values = entriesToCalc.map(e => {
-        if (col.type === 'formula') return evaluateFormula(col.formula || '', e, columns);
-        return e.cells?.[col.id.toString()] || '';
-      });
+      colStatsData[col.id] = {
+        type: calcType,
+        sum: 0,
+        count: 0,
+        min: Infinity,
+        max: -Infinity,
+        distinct: new Set<string>()
+      };
+    });
 
-      if (calcType === 'empty') {
-        stats[col.id] = values.filter(v => v.trim() === '').length;
-      } else if (calcType === 'filled' || calcType === 'count') {
-        stats[col.id] = values.filter(v => v.trim() !== '').length;
-      } else if (calcType === 'distinct') {
-        stats[col.id] = new Set(values.filter(v => v.trim() !== '')).size;
-      } else {
-        // Numeric calcs
-        const nums = values.map(v => {
-          if (v === 'true') return 1;
-          if (v === 'false') return 0;
-          const parsed = parseFloat(v.toString().replace(/[₹$,]/g, ''));
-          return isNaN(parsed) ? 0 : parsed;
-        });
+    const activeColIds = Object.keys(colStatsData).map(Number);
+    if (activeColIds.length === 0) return {};
 
-        if (calcType === 'sum') {
-          const sum = nums.reduce((a, b) => a + b, 0);
-          stats[col.id] = Number.isInteger(sum) ? sum : parseFloat(sum.toFixed(2));
-        } else if (calcType === 'average') {
-          const sum = nums.reduce((a, b) => a + b, 0);
-          const avg = sum / (nums.length || 1);
-          stats[col.id] = Number.isInteger(avg) ? avg : parseFloat(avg.toFixed(2));
-        } else if (calcType === 'min') {
-          stats[col.id] = Math.min(...nums);
-        } else if (calcType === 'max') {
-          stats[col.id] = Math.max(...nums);
+    // Map column IDs to objects for O(1) lookup in the loop
+    const activeColsMap = new Map<number, any>();
+    activeColIds.forEach(id => {
+      const col = columns.find(c => c.id === id);
+      if (col) activeColsMap.set(id, col);
+    });
+
+    // Single pass over entries to accumulate all stats
+    const entryLen = entriesToCalc.length;
+    for (let i = 0; i < entryLen; i++) {
+      const e = entriesToCalc[i];
+      for (let j = 0; j < activeColIds.length; j++) {
+        const colId = activeColIds[j];
+        const col = activeColsMap.get(colId);
+        if (!col) continue;
+
+        const s = colStatsData[colId];
+        let val = '';
+        if (col.type === 'formula') {
+          val = evaluateFormula(col.formula || '', e, columns);
+        } else {
+          val = e.cells?.[colId.toString()] || '';
         }
+
+        const trimmed = val.trim();
+        
+        if (s.type === 'empty') {
+          if (trimmed === '') s.count++;
+          continue;
+        }
+        if (s.type === 'filled' || s.type === 'count') {
+          if (trimmed !== '') s.count++;
+          continue;
+        }
+        if (s.type === 'distinct') {
+          if (trimmed !== '') s.distinct.add(trimmed);
+          continue;
+        }
+
+        // Numeric calculations
+        let n: number;
+        if (val === 'true') n = 1;
+        else if (val === 'false') n = 0;
+        else {
+          n = parseFloat(val.replace(/[₹$,]/g, ''));
+          if (isNaN(n)) n = 0;
+        }
+
+        s.sum += n;
+        s.count++;
+        if (n < s.min) s.min = n;
+        if (n > s.max) s.max = n;
+      }
+    }
+
+    // Finalize stats values
+    const finalStats: Record<number, string | number> = {};
+    activeColIds.forEach(colId => {
+      const s = colStatsData[colId];
+      if (s.type === 'empty' || s.type === 'filled' || s.type === 'count') {
+        finalStats[colId] = s.count;
+      } else if (s.type === 'distinct') {
+        finalStats[colId] = s.distinct.size;
+      } else if (s.type === 'sum') {
+        finalStats[colId] = Number.isInteger(s.sum) ? s.sum : parseFloat(s.sum.toFixed(2));
+      } else if (s.type === 'average') {
+        const avg = s.sum / (entryLen || 1);
+        finalStats[colId] = Number.isInteger(avg) ? avg : parseFloat(avg.toFixed(2));
+      } else if (s.type === 'min') {
+        finalStats[colId] = s.min === Infinity ? 0 : s.min;
+      } else if (s.type === 'max') {
+        finalStats[colId] = s.max === -Infinity ? 0 : s.max;
       }
     });
-    return stats;
-  }, [register, columns, displayEntries, selectedRows, calcTypes]);
+
+    return finalStats;
+  }, [register, columns, visibleColumns, displayEntries, selectedRows, calcTypes]);
 
   // ── Virtualization ──
   const parentRef = useRef<HTMLDivElement>(null);
   const rowVirtualizer = useVirtualizer({
     count: displayEntries.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 41, // Default row height
-    overscan: 10,
+    estimateSize: useCallback(() => window.innerWidth < 768 ? 38 : 42, []),
+    overscan: 30,
   });
 
   const virtualRows = rowVirtualizer.getVirtualItems();
@@ -1851,17 +2005,17 @@ export default function RegisterPage() {
   const paddingTop = virtualRows.length > 0 ? virtualRows[0].start : 0;
   const paddingBottom = virtualRows.length > 0 ? totalVirtualHeight - virtualRows[virtualRows.length - 1].end : 0;
 
-  const getFrozenLeftOffset = useCallback((colId: number) => {
-    let offset = 50; // S.No column width
+  const frozenLeftOffsets = useMemo(() => {
+    const offsets: Record<number, number> = {};
+    let left = 50; // S.No column
     for (const vc of visibleColumns) {
-      if (vc.id === colId) break;
       if (frozenColumns.has(vc.id)) {
-        const headerEl = colHeaderRefs.current.get(vc.id);
-        offset += headerEl?.offsetWidth || 120;
+        offsets[vc.id] = left;
+        left += colWidths[vc.id] || 150;
       }
     }
-    return offset;
-  }, [frozenColumns, visibleColumns]);
+    return offsets;
+  }, [visibleColumns, frozenColumns, colWidths]);
 
 
   if (isLoading) return (
@@ -1998,8 +2152,7 @@ export default function RegisterPage() {
       {/* ── Dynamic Column Widths ── */}
       <style>{`
         ${visibleColumns.map((col, idx) => {
-          const w = colWidths[col.id];
-          if (!w) return '';
+          const w = colWidths[col.id] || 150;
           return `
             .spreadsheet tr > :nth-child(${idx + 2}) {
               width: ${w}px !important;
@@ -2010,10 +2163,6 @@ export default function RegisterPage() {
               width: ${w}px !important;
               min-width: ${w}px !important;
               max-width: ${w}px !important;
-            }
-            .spreadsheet td:nth-child(${idx + 2}) {
-              overflow: hidden !important;
-              text-overflow: ellipsis !important;
             }
           `;
         }).join('')}
@@ -2051,19 +2200,8 @@ export default function RegisterPage() {
                   }
                 })();
 
-                // Compute frozen column sticky left offset
                 const isFrozen = frozenColumns.has(col.id);
-                let stickyLeft: number | undefined;
-                if (isFrozen) {
-                  stickyLeft = 50; // S.No. column width
-                  for (const vc of visibleColumns) {
-                    if (vc.id === col.id) break;
-                    if (frozenColumns.has(vc.id)) {
-                      const headerEl = colHeaderRefs.current.get(vc.id);
-                      stickyLeft += headerEl?.offsetWidth || 120;
-                    }
-                  }
-                }
+                const stickyLeft = isFrozen ? frozenLeftOffsets[col.id] : undefined;
 
                 return (
                 <th 
@@ -2138,6 +2276,7 @@ export default function RegisterPage() {
                   onRowDetail={setDetailViewEntry}
                   onImagePreview={setPreviewImage}
                   frozenColumns={frozenColumns}
+                  frozenLeftOffsets={frozenLeftOffsets}
                   totalRows={displayEntries.length}
                 />
               );
@@ -2167,7 +2306,7 @@ export default function RegisterPage() {
                     const isNumeric = col.type === 'number' || col.type === 'formula' || col.type === 'currency';
                     const calcType = calcTypes[col.id] || (isNumeric ? 'sum' : 'count');
                     const isFrozen = frozenColumns.has(col.id);
-                    const leftOffset = isFrozen ? getFrozenLeftOffset(col.id) : 0;
+                    const leftOffset = isFrozen ? (frozenLeftOffsets[col.id] || 0) : 0;
                     
                     const calcValue = columnStats[col.id] ?? '-';
                     const displayValue = (col.type === 'currency' && typeof calcValue === 'number') 

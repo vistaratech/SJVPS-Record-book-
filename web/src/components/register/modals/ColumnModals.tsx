@@ -7,7 +7,29 @@ import {
 import { evaluateFormula } from '../../../lib/api';
 
 function FormulaBuilder({ formula, onChange, columns, entries, outputName, excludeId }: { formula: string, onChange: (v: string) => void, columns: any[], entries?: any[], outputName?: string, excludeId?: number | null }) {
+  const inputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<'preset' | 'custom'>('preset');
+
+  const insertText = (text: string) => {
+    const input = inputRef.current;
+    if (input) {
+      const start = input.selectionStart || 0;
+      const end = input.selectionEnd || 0;
+      const val = formula;
+      const newVal = val.substring(0, start) + text + val.substring(end);
+      onChange(newVal);
+      
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+          const newPos = start + text.length;
+          inputRef.current.setSelectionRange(newPos, newPos);
+        }
+      }, 10);
+    } else {
+      onChange(formula + text);
+    }
+  };
   const [presetType, setPresetType] = useState<'add' | 'sub' | 'mul' | 'div' | 'pct'>('add');
   
   // Selection state for presets
@@ -327,19 +349,88 @@ function FormulaBuilder({ formula, onChange, columns, entries, outputName, exclu
         <div className="custom-editor">
           <label className="modal-label" style={{ fontSize: '11px' }}>Formula</label>
           <input 
+            ref={inputRef}
             className="modal-input" 
             value={formula} 
             onChange={(e) => onChange(e.target.value)} 
             placeholder="e.g. {A} + {B} * 0.18" 
           />
+          
+          <div style={{ marginTop: '8px', marginBottom: '12px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginBottom: '6px' }}>Operators:</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {[
+                { label: '+', value: '+' },
+                { label: '-', value: '-' },
+                { label: '*', value: '*' },
+                { label: '/', value: '/' },
+                { label: '(', value: '(' },
+                { label: ')', value: ')' },
+                { label: '.', value: '.' },
+                { label: '^', value: '^' },
+              ].map(op => (
+                <button 
+                  key={op.value} 
+                  onClick={() => insertText(op.value)}
+                  style={{ 
+                    padding: '6px 12px', 
+                    fontSize: '14px', 
+                    fontWeight: 800,
+                    borderRadius: '6px', 
+                    border: '1px solid var(--border)', 
+                    background: 'white', 
+                    cursor: 'pointer',
+                    minWidth: '38px',
+                    color: 'var(--navy)',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s'
+                  }}
+                  type="button"
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'var(--bg-light)';
+                    e.currentTarget.style.borderColor = 'var(--primary-light)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'white';
+                    e.currentTarget.style.borderColor = 'var(--border)';
+                  }}
+                >
+                  {op.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div style={{ marginTop: '8px' }}>
             <label style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>Insert Column:</label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
               {columns.filter(c => c.id !== excludeId).map(c => (
                 <button 
                   key={c.id} 
-                  onClick={() => onChange(formula + `{${c.name}}`)}
-                  style={{ padding: '2px 6px', fontSize: '10px', borderRadius: '4px', border: '1px solid var(--border)', background: 'white', cursor: 'pointer' }}
+                  onClick={() => insertText(`{${c.name}}`)}
+                  style={{ 
+                    padding: '4px 10px', 
+                    fontSize: '11px', 
+                    fontWeight: 500,
+                    borderRadius: '6px', 
+                    border: '1px solid var(--border)', 
+                    background: 'white', 
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    color: 'var(--text-main)'
+                  }}
+                  type="button"
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'var(--bg-light)';
+                    e.currentTarget.style.borderColor = 'var(--primary-light)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'white';
+                    e.currentTarget.style.borderColor = 'var(--border)';
+                  }}
                 >
                   +{c.name}
                 </button>

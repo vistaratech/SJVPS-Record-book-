@@ -747,8 +747,21 @@ function getColumnRegex(name: string): RegExp {
   return regex;
 }
 
+// Cache evaluated formulas per entry object to avoid redundant heavy calculations (especially in stats loops)
+const _formulaResultCache = new WeakMap<Entry, Map<string, string>>();
+
 export function evaluateFormula(formula: string, entry: Entry, columns: Column[]): string {
   if (!formula || formula.trim() === '') return '';
+
+  // Check cache first
+  let entryCache = _formulaResultCache.get(entry);
+  if (!entryCache) {
+    entryCache = new Map<string, string>();
+    _formulaResultCache.set(entry, entryCache);
+  }
+  const cachedResult = entryCache.get(formula);
+  if (cachedResult !== undefined) return cachedResult;
+
   try {
     let sorted = _sortedColumnsCache.get(columns);
     if (!sorted) {
@@ -785,14 +798,21 @@ export function evaluateFormula(formula: string, entry: Entry, columns: Column[]
     expression = expression.trim();
     if (expression === '') return '';
     
+    let finalResult = '';
     const result = parseAndEval(expression);
     if (typeof result === 'number' && isFinite(result)) {
-      if (Number.isInteger(result)) return result.toString();
-      const fixed = parseFloat(result.toFixed(2));
-      return fixed.toString();
+      if (Number.isInteger(result)) {
+        finalResult = result.toString();
+      } else {
+        const fixed = parseFloat(result.toFixed(2));
+        finalResult = fixed.toString();
+      }
     }
-    return '';
+    
+    entryCache.set(formula, finalResult);
+    return finalResult;
   } catch {
+    entryCache.set(formula, '');
     return '';
   }
 }
