@@ -875,6 +875,41 @@ export async function deleteColumn(registerId: number, columnId: number): Promis
   });
 }
 
+/**
+ * Restore a previously deleted column with all its cell data.
+ * Uses splice at the exact original position so the column lands
+ * back in the correct slot, then re-normalises all positions.
+ */
+export async function restoreColumn(
+  registerId: number,
+  column: Column,
+  cellData: Record<string, string>,  // entryId -> cellValue
+): Promise<RegisterDetail> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+
+    // Splice at the exact original index (clamped to current length)
+    const insertAt = Math.min(column.position, reg.columns.length);
+    reg.columns.splice(insertAt, 0, column);
+
+    // Re-normalise positions so they're 0, 1, 2, …
+    reg.columns.forEach((c, i) => c.position = i);
+
+    // Restore cell data for this column across all entries
+    const colIdStr = column.id.toString();
+    reg.entries.forEach(e => {
+      const val = cellData[e.id.toString()];
+      if (val !== undefined) {
+        if (!e.cells) e.cells = {};
+        e.cells[colIdStr] = val;
+      }
+    });
+
+    await saveRegDocImmediate(reg);
+    return reg;
+  });
+}
+
 export async function renameColumn(registerId: number, columnId: number, newName: string): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
@@ -1129,6 +1164,48 @@ export async function deleteEntry(registerId: number, entryId: number): Promise<
     reg.entryCount = reg.entries.length;
     await saveRegDocImmediate(reg);
     await logAction(reg.businessId, 'Delete Row', `Deleted a row from "${reg.name}"`, { registerId, registerName: reg.name });
+  });
+}
+
+/**
+ * Restore a previously deleted entry at its original index, preserving the original ID and data.
+ * Used by undo to exactly reconstruct deleted rows.
+ */
+export async function restoreEntry(registerId: number, entry: Entry, originalIndex?: number): Promise<Entry> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    // Insert at original position if provided, otherwise append
+    if (originalIndex !== undefined && originalIndex >= 0 && originalIndex <= reg.entries.length) {
+      reg.entries.splice(originalIndex, 0, entry);
+    } else {
+      reg.entries.push(entry);
+    }
+    reg.entryCount = reg.entries.length;
+    reg.updatedAt = new Date().toISOString();
+    await saveRegDocImmediate(reg);
+    return entry;
+  });
+}
+
+/**
+ * Restore multiple previously deleted entries, preserving original IDs and data.
+ * Entries are inserted in their original order. Used by undo for bulk delete.
+ */
+export async function bulkRestoreEntries(registerId: number, entries: { entry: Entry; index: number }[]): Promise<void> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    // Sort by index ascending so we insert in the right order
+    const sorted = [...entries].sort((a, b) => a.index - b.index);
+    for (const { entry, index } of sorted) {
+      if (index >= 0 && index <= reg.entries.length) {
+        reg.entries.splice(index, 0, entry);
+      } else {
+        reg.entries.push(entry);
+      }
+    }
+    reg.entryCount = reg.entries.length;
+    reg.updatedAt = new Date().toISOString();
+    await saveRegDocImmediate(reg);
   });
 }
 

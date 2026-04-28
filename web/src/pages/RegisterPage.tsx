@@ -7,6 +7,7 @@ import {
   duplicateColumn, moveColumn, reorderColumn, changeColumnType, clearColumnData, insertColumn, updateColumnWidth,
   freezeColumn, hideColumn,
   addEntry, updateEntry, deleteEntry, duplicateEntry, bulkDeleteEntries,
+  restoreEntry, bulkRestoreEntries, restoreColumn,
   addPage, renamePage, deletePage,
   evaluateFormula,
   generateShareLink, addSharedUser, removeSharedUser,
@@ -18,9 +19,10 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
   Plus, ChevronDown, Calendar,
-  Hash, FlaskConical, ChevronRight, Pin, IndianRupee,
+  Hash, FlaskConical, Pin, IndianRupee,
   Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
-  Search, Filter, Eye, Trash2, FileText, Download, ListOrdered, Maximize2, AlertCircle
+  Search, Filter, Eye, Trash2, FileText, Download, ListOrdered, Maximize2, AlertCircle,
+  Undo2, Redo2, X
 } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { RegisterHeader } from '../components/register/RegisterHeader';
@@ -89,6 +91,7 @@ export default function RegisterPage() {
 
   // ── State ──
   const [search, setSearch] = useState(() => localStorage.getItem(`rb_search_${registerId}`) || '');
+  const [searchExpanded, setSearchExpanded] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(() => {
     const saved = localStorage.getItem(`rb_page_${registerId}`);
     return saved ? parseInt(saved, 10) : 0;
@@ -117,6 +120,7 @@ export default function RegisterPage() {
   const isDraggingCol = useRef(false);
   const [activeModalColId, setActiveModalColId] = useState<number | null>(null);
   const [filterModal, setFilterModal] = useState(false);
+  const filterWrapperRef = useRef<HTMLDivElement>(null);
   const [dateModal, setDateModal] = useState(false);
   const [dropdownModal, setDropdownModal] = useState(false);
   const [shareModal, setShareModal] = useState(false);
@@ -211,9 +215,7 @@ export default function RegisterPage() {
     isHistoryAction.current = true;
     try {
       if (action.type === 'EDIT_CELL') {
-        await updateEntry(registerId, action.entryId, { [action.columnId]: action.oldValue });
-        
-        // Update local state and cache
+        // Optimistic local update first for instant feedback
         const patch = (prev: any) => prev.map((e: any) => 
           e.id === action.entryId ? { ...e, cells: { ...e.cells, [action.columnId]: action.oldValue } } : e
         );
@@ -223,12 +225,14 @@ export default function RegisterPage() {
           return { ...old, entries: patch(old.entries) };
         });
 
+        // Persist in background
+        await updateEntry(registerId, action.entryId, { [action.columnId]: action.oldValue });
         redoStack.current.push(action);
         toast.success('Undone cell edit');
+
       } else if (action.type === 'BULK_EDIT_CELLS') {
         const updates: Record<string, string> = {};
         action.changes.forEach((c: any) => { updates[c.columnId] = c.oldValue; });
-        await updateEntry(registerId, action.entryId, updates);
 
         const patch = (prev: any) => prev.map((e: any) => 
           e.id === action.entryId ? { ...e, cells: { ...e.cells, ...updates } } : e
@@ -239,21 +243,24 @@ export default function RegisterPage() {
           return { ...old, entries: patch(old.entries) };
         });
 
+        await updateEntry(registerId, action.entryId, updates);
         redoStack.current.push(action);
         toast.success('Undone bulk edit');
+
       } else if (action.type === 'REORDER_COLUMN') {
         await reorderColumn(registerId, action.columnId, action.oldIndex);
         queryClient.invalidateQueries({ queryKey: ['register', registerId] });
         redoStack.current.push(action);
         toast.success('Undone column move');
+
       } else if (action.type === 'RENAME_COLUMN') {
         await renameColumn(registerId, action.columnId, action.oldName);
         queryClient.invalidateQueries({ queryKey: ['register', registerId] });
         redoStack.current.push(action);
         toast.success('Undone rename');
+
       } else if (action.type === 'ADD_ENTRY') {
-        await deleteEntry(registerId, action.entryId);
-        
+        // Optimistic remove from local state
         setLocalEntries(prev => prev.filter(e => e.id !== action.entryId));
         queryClient.setQueryData(['register', registerId], (old: any) => {
           if (!old) return old;
@@ -261,24 +268,76 @@ export default function RegisterPage() {
           return { ...old, entries, entryCount: entries.length };
         });
 
+        await deleteEntry(registerId, action.entryId);
         redoStack.current.push(action);
         toast.success('Undone row addition');
+
       } else if (action.type === 'DELETE_ENTRY') {
-        const restored = await addEntry(registerId, action.entry.cells, action.entry.pageIndex);
-        // Note: restored entry will have a new ID. We should ideally update future history actions 
-        // that might refer to the old ID, but for now we'll just restore it.
-        
-        // To make redo work for DELETE_ENTRY, we'd need to store the new ID.
-        const redoAction = { ...action, newEntryId: restored.id };
-        redoStack.current.push(redoAction);
-        
-        // Re-fetch to ensure order is correct and IDs are synced
-        queryClient.invalidateQueries({ queryKey: ['register', registerId] });
-        toast.success('Undone row deletion');
+        // Restore entry at its original position with exact same ID and data
+        const entryToRestore = { ...action.entry };
+
+        // Optimistic: insert back into local state at original index
+        setLocalEntries(prev => {
+          const next = [...prev];
+          const idx = Math.min(action.index ?? next.length, next.length);
+          next.splice(idx, 0, entryToRestore);
+          return next;
+        });
+        queryClient.setQueryData(['register', registerId], (old: any) => {
+          if (!old) return old;
+          const entries = [...old.entries];
+          const idx = Math.min(action.index ?? entries.length, entries.length);
+          entries.splice(idx, 0, entryToRestore);
+          return { ...old, entries, entryCount: entries.length };
+        });
+
+        // Persist using restoreEntry which keeps the original ID
+        await restoreEntry(registerId, entryToRestore, action.index);
+        redoStack.current.push(action);
+        toast.success('Restored deleted row');
+
+      } else if (action.type === 'BULK_DELETE_ENTRIES') {
+        // Restore all deleted entries at their original positions
+        const entriesToRestore: { entry: Entry; index: number }[] = action.entries;
+
+        // Optimistic: re-insert all entries
+        setLocalEntries(prev => {
+          const next = [...prev];
+          const sorted = [...entriesToRestore].sort((a, b) => a.index - b.index);
+          for (const { entry, index } of sorted) {
+            const idx = Math.min(index, next.length);
+            next.splice(idx, 0, entry);
+          }
+          return next;
+        });
+        queryClient.setQueryData(['register', registerId], (old: any) => {
+          if (!old) return old;
+          const entries = [...old.entries];
+          const sorted = [...entriesToRestore].sort((a, b) => a.index - b.index);
+          for (const { entry, index } of sorted) {
+            const idx = Math.min(index, entries.length);
+            entries.splice(idx, 0, entry);
+          }
+          return { ...old, entries, entryCount: entries.length };
+        });
+
+        await bulkRestoreEntries(registerId, entriesToRestore);
+        redoStack.current.push(action);
+        toast.success(`Restored ${entriesToRestore.length} deleted rows`);
+
+      } else if (action.type === 'DELETE_COLUMN') {
+        // Restore column definition + all cell data for that column
+        const restoredReg = await restoreColumn(registerId, action.column, action.cellData);
+        queryClient.setQueryData(['register', registerId], restoredReg);
+        setLocalEntries(restoredReg.entries || []);
+        redoStack.current.push(action);
+        toast.success(`Restored column "${action.column.name}"`);
       }
     } catch (err) {
       console.error('Undo failed:', err);
       toast.error('Failed to undo');
+      // Re-fetch to recover from any partial state
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
     } finally {
       isHistoryAction.current = false;
     }
@@ -294,8 +353,6 @@ export default function RegisterPage() {
     isHistoryAction.current = true;
     try {
       if (action.type === 'EDIT_CELL') {
-        await updateEntry(registerId, action.entryId, { [action.columnId]: action.newValue });
-        
         const patch = (prev: any) => prev.map((e: any) => 
           e.id === action.entryId ? { ...e, cells: { ...e.cells, [action.columnId]: action.newValue } } : e
         );
@@ -305,12 +362,13 @@ export default function RegisterPage() {
           return { ...old, entries: patch(old.entries) };
         });
 
+        await updateEntry(registerId, action.entryId, { [action.columnId]: action.newValue });
         undoStack.current.push(action);
         toast.success('Redone cell edit');
+
       } else if (action.type === 'BULK_EDIT_CELLS') {
         const updates: Record<string, string> = {};
         action.changes.forEach((c: any) => { updates[c.columnId] = c.newValue; });
-        await updateEntry(registerId, action.entryId, updates);
 
         const patch = (prev: any) => prev.map((e: any) => 
           e.id === action.entryId ? { ...e, cells: { ...e.cells, ...updates } } : e
@@ -321,50 +379,88 @@ export default function RegisterPage() {
           return { ...old, entries: patch(old.entries) };
         });
 
+        await updateEntry(registerId, action.entryId, updates);
         undoStack.current.push(action);
         toast.success('Redone bulk edit');
+
       } else if (action.type === 'REORDER_COLUMN') {
         await reorderColumn(registerId, action.columnId, action.newIndex);
         queryClient.invalidateQueries({ queryKey: ['register', registerId] });
         undoStack.current.push(action);
         toast.success('Redone column move');
+
       } else if (action.type === 'RENAME_COLUMN') {
         await renameColumn(registerId, action.columnId, action.newName);
         queryClient.invalidateQueries({ queryKey: ['register', registerId] });
         undoStack.current.push(action);
         toast.success('Redone rename');
+
       } else if (action.type === 'ADD_ENTRY') {
-        // Redo adding a row: we need to re-add it. 
-        // If we deleted it during undo, we just add it back.
-        const newEntry = await addEntry(registerId, {}, action.pageIndex);
-        // Update the action with the new ID for future undo
-        action.entryId = newEntry.id;
+        // Redo adding a row — use restoreEntry to keep the same ID
+        const restoredEntry = action.restoredEntry;
+        if (restoredEntry) {
+          setLocalEntries(prev => [...prev, restoredEntry]);
+          queryClient.setQueryData(['register', registerId], (old: any) => {
+            if (!old) return old;
+            return { ...old, entries: [...old.entries, restoredEntry], entryCount: old.entries.length + 1 };
+          });
+          await restoreEntry(registerId, restoredEntry);
+        } else {
+          const newEntry = await addEntry(registerId, {}, action.pageIndex);
+          action.entryId = newEntry.id;
+          queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+        }
         undoStack.current.push(action);
-        
-        queryClient.invalidateQueries({ queryKey: ['register', registerId] });
         toast.success('Redone row addition');
+
       } else if (action.type === 'DELETE_ENTRY') {
-        // Redo deleting a row: use the ID from the restore or the original
-        const idToDelete = action.newEntryId || action.entry.id;
-        await deleteEntry(registerId, idToDelete);
-        
-        setLocalEntries(prev => prev.filter(e => e.id !== idToDelete));
+        const entryId = action.entry.id;
+
+        // Optimistic remove
+        setLocalEntries(prev => prev.filter(e => e.id !== entryId));
         queryClient.setQueryData(['register', registerId], (old: any) => {
           if (!old) return old;
-          const entries = old.entries.filter((e: any) => e.id !== idToDelete);
+          const entries = old.entries.filter((e: any) => e.id !== entryId);
           return { ...old, entries, entryCount: entries.length };
         });
 
+        await deleteEntry(registerId, entryId);
         undoStack.current.push(action);
         toast.success('Redone row deletion');
+
+      } else if (action.type === 'BULK_DELETE_ENTRIES') {
+        const entryIds = action.entries.map((e: any) => e.entry.id);
+
+        // Optimistic remove
+        const idSet = new Set(entryIds);
+        setLocalEntries(prev => prev.filter(e => !idSet.has(e.id)));
+        queryClient.setQueryData(['register', registerId], (old: any) => {
+          if (!old) return old;
+          const entries = old.entries.filter((e: any) => !idSet.has(e.id));
+          return { ...old, entries, entryCount: entries.length };
+        });
+
+        await bulkDeleteEntries(registerId, entryIds);
+        undoStack.current.push(action);
+        toast.success(`Redone deletion of ${entryIds.length} rows`);
+
+      } else if (action.type === 'DELETE_COLUMN') {
+        // Re-delete the column
+        const updatedReg = await deleteColumn(registerId, action.column.id);
+        queryClient.setQueryData(['register', registerId], updatedReg);
+        setLocalEntries(updatedReg.entries || []);
+        undoStack.current.push(action);
+        toast.success(`Redone column deletion`);
       }
     } catch (err) {
       console.error('Redo failed:', err);
       toast.error('Failed to redo');
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
     } finally {
       isHistoryAction.current = false;
     }
   }, [registerId, queryClient]);
+
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -761,6 +857,27 @@ export default function RegisterPage() {
 
   const deleteColumnMutation = useMutation({
     mutationFn: (colId: number) => deleteColumn(registerId, colId),
+    onMutate: async (colId) => {
+      // Capture the full column definition + all cell data before deletion for undo
+      const regData = queryClient.getQueryData(['register', registerId]) as any;
+      if (regData) {
+        const col = regData.columns?.find((c: any) => c.id.toString() === colId.toString());
+        if (col) {
+          const cellData: Record<string, string> = {};
+          const colIdStr = colId.toString();
+          (regData.entries || []).forEach((e: any) => {
+            if (e.cells?.[colIdStr] !== undefined && e.cells[colIdStr] !== '') {
+              cellData[e.id.toString()] = e.cells[colIdStr];
+            }
+          });
+          pushToUndoStack({
+            type: 'DELETE_COLUMN',
+            column: { ...col },
+            cellData,
+          });
+        }
+      }
+    },
     onSuccess: (updatedReg) => {
       queryClient.setQueryData(['register', registerId], updatedReg);
       queryClient.invalidateQueries({ queryKey: ['register', registerId] });
@@ -1365,11 +1482,15 @@ export default function RegisterPage() {
   const deleteEntryMutation = useMutation({
     mutationFn: (entryId: number) => deleteEntry(registerId, entryId),
     onMutate: async (entryId) => {
-      // Capture entry for undo before it's deleted
+      // Deep-clone entry + cells for undo — ensures data survives state mutations
       const entry = localEntries.find(e => e.id === entryId);
       const index = localEntries.findIndex(e => e.id === entryId);
       if (entry) {
-        pushToUndoStack({ type: 'DELETE_ENTRY', entry, index });
+        pushToUndoStack({
+          type: 'DELETE_ENTRY',
+          entry: { ...entry, cells: { ...entry.cells } },
+          index,
+        });
       }
     },
     onSuccess: (_data, entryId) => {
@@ -1397,6 +1518,19 @@ export default function RegisterPage() {
 
   const bulkDeleteMutation = useMutation({
     mutationFn: () => bulkDeleteEntries(registerId, Array.from(selectedRows)),
+    onMutate: async () => {
+      // Capture all selected entries with their indices for undo
+      const deletedIds = Array.from(selectedRows);
+      const capturedEntries: { entry: Entry; index: number }[] = [];
+      localEntries.forEach((e, idx) => {
+        if (deletedIds.includes(e.id)) {
+          capturedEntries.push({ entry: { ...e, cells: { ...e.cells } }, index: idx });
+        }
+      });
+      if (capturedEntries.length > 0) {
+        pushToUndoStack({ type: 'BULK_DELETE_ENTRIES', entries: capturedEntries });
+      }
+    },
     onSuccess: () => {
       const deletedIds = Array.from(selectedRows);
       queryClient.setQueryData(['register', registerId], (old: any) => {
@@ -2268,9 +2402,13 @@ export default function RegisterPage() {
 
   if (isLoading) return (
     <div className="content-area">
-      <div className="center-loader">
-        <div className="spinner dark spinner-large" />
-        <span className="center-loader-text">Loading register…</span>
+      <div className="book-loader-wrapper">
+        <div className="book-loader">
+          <div className="page" />
+          <div className="page" />
+          <div className="page" />
+        </div>
+        <span className="center-loader-text" style={{ marginTop: '20px' }}>Loading register…</span>
       </div>
     </div>
   );
@@ -2305,10 +2443,24 @@ export default function RegisterPage() {
             >
               <FileText size={11} style={{ flexShrink: 0 }} />
               {page.name}
+              {pages.length > 1 && (
+                <span
+                  className="page-tab-close"
+                  title={`Delete ${page.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm(`Delete "${page.name}" and all its rows?`)) {
+                      deletePageMutation.mutate(page.id);
+                    }
+                  }}
+                >
+                  <X size={11} />
+                </span>
+              )}
             </button>
           ))}
-          <button className="page-add-btn" onClick={() => addPageMutation.mutate()}>
-            <Plus size={12} /> Add Page
+          <button className="page-add-btn" onClick={() => addPageMutation.mutate()} title="Add Page" aria-label="Add Page">
+            <Plus size={14} />
           </button>
 
           <div className="pab-divider" />
@@ -2333,34 +2485,72 @@ export default function RegisterPage() {
 
           <div className="pab-divider" />
 
-          {/* Expandable search */}
-          <div className={`pab-search${search ? ' open' : ''}`} id="pab-search-wrap">
+          {/* Search — icon-only, expands on click */}
+          <div className={`pab-search${search || searchExpanded ? ' open' : ''}`} id="pab-search-wrap">
             <input
               id="pab-search-input"
               className="pab-search-input"
               placeholder="Search rows…"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Escape') setSearch(''); }}
+              onKeyDown={e => { if (e.key === 'Escape') { setSearch(''); setSearchExpanded(false); } }}
+              onBlur={() => { if (!search) setSearchExpanded(false); }}
             />
             <button
-              className={`pab-icon-btn${search ? ' active' : ''}`}
+              className="pab-icon-btn"
               title="Search" aria-label="Search rows"
-              onClick={() => { (document.getElementById('pab-search-input') as HTMLInputElement)?.focus(); }}
+              onClick={() => {
+                setSearchExpanded(prev => !prev);
+                setTimeout(() => (document.getElementById('pab-search-input') as HTMLInputElement)?.focus(), 60);
+              }}
             >
               <Search size={13} />
             </button>
           </div>
 
-          {/* Filter */}
+          {/* Filter — highlighted button + inline dropdown panel */}
+          <div className="pab-filter-wrapper" ref={filterWrapperRef}>
+            <button
+              className={`pab-filter-btn${activeFilters.length > 0 ? ' active' : ''}`}
+              title={`Filter${activeFilters.length > 0 ? ` (${activeFilters.length} active)` : ''}`}
+              onClick={() => {
+                if (!filterModal) setFilters(activeFilters.length ? [...activeFilters] : []);
+                setFilterModal(prev => !prev);
+              }}
+              aria-label="Filter"
+            >
+              <Filter size={14} />
+              {activeFilters.length > 0 && <span className="pab-filter-count">{activeFilters.length}</span>}
+            </button>
+            <FilterModal
+              filterModal={filterModal} setFilterModal={setFilterModal}
+              filters={filters} setFilters={setFilters} setActiveFilters={setActiveFilters}
+              columns={columns}
+            />
+          </div>
+
+          <div className="pab-divider" />
+
+          {/* Undo */}
           <button
-            className={`pab-icon-btn${activeFilters.length > 0 ? ' active' : ''}`}
-            title={`Filter${activeFilters.length > 0 ? ` (${activeFilters.length})` : ''}`}
-            onClick={() => { setFilters(activeFilters.length ? [...activeFilters] : []); setFilterModal(true); }}
-            aria-label="Filter"
+            className={`pab-history-btn${undoStack.current.length > 0 ? '' : ' disabled'}`}
+            title={`Undo${undoStack.current.length > 0 ? ` (${undoStack.current.length})` : ''} — Ctrl+Z`}
+            onClick={undo}
+            aria-label="Undo"
           >
-            <Filter size={13} />
-            {activeFilters.length > 0 && <span className="pab-badge">{activeFilters.length}</span>}
+            <Undo2 size={14} />
+            {undoStack.current.length > 0 && <span className="pab-history-count">{undoStack.current.length}</span>}
+          </button>
+
+          {/* Redo */}
+          <button
+            className={`pab-history-btn${redoStack.current.length > 0 ? '' : ' disabled'}`}
+            title={`Redo${redoStack.current.length > 0 ? ` (${redoStack.current.length})` : ''} — Ctrl+Y`}
+            onClick={redo}
+            aria-label="Redo"
+          >
+            <Redo2 size={14} />
+            {redoStack.current.length > 0 && <span className="pab-history-count">{redoStack.current.length}</span>}
           </button>
 
           {/* Show hidden */}
@@ -2385,17 +2575,6 @@ export default function RegisterPage() {
 
 
 
-      {/* ── Guidance Banner ── */}
-      {displayEntries.length === 0 && columns.length > 0 && (
-        <div className="guidance-banner" onClick={() => addEntryMutation.mutate()}>
-          <div className="guidance-icon"><Plus size={20} /></div>
-          <div>
-            <div className="guidance-title">Ready to enter data!</div>
-            <div className="guidance-sub">Click to add your first row</div>
-          </div>
-          <div className="guidance-add"><ChevronRight size={18} /></div>
-        </div>
-      )}
 
       {/* ── Dynamic Column Widths ── */}
       <style>{`
@@ -2634,11 +2813,6 @@ export default function RegisterPage() {
         entries={localEntries}
       />
 
-      <FilterModal 
-        filterModal={filterModal} setFilterModal={setFilterModal}
-        filters={filters} setFilters={setFilters} setActiveFilters={setActiveFilters}
-        columns={columns}
-      />
 
       <ShareModal 
         shareModal={shareModal} setShareModal={setShareModal}

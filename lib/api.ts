@@ -86,6 +86,7 @@ export async function createBusiness(name: string): Promise<Business> {
 export interface RegisterSummary {
   id: number;
   businessId: number;
+  folderId?: number;
   name: string;
   icon: string;
   iconColor?: string;
@@ -105,6 +106,7 @@ export interface Column {
   position: number;
   dropdownOptions?: string[];  // For dropdown-type columns
   formula?: string;            // For formula-type columns, e.g. "{Marks}/{Full Marks}*100"
+  width?: number;              // Persisted column width
 }
 
 export interface Entry {
@@ -776,6 +778,57 @@ export async function bulkDeleteEntries(registerId: number, entryIds: number[]):
   reg.entryCount = reg.entries.length;
 }
 
+// ==================== RESTORE (UNDO SUPPORT) ====================
+export async function restoreEntry(registerId: number, entry: Entry, originalIndex: number): Promise<Entry> {
+  await delay(100);
+  const reg = DB.registers.find((r) => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+
+  const insertAt = Math.min(originalIndex, reg.entries.length);
+  reg.entries.splice(insertAt, 0, entry);
+  reg.entryCount = reg.entries.length;
+  return entry;
+}
+
+export async function bulkRestoreEntries(registerId: number, entries: { entry: Entry; originalIndex: number }[]): Promise<void> {
+  await delay(200);
+  const reg = DB.registers.find((r) => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+
+  // Sort by originalIndex ascending so splice positions stay correct
+  const sorted = [...entries].sort((a, b) => a.originalIndex - b.originalIndex);
+  for (const { entry, originalIndex } of sorted) {
+    const insertAt = Math.min(originalIndex, reg.entries.length);
+    reg.entries.splice(insertAt, 0, entry);
+  }
+  reg.entryCount = reg.entries.length;
+}
+
+export async function restoreColumn(
+  registerId: number,
+  column: Column,
+  cellData: Record<string, string>,
+): Promise<void> {
+  await delay(200);
+  const reg = DB.registers.find((r) => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+
+  // Splice at exact original position
+  const insertAt = Math.min(column.position, reg.columns.length);
+  reg.columns.splice(insertAt, 0, column);
+  reg.columns.forEach((c, i) => c.position = i);
+
+  // Restore cell data across all entries
+  const colIdStr = column.id.toString();
+  reg.entries.forEach(e => {
+    const val = cellData[e.id.toString()];
+    if (val !== undefined) {
+      if (!e.cells) e.cells = {};
+      e.cells[colIdStr] = val;
+    }
+  });
+}
+
 // ==================== NEW: PAGES ====================
 export async function addPage(registerId: number, pageName?: string): Promise<Page> {
   await delay(200);
@@ -930,4 +983,136 @@ export async function getDashboardSummary(businessId: number): Promise<Dashboard
     recentRegisters: regs.slice(0, 5),
     categoryBreakdown: [],
   };
+}
+
+// ==================== FOLDERS ====================
+export interface Folder {
+  id: number;
+  businessId: number;
+  name: string;
+  createdAt: string;
+}
+
+let folders: Folder[] = [];
+
+export async function listFolders(businessId: number): Promise<Folder[]> {
+  await delay(200);
+  return folders.filter(f => f.businessId === businessId);
+}
+
+export async function createFolder(businessId: number, name: string): Promise<Folder> {
+  await delay(200);
+  const folder: Folder = { id: Date.now(), businessId, name, createdAt: new Date().toISOString() };
+  folders.push(folder);
+  await logAction(businessId, 'Create Folder', `Created folder: ${name}`);
+  return folder;
+}
+
+export async function deleteFolder(folderId: number): Promise<void> {
+  await delay(200);
+  const folder = folders.find(f => f.id === folderId);
+  folders = folders.filter(f => f.id !== folderId);
+  // Unassign registers from deleted folder
+  DB.registers.forEach(r => {
+    if ((r as any).folderId === folderId) delete (r as any).folderId;
+  });
+  if (folder) await logAction(folder.businessId, 'Delete Folder', `Deleted folder: ${folder.name}`);
+}
+
+export async function renameFolder(folderId: number, newName: string): Promise<Folder> {
+  await delay(200);
+  const folder = folders.find(f => f.id === folderId);
+  if (!folder) throw new Error('Folder not found');
+  const oldName = folder.name;
+  folder.name = newName;
+  await logAction(folder.businessId, 'Rename Folder', `Renamed folder from "${oldName}" to "${newName}"`);
+  return folder;
+}
+
+export async function moveRegisterToFolder(registerId: number, folderId: number | null): Promise<void> {
+  await delay(200);
+  const reg = DB.registers.find(r => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+  if (folderId === null) {
+    delete (reg as any).folderId;
+  } else {
+    (reg as any).folderId = folderId;
+  }
+}
+
+// ==================== COLUMN WIDTH & REORDER ====================
+export async function updateColumnWidth(registerId: number, columnId: number, width: number): Promise<Column> {
+  await delay(100);
+  const reg = DB.registers.find(r => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+  const col = reg.columns.find(c => c.id === columnId);
+  if (!col) throw new Error('Column not found');
+  (col as any).width = width;
+  return col;
+}
+
+export async function reorderColumn(registerId: number, columnId: number, targetIndex: number): Promise<Column[]> {
+  await delay(200);
+  const reg = DB.registers.find(r => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+  const idx = reg.columns.findIndex(c => c.id === columnId);
+  if (idx === -1) throw new Error('Column not found');
+  const [col] = reg.columns.splice(idx, 1);
+  reg.columns.splice(targetIndex, 0, col);
+  reg.columns.forEach((c, i) => c.position = i);
+  return reg.columns;
+}
+
+// ==================== ENTRIES ORDER ====================
+export async function updateEntriesOrder(registerId: number, sortedEntries: Entry[]): Promise<void> {
+  await delay(200);
+  const reg = DB.registers.find(r => r.id === registerId);
+  if (!reg) throw new Error('Register not found');
+  // Replace entries for the given page with sorted order
+  const otherEntries = reg.entries.filter(e => !sortedEntries.find(s => s.id === e.id));
+  reg.entries = [...otherEntries, ...sortedEntries.map((e, i) => ({ ...e, rowNumber: i + 1 }))];
+}
+
+// ==================== HISTORY / AUDIT LOG ====================
+export interface HistoryEntry {
+  id: number;
+  businessId: number;
+  action: string;
+  details: string;
+  timestamp: string;
+  userName?: string;
+  registerName?: string;
+  registerId?: number;
+}
+
+let historyLog: HistoryEntry[] = [];
+
+export async function logAction(
+  businessId: number,
+  action: string,
+  details: string,
+  meta?: { registerId?: number; registerName?: string }
+): Promise<void> {
+  const entry: HistoryEntry = {
+    id: Date.now() + Math.floor(Math.random() * 1000),
+    businessId,
+    action,
+    details,
+    timestamp: new Date().toISOString(),
+    userName: 'Test User',
+    ...meta,
+  };
+  historyLog.unshift(entry);
+}
+
+export async function listHistory(businessId: number): Promise<HistoryEntry[]> {
+  await delay(300);
+  return historyLog
+    .filter(h => h.businessId === businessId)
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+// ==================== UTILITIES ====================
+export function saveToStorage(): boolean {
+  return true; // No-op — data lives in memory
 }

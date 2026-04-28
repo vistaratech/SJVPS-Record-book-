@@ -25,6 +25,14 @@ export interface TemplateColumn {
   dropdownOptions?: string[];
 }
 
+export const DEFAULT_BLANK_COLUMNS: TemplateColumn[] = [
+  { name: 'Column 1', type: 'text' },
+  { name: 'Column 2', type: 'text' },
+  { name: 'Column 3', type: 'text' },
+  { name: 'Column 4', type: 'text' },
+  { name: 'Column 5', type: 'text' },
+];
+
 export interface Template {
   name: string;
   columns: TemplateColumn[];

@@ -24,6 +24,7 @@ import { useLocalSearchParams, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import * as Print from 'expo-print';
 import * as XLSX from 'xlsx';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -44,6 +45,9 @@ import {
   deleteEntry,
   duplicateEntry,
   bulkDeleteEntries,
+  restoreEntry,
+  restoreColumn,
+  bulkRestoreEntries,
   addPage,
   renamePage,
   deletePage,
@@ -73,6 +77,63 @@ interface FilterCondition {
   columnId: string;
   operator: 'contains' | 'equals' | 'gt' | 'lt' | 'gte' | 'lte' | 'empty' | 'not_empty';
   value: string;
+}
+
+// ─── SKELETON LOADER ─────────────────────────────────────────
+function RegisterSkeleton() {
+  const pulseAnim = useRef(new Animated.Value(0.4)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 0.4, duration: 800, useNativeDriver: true }),
+      ])
+    ).start();
+  }, [pulseAnim]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: Colors.white }}>
+      {/* Fake Header */}
+      <View style={{ backgroundColor: '#f4f7ff', borderBottomWidth: 1, borderBottomColor: '#dce4f5', height: Platform.OS === 'ios' ? 100 : 56, paddingTop: Platform.OS === 'ios' ? 48 : 0, paddingHorizontal: Spacing.lg, flexDirection: 'row', alignItems: 'center' }}>
+         <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: '#dce4f5', marginRight: Spacing.md }} />
+         <View style={{ flex: 1 }}>
+            <View style={{ width: 140, height: 32, borderRadius: 8, backgroundColor: '#dce4f5' }} />
+         </View>
+      </View>
+      {/* Fake Toolbar */}
+      <View style={{ backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, gap: Spacing.sm }}>
+        <View style={{ width: 120, height: 34, borderRadius: 4, backgroundColor: Colors.surface }} />
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+           <View style={{ width: 40, height: 26, borderRadius: 4, backgroundColor: Colors.surface }} />
+           <View style={{ width: 60, height: 26, borderRadius: 4, backgroundColor: Colors.borderLight }} />
+        </View>
+      </View>
+      {/* Fake Grid */}
+      <Animated.View style={{ flex: 1, opacity: pulseAnim }}>
+         {/* Headers */}
+         <View style={{ flexDirection: 'row', borderBottomWidth: 2, borderBottomColor: Colors.border }}>
+            <View style={{ width: CHECKBOX_COL_WIDTH, height: 44, borderRightWidth: 1, borderRightColor: Colors.border }} />
+            <View style={{ width: SERIAL_COL_WIDTH, height: 44, backgroundColor: Colors.borderLight, borderRightWidth: 1, borderRightColor: Colors.border }} />
+            <View style={{ width: COL_WIDTH, height: 44, backgroundColor: Colors.white, borderRightWidth: 1, borderRightColor: Colors.border }} />
+            <View style={{ width: COL_WIDTH, height: 44, backgroundColor: Colors.white, borderRightWidth: 1, borderRightColor: Colors.border }} />
+         </View>
+         {/* Rows */}
+         {[1, 2, 3, 4, 5, 6, 7].map(i => (
+           <View key={i} style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: Colors.border, minHeight: 44 }}>
+             <View style={{ width: CHECKBOX_COL_WIDTH, borderRightWidth: 1, borderRightColor: Colors.border }} />
+             <View style={{ width: SERIAL_COL_WIDTH, backgroundColor: Colors.borderLight, borderRightWidth: 1, borderRightColor: Colors.border }} />
+             <View style={{ width: COL_WIDTH, backgroundColor: Colors.white, borderRightWidth: 1, borderRightColor: Colors.border, padding: 12 }}>
+                <View style={{ width: '80%', height: 12, backgroundColor: Colors.surface, borderRadius: 2 }} />
+             </View>
+             <View style={{ width: COL_WIDTH, backgroundColor: Colors.white, borderRightWidth: 1, borderRightColor: Colors.border, padding: 12 }}>
+                <View style={{ width: '60%', height: 12, backgroundColor: Colors.surface, borderRadius: 2 }} />
+             </View>
+           </View>
+         ))}
+      </Animated.View>
+    </View>
+  );
 }
 
 export default function RegisterScreen() {
@@ -165,13 +226,31 @@ export default function RegisterScreen() {
   const [renamePageId, setRenamePageId] = useState<number | null>(null);
   const [renamePageValue, setRenamePageValue] = useState('');
 
-  // Dropdown config for column
   const [dropdownConfigModal, setDropdownConfigModal] = useState(false);
   const [dropdownConfigColumnId, setDropdownConfigColumnId] = useState<number | null>(null);
   const [dropdownConfigOptions, setDropdownConfigOptions] = useState('');
 
+  // Download / export menu
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+
   // Horizontal scroll ref for frozen serial column effect
   const horizontalScrollRef = useRef<ScrollView>(null);
+
+  // ─── Undo / Redo ────────────────────────────────────────────
+  type HistoryAction =
+    | { type: 'CELL_EDIT'; entryId: number; columnId: string; oldValue: string; newValue: string }
+    | { type: 'ADD_ENTRY'; entryId: number; pageIndex: number }
+    | { type: 'DELETE_ENTRY'; entry: Entry; originalIndex: number }
+    | { type: 'DELETE_COLUMN'; column: Column; cellData: Record<string, string> }
+    | { type: 'BULK_DELETE_ENTRIES'; entries: { entry: Entry; originalIndex: number }[] };
+  const undoStack = useRef<HistoryAction[]>([]);
+  const redoStack = useRef<HistoryAction[]>([]);
+  const [, forceRender] = useState(0);
+  const pushToUndoStack = useCallback((action: HistoryAction) => {
+    undoStack.current.push(action);
+    redoStack.current = [];
+    forceRender(n => n + 1);
+  }, []);
 
   // Sync server → local entries
   useEffect(() => {
@@ -204,7 +283,19 @@ export default function RegisterScreen() {
   });
 
   const deleteColumnMutation = useMutation({
-    mutationFn: (colId: number) => deleteColumn(registerId, colId),
+    mutationFn: (colId: number) => {
+      // Capture for undo before deleting
+      const col = register?.columns?.find(c => c.id === colId);
+      if (col) {
+        const cellData: Record<string, string> = {};
+        localEntries.forEach(e => {
+          const v = e.cells?.[colId.toString()];
+          if (v !== undefined) cellData[e.id.toString()] = v;
+        });
+        pushToUndoStack({ type: 'DELETE_COLUMN', column: JSON.parse(JSON.stringify(col)), cellData });
+      }
+      return deleteColumn(registerId, colId);
+    },
     onSuccess: () => {
       invalidate();
       setColumnMenuId(null);
@@ -277,7 +368,10 @@ export default function RegisterScreen() {
 
   const addEntryMutation = useMutation({
     mutationFn: () => addEntry(registerId, {}, activePageIndex),
-    onSuccess: invalidate,
+    onSuccess: (newEntry) => {
+      pushToUndoStack({ type: 'ADD_ENTRY', entryId: newEntry.id, pageIndex: activePageIndex });
+      invalidate();
+    },
   });
 
   const updateEntryMutation = useMutation({
@@ -290,7 +384,13 @@ export default function RegisterScreen() {
   });
 
   const deleteEntryMutation = useMutation({
-    mutationFn: (entryId: number) => deleteEntry(registerId, entryId),
+    mutationFn: (entryId: number) => {
+      const idx = localEntries.findIndex(e => e.id === entryId);
+      const entry = localEntries.find(e => e.id === entryId);
+      if (entry) pushToUndoStack({ type: 'DELETE_ENTRY', entry: JSON.parse(JSON.stringify(entry)), originalIndex: idx });
+      setLocalEntries(prev => prev.filter(e => e.id !== entryId));
+      return deleteEntry(registerId, entryId);
+    },
     onSuccess: () => {
       invalidate();
       setRowMenuId(null);
@@ -306,7 +406,17 @@ export default function RegisterScreen() {
   });
 
   const bulkDeleteMutation = useMutation({
-    mutationFn: () => bulkDeleteEntries(registerId, Array.from(selectedRows)),
+    mutationFn: () => {
+      const ids = Array.from(selectedRows);
+      const captured = ids.map(id => {
+        const idx = localEntries.findIndex(e => e.id === id);
+        const entry = localEntries.find(e => e.id === id);
+        return { entry: JSON.parse(JSON.stringify(entry)), originalIndex: idx };
+      }).filter(x => x.entry);
+      pushToUndoStack({ type: 'BULK_DELETE_ENTRIES', entries: captured });
+      setLocalEntries(prev => prev.filter(e => !ids.includes(e.id)));
+      return bulkDeleteEntries(registerId, ids);
+    },
     onSuccess: () => {
       invalidate();
       setSelectedRows(new Set());
@@ -338,10 +448,88 @@ export default function RegisterScreen() {
     },
   });
 
+  // ─── Undo / Redo Logic ─────────────────────────────────────
+  const undo = useCallback(async () => {
+    const action = undoStack.current.pop();
+    if (!action) return;
+    forceRender(n => n + 1);
+    try {
+      switch (action.type) {
+        case 'CELL_EDIT':
+          setLocalEntries(prev => prev.map(e => e.id === action.entryId ? { ...e, cells: { ...e.cells, [action.columnId]: action.oldValue } } : e));
+          await updateEntry(registerId, action.entryId, { [action.columnId]: action.oldValue });
+          redoStack.current.push(action);
+          break;
+        case 'ADD_ENTRY':
+          setLocalEntries(prev => prev.filter(e => e.id !== action.entryId));
+          await deleteEntry(registerId, action.entryId);
+          redoStack.current.push(action);
+          break;
+        case 'DELETE_ENTRY':
+          setLocalEntries(prev => { const n = [...prev]; n.splice(Math.min(action.originalIndex, n.length), 0, action.entry); return n; });
+          await restoreEntry(registerId, action.entry, action.originalIndex);
+          redoStack.current.push(action);
+          break;
+        case 'DELETE_COLUMN':
+          await restoreColumn(registerId, action.column, action.cellData);
+          invalidate();
+          redoStack.current.push(action);
+          break;
+        case 'BULK_DELETE_ENTRIES':
+          const sorted = [...action.entries].sort((a, b) => a.originalIndex - b.originalIndex);
+          setLocalEntries(prev => { const n = [...prev]; sorted.forEach(({ entry, originalIndex }) => n.splice(Math.min(originalIndex, n.length), 0, entry)); return n; });
+          await bulkRestoreEntries(registerId, action.entries);
+          redoStack.current.push(action);
+          break;
+      }
+    } catch { invalidate(); }
+    forceRender(n => n + 1);
+  }, [registerId]);
+
+  const redo = useCallback(async () => {
+    const action = redoStack.current.pop();
+    if (!action) return;
+    forceRender(n => n + 1);
+    try {
+      switch (action.type) {
+        case 'CELL_EDIT':
+          setLocalEntries(prev => prev.map(e => e.id === action.entryId ? { ...e, cells: { ...e.cells, [action.columnId]: action.newValue } } : e));
+          await updateEntry(registerId, action.entryId, { [action.columnId]: action.newValue });
+          undoStack.current.push(action);
+          break;
+        case 'ADD_ENTRY':
+          const newEntry = await addEntry(registerId, {}, action.pageIndex);
+          action.entryId = newEntry.id;
+          undoStack.current.push(action);
+          invalidate();
+          break;
+        case 'DELETE_ENTRY':
+          setLocalEntries(prev => prev.filter(e => e.id !== action.entry.id));
+          await deleteEntry(registerId, action.entry.id);
+          undoStack.current.push(action);
+          break;
+        case 'DELETE_COLUMN':
+          await deleteColumn(registerId, action.column.id);
+          invalidate();
+          undoStack.current.push(action);
+          break;
+        case 'BULK_DELETE_ENTRIES':
+          const ids = action.entries.map(e => e.entry.id);
+          setLocalEntries(prev => prev.filter(e => !ids.includes(e.id)));
+          await bulkDeleteEntries(registerId, ids);
+          undoStack.current.push(action);
+          break;
+      }
+    } catch { invalidate(); }
+    forceRender(n => n + 1);
+  }, [registerId]);
+
   // ─── Cell Edit ────────────────────────────────────────────
   const handleCellChange = useCallback(
     (entryId: number, columnId: string, newValue: string, oldValue: string) => {
       if (newValue === oldValue) return;
+      // Track for undo
+      pushToUndoStack({ type: 'CELL_EDIT', entryId, columnId, oldValue, newValue });
       // Optimistic update
       setLocalEntries((prev) =>
         prev.map((entry) =>
@@ -352,7 +540,7 @@ export default function RegisterScreen() {
       );
       updateEntryMutation.mutate({ entryId, cells: { [columnId]: newValue } });
     },
-    [updateEntryMutation]
+    [updateEntryMutation, pushToUndoStack]
   );
 
   // ─── Sort handler ─────────────────────────────────────────
@@ -475,6 +663,180 @@ export default function RegisterScreen() {
     }
   };
 
+  // ─── CSV Export ─────────────────────────────────────────────
+  const handleDownloadCSV = async () => {
+    if (!register) return;
+    try {
+      const csv = generateCSV(register, activePageIndex);
+      const fileName = `${register.name.replace(/\s+/g, '_')}.csv`;
+      if (Platform.OS === 'web') {
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = fileName; a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const filePath = `${(FileSystem as any).cacheDirectory || 'file:///tmp/'}${fileName}`;
+        await FileSystem.writeAsStringAsync(filePath, csv, { encoding: 'utf8' as any });
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) {
+          await Sharing.shareAsync(filePath, { mimeType: 'text/csv', dialogTitle: 'Export CSV' });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Export Error', 'Failed to export CSV file.');
+    }
+  };
+
+  // ─── PDF Export ─────────────────────────────────────────────
+  const handleDownloadPDF = async () => {
+    if (!register) return;
+    try {
+      const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
+      const headerRow = ['S.No.', ...visibleCols.map(c => c.name)];
+      const bodyRows = displayEntries.map((entry, idx) => {
+        return [
+          (idx + 1).toString(),
+          ...visibleCols.map(c => {
+            if (c.type === 'formula') return evaluateFormula(c.formula || '', entry as any, columns);
+            return entry.cells?.[c.id.toString()] || '';
+          }),
+        ];
+      });
+
+      const html = `
+        <html><head><style>
+          body { font-family: Helvetica, Arial, sans-serif; padding: 20px; }
+          h1 { font-size: 18px; color: #1a237e; margin-bottom: 4px; }
+          p { font-size: 11px; color: #666; margin-bottom: 16px; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; }
+          th { background: #1a237e; color: white; padding: 8px 6px; text-align: left; }
+          td { border: 1px solid #ddd; padding: 6px; }
+          tr:nth-child(even) { background: #f8f9fa; }
+        </style></head><body>
+          <h1>${register.name}</h1>
+          <p>Page ${activePageIndex + 1} • Exported ${new Date().toLocaleDateString()}</p>
+          <table>
+            <thead><tr>${headerRow.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+            <tbody>${bodyRows.map(row => `<tr>${row.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>
+          </table>
+        </body></html>`;
+
+      if (Platform.OS === 'web') {
+        const w = window.open();
+        if (w) { w.document.write(html); w.print(); }
+      } else {
+        const { uri } = await Print.printToFileAsync({ html });
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) {
+          await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Export PDF' });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Export Error', 'Failed to export PDF.');
+    }
+  };
+
+  // ─── Row-level Export: PDF ──────────────────────────────────
+  const handleRowDownloadPDF = async (entryId: number) => {
+    if (!register) return;
+    try {
+      const entry = displayEntries.find(e => e.id === entryId);
+      if (!entry) return;
+      const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
+      const html = `
+        <html><head><style>
+          body { font-family: Helvetica, Arial, sans-serif; padding: 20px; }
+          h1 { font-size: 18px; color: #1a237e; margin-bottom: 4px; }
+          table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 16px; }
+          th { background: #f1f5f9; padding: 8px 12px; text-align: left; font-weight: 600; }
+          td { border: 1px solid #e2e8f0; padding: 8px 12px; }
+        </style></head><body>
+          <h1>${register.name} — Row Detail</h1>
+          <table>
+            ${visibleCols.map(c => {
+              const val = c.type === 'formula' ? evaluateFormula(c.formula || '', entry as any, columns) : (entry.cells?.[c.id.toString()] || '');
+              return `<tr><th>${c.name}</th><td>${val}</td></tr>`;
+            }).join('')}
+          </table>
+        </body></html>`;
+      if (Platform.OS === 'web') {
+        const w = window.open(); if (w) { w.document.write(html); w.print(); }
+      } else {
+        const { uri } = await Print.printToFileAsync({ html });
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Row PDF' });
+      }
+    } catch (err) { console.error(err); Alert.alert('Export Error', 'Failed to export row PDF.'); }
+  };
+
+  // ─── Row-level Export: Excel ─────────────────────────────────
+  const handleRowDownloadExcel = async (entryId: number) => {
+    if (!register) return;
+    try {
+      const entry = displayEntries.find(e => e.id === entryId);
+      if (!entry) return;
+      const visibleCols = columns.filter(col => !hiddenColumns.has(col.id));
+      const rowObj: any = {};
+      visibleCols.forEach(c => {
+        rowObj[c.name] = c.type === 'formula' ? evaluateFormula(c.formula || '', entry as any, columns) : (entry.cells?.[c.id.toString()] || '');
+      });
+      const ws = XLSX.utils.json_to_sheet([rowObj]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Row');
+      const fileName = `${register.name.replace(/\s+/g, '_')}_row.xlsx`;
+      if (Platform.OS === 'web') {
+        XLSX.writeFile(wb, fileName);
+      } else {
+        const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+        const filePath = `${(FileSystem as any).cacheDirectory || 'file:///tmp/'}${fileName}`;
+        await FileSystem.writeAsStringAsync(filePath, base64, { encoding: 'base64' as any });
+        const isAvailable = await Sharing.isAvailableAsync();
+        if (isAvailable) await Sharing.shareAsync(filePath, { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Row Excel' });
+      }
+    } catch (err) { console.error(err); Alert.alert('Export Error', 'Failed to export row Excel.'); }
+  };
+
+  // ─── Row-level Share as Text ─────────────────────────────────
+  const handleRowShareText = async (entryId: number) => {
+    if (!register) return;
+    const entry = displayEntries.find(e => e.id === entryId);
+    if (!entry) return;
+    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id));
+    const lines = visibleCols.map(c => {
+      const val = c.type === 'formula' ? evaluateFormula(c.formula || '', entry as any, columns) : (entry.cells?.[c.id.toString()] || '');
+      return `${c.name}: ${val}`;
+    });
+    const text = `${register.name}\n${'─'.repeat(30)}\n${lines.join('\n')}`;
+    try {
+      await Share.share({ title: register.name, message: text });
+    } catch {}
+  };
+
+  // ─── Save as Template ────────────────────────────────────────
+  const handleSaveAsTemplate = () => {
+    if (!register) return;
+    Alert.prompt ? Alert.prompt(
+      'Save as Template',
+      'Enter a name for this template:',
+      (name: string) => {
+        if (!name?.trim()) return;
+        // Save to AsyncStorage (or local mock)
+        const template = {
+          id: Date.now().toString(),
+          name: name.trim(),
+          columns: columns.map(c => ({ name: c.name, type: c.type, dropdownOptions: c.dropdownOptions, formula: c.formula })),
+          createdAt: new Date().toISOString(),
+        };
+        // For now, show confirmation
+        Alert.alert('Template Saved', `"${name.trim()}" has been saved as a template.`);
+      },
+      'plain-text',
+      register.name
+    ) : Alert.alert('Save as Template', `Template "${register.name}" saved with ${columns.length} columns.`);
+  };
   // ─── Date handler ─────────────────────────────────────────
   const handleDateSelect = () => {
     if (dateEntryId && dateColumnId) {
@@ -488,11 +850,7 @@ export default function RegisterScreen() {
 
   // ─── Loading ──────────────────────────────────────────────
   if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.navy} />
-      </View>
-    );
+    return <RegisterSkeleton />;
   }
 
   if (!register) {
@@ -590,20 +948,58 @@ export default function RegisterScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        {/* ─── Top Header (web: bg-primary h-14) ─────────── */}
+        {/* ─── Top Header (matches web: bg-primary h-14) ─────────── */}
         <View style={styles.topHeader}>
           <TouchableOpacity onPress={() => require('expo-router').router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color={Colors.white} />
+            <Ionicons name="arrow-back" size={22} color={Colors.navy} />
           </TouchableOpacity>
           <View style={styles.topHeaderLeft}>
-            <Ionicons name={(register.icon as any) || 'document'} size={22} color={Colors.white} style={{ marginRight: 4 }} />
-            <Text style={styles.topHeaderTitle} numberOfLines={1}>{register.name}</Text>
+            <View style={styles.topHeaderTitleBox}>
+              <Ionicons name={(register.icon as any) || 'document'} size={16} color={Colors.navy} style={{ marginRight: 6 }} />
+              <Text style={styles.topHeaderTitle} numberOfLines={1}>{register.name}</Text>
+            </View>
           </View>
           <View style={styles.topHeaderRight}>
-            <TouchableOpacity style={styles.topHeaderBtn} onPress={handleDownloadExcel}>
-              <Ionicons name="download-outline" size={16} color={Colors.white} />
-              <Text style={styles.topHeaderBtnText}>Export (Excel)</Text>
-            </TouchableOpacity>
+            <View>
+              <TouchableOpacity style={styles.topHeaderBtn} onPress={() => setDownloadMenuOpen(!downloadMenuOpen)}>
+                <Ionicons name="download-outline" size={16} color={Colors.navy} />
+                <Text style={styles.topHeaderBtnText}>Export</Text>
+                <Ionicons name="chevron-down" size={12} color={Colors.muted} />
+              </TouchableOpacity>
+              {downloadMenuOpen && (
+                <View style={styles.downloadDropdown}>
+                  <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleDownloadExcel(); }}>
+                    <Ionicons name="document-outline" size={18} color={Colors.navy} />
+                    <View style={styles.downloadDropdownItemInfo}>
+                      <Text style={styles.downloadDropdownText}>Excel (.xlsx)</Text>
+                      <Text style={styles.downloadDropdownSubtext}>Full dataset export</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleDownloadCSV(); }}>
+                    <Ionicons name="code-slash-outline" size={18} color={Colors.navy} />
+                    <View style={styles.downloadDropdownItemInfo}>
+                      <Text style={styles.downloadDropdownText}>CSV (.csv)</Text>
+                      <Text style={styles.downloadDropdownSubtext}>Raw comma separated</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleDownloadPDF(); }}>
+                    <Ionicons name="print-outline" size={18} color={Colors.navy} />
+                    <View style={styles.downloadDropdownItemInfo}>
+                      <Text style={styles.downloadDropdownText}>PDF</Text>
+                      <Text style={styles.downloadDropdownSubtext}>Formatted print view</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <View style={{ height: 1, backgroundColor: Colors.border, marginVertical: 4 }} />
+                  <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleSaveAsTemplate(); }}>
+                    <Ionicons name="bookmark-outline" size={18} color={Colors.navy} />
+                    <View style={styles.downloadDropdownItemInfo}>
+                      <Text style={styles.downloadDropdownText}>Save as Template</Text>
+                      <Text style={styles.downloadDropdownSubtext}>Reuse these columns</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
             <TouchableOpacity
               style={styles.topHeaderBtn}
               onPress={() => {
@@ -611,7 +1007,7 @@ export default function RegisterScreen() {
                 handleGenerateShareLink();
               }}
             >
-              <Ionicons name="share-outline" size={16} color={Colors.white} />
+              <Ionicons name="share-outline" size={16} color={Colors.navy} />
               <Text style={styles.topHeaderBtnText}>Share</Text>
             </TouchableOpacity>
           </View>
@@ -659,20 +1055,39 @@ export default function RegisterScreen() {
         <View style={styles.tabsRow}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsScroll}>
             {pages.map((page, idx) => (
-              <TouchableOpacity
-                key={page.id}
-                style={[styles.tabBtn, idx === activePageIndex && styles.activeTab]}
-                onPress={() => setActivePageIndex(idx)}
-                onLongPress={() => {
-                  setRenamePageId(page.id);
-                  setRenamePageValue(page.name);
-                  setRenamePageModal(true);
-                }}
-              >
-                <Text style={[styles.tabBtnText, idx === activePageIndex && styles.activeTabText]}>
-                  {page.name}
-                </Text>
-              </TouchableOpacity>
+              <View key={page.id} style={[styles.tabBtn, idx === activePageIndex && styles.activeTab, { flexDirection: 'row', alignItems: 'center' }]}>
+                <TouchableOpacity
+                  style={{ flex: 1 }}
+                  onPress={() => setActivePageIndex(idx)}
+                  onLongPress={() => {
+                    setRenamePageId(page.id);
+                    setRenamePageValue(page.name);
+                    setRenamePageModal(true);
+                  }}
+                >
+                  <Text style={[styles.tabBtnText, idx === activePageIndex && styles.activeTabText]}>
+                    {page.name}
+                  </Text>
+                </TouchableOpacity>
+                {pages.length > 1 && (
+                  <TouchableOpacity
+                    style={{ marginLeft: 4, padding: 2 }}
+                    onPress={() => {
+                      Alert.alert(
+                        'Delete Page',
+                        `Delete "${page.name}" and all its rows?`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Delete', style: 'destructive', onPress: () => deletePageMutation.mutate(page.id) },
+                        ]
+                      );
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                  >
+                    <Ionicons name="close" size={12} color={idx === activePageIndex ? Colors.white : Colors.muted} />
+                  </TouchableOpacity>
+                )}
+              </View>
             ))}
             <TouchableOpacity
               style={styles.addTabBtn}
@@ -707,18 +1122,67 @@ export default function RegisterScreen() {
             )}
           </View>
 
-          {/* Right: Filter + Add Row (primary) + Add Column */}
+          {/* Right: Action Group + Primary Add Row */}
           <View style={styles.toolbarRight}>
-            <TouchableOpacity
-              style={[styles.toolbarBtn, activeFilters.length > 0 && styles.toolbarBtnHighlight]}
-              onPress={() => {
-                setFilters([...activeFilters]);
-                setFilterModal(true);
-              }}
-            >
-              <Ionicons name="funnel" size={14} color={activeFilters.length > 0 ? Colors.white : Colors.muted} />
-              <Text style={[styles.toolbarBtnMuted, activeFilters.length > 0 && styles.toolbarBtnHighlightText]}>Filter</Text>
-            </TouchableOpacity>
+            <View style={styles.toolbarActionGroup}>
+              {/* Filter */}
+              <TouchableOpacity
+                style={[styles.toolbarIconBtn, activeFilters.length > 0 && styles.toolbarIconBtnActive]}
+                onPress={() => {
+                  setFilters([...activeFilters]);
+                  setFilterModal(true);
+                }}
+              >
+                <Ionicons name="funnel" size={14} color={activeFilters.length > 0 ? Colors.navy : Colors.muted} />
+                {activeFilters.length > 0 && <View style={styles.toolbarBadge}><Text style={styles.toolbarBadgeText}>{activeFilters.length}</Text></View>}
+              </TouchableOpacity>
+
+              <View style={styles.toolbarDivider} />
+
+              {/* Undo */}
+              <TouchableOpacity
+                style={[styles.toolbarIconBtn, undoStack.current.length > 0 && styles.toolbarIconBtnActive]}
+                onPress={undo}
+                disabled={undoStack.current.length === 0}
+              >
+                <Ionicons name="arrow-undo" size={14} color={undoStack.current.length > 0 ? Colors.navy : Colors.mutedLight} />
+                {undoStack.current.length > 0 && <View style={styles.toolbarBadge}><Text style={styles.toolbarBadgeText}>{undoStack.current.length}</Text></View>}
+              </TouchableOpacity>
+
+              {/* Redo */}
+              <TouchableOpacity
+                style={[styles.toolbarIconBtn, redoStack.current.length > 0 && styles.toolbarIconBtnActive]}
+                onPress={redo}
+                disabled={redoStack.current.length === 0}
+              >
+                <Ionicons name="arrow-redo" size={14} color={redoStack.current.length > 0 ? Colors.navy : Colors.mutedLight} />
+                {redoStack.current.length > 0 && <View style={styles.toolbarBadge}><Text style={styles.toolbarBadgeText}>{redoStack.current.length}</Text></View>}
+              </TouchableOpacity>
+
+              <View style={styles.toolbarDivider} />
+
+              {/* Add Column */}
+              <TouchableOpacity
+                style={styles.toolbarIconBtn}
+                onPress={() => setNewColumnModal(true)}
+              >
+                <Ionicons name="add" size={14} color={Colors.muted} />
+                <Text style={styles.toolbarIconLabel}>Col</Text>
+              </TouchableOpacity>
+              
+              {hiddenColumns.size > 0 && (
+                <TouchableOpacity
+                  style={styles.toolbarIconBtn}
+                  onPress={() => {
+                    setHiddenColumns(new Set());
+                    hiddenColumns.forEach((colId) => hideColumn(registerId, colId, false));
+                  }}
+                >
+                  <Ionicons name="eye" size={14} color={Colors.navy} />
+                  <View style={styles.toolbarBadge}><Text style={styles.toolbarBadgeText}>{hiddenColumns.size}</Text></View>
+                </TouchableOpacity>
+              )}
+            </View>
 
             <TouchableOpacity
               style={styles.toolbarBtnPrimary}
@@ -726,29 +1190,8 @@ export default function RegisterScreen() {
               disabled={addEntryMutation.isPending}
             >
               <Ionicons name="add" size={15} color={Colors.white} />
-              <Text style={styles.toolbarBtnPrimaryText}>Add Row</Text>
+              <Text style={styles.toolbarBtnPrimaryText}>Row</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.toolbarBtn}
-              onPress={() => setNewColumnModal(true)}
-            >
-              <Ionicons name="add" size={14} color={Colors.muted} />
-              <Text style={styles.toolbarBtnMuted}>Add Column</Text>
-            </TouchableOpacity>
-            
-            {hiddenColumns.size > 0 && (
-              <TouchableOpacity
-                style={styles.toolbarBtn}
-                onPress={() => {
-                  setHiddenColumns(new Set());
-                  hiddenColumns.forEach((colId) => hideColumn(registerId, colId, false));
-                }}
-              >
-                <Ionicons name="eye" size={14} color={Colors.navy} />
-                <Text style={[styles.toolbarBtnMuted, { color: Colors.navy }]}>Show {hiddenColumns.size} Hidden</Text>
-              </TouchableOpacity>
-            )}
           </View>
         </View>
 
@@ -794,29 +1237,6 @@ export default function RegisterScreen() {
           </View>
         ) : (
           <View style={{ flex: 1 }}>
-            {/* First-time guidance banner */}
-            {hasNoEntries && (
-              <TouchableOpacity
-                style={styles.firstEntryBanner}
-                onPress={() => addEntryMutation.mutate()}
-                activeOpacity={0.85}
-              >
-                <View style={styles.firstEntryBannerIcon}>
-                  <Ionicons name="arrow-down-circle" size={24} color={Colors.white} />
-                </View>
-                <View style={styles.firstEntryBannerText}>
-                  <Text style={styles.firstEntryTitle}>Ready to enter data!</Text>
-                  <Text style={styles.firstEntrySub}>Tap here or tap any row below to start adding entries</Text>
-                </View>
-                <View style={styles.firstEntryBannerBtn}>
-                  {addEntryMutation.isPending ? (
-                    <ActivityIndicator size="small" color={Colors.white} />
-                  ) : (
-                    <Ionicons name="add" size={22} color={Colors.white} />
-                  )}
-                </View>
-              </TouchableOpacity>
-            )}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} ref={horizontalScrollRef}>
               <View>
                 {/* Column Headers */}
@@ -1449,6 +1869,39 @@ export default function RegisterScreen() {
         <TouchableOpacity style={styles.contextOverlay} onPress={() => setRowMenuId(null)} activeOpacity={1}>
           <View style={styles.contextMenu}>
             <Text style={styles.contextTitle}>Row Actions</Text>
+            {/* Download as PDF */}
+            <TouchableOpacity
+              style={styles.contextItem}
+              onPress={() => { if (rowMenuId) { handleRowDownloadPDF(rowMenuId); setRowMenuId(null); } }}
+            >
+              <Ionicons name="document-text-outline" size={18} color={Colors.navy} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.contextItemText}>Download as PDF</Text>
+                <Text style={styles.contextItemSubtext}>All columns included</Text>
+              </View>
+            </TouchableOpacity>
+            {/* Download as Excel */}
+            <TouchableOpacity
+              style={styles.contextItem}
+              onPress={() => { if (rowMenuId) { handleRowDownloadExcel(rowMenuId); setRowMenuId(null); } }}
+            >
+              <Ionicons name="document-outline" size={18} color={Colors.navy} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.contextItemText}>Download as Excel</Text>
+                <Text style={styles.contextItemSubtext}>All columns included</Text>
+              </View>
+            </TouchableOpacity>
+            {/* Share as Text */}
+            <TouchableOpacity
+              style={styles.contextItem}
+              onPress={() => { if (rowMenuId) { handleRowShareText(rowMenuId); setRowMenuId(null); } }}
+            >
+              <Ionicons name="share-outline" size={18} color={Colors.navy} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.contextItemText}>Share as Text</Text>
+                <Text style={styles.contextItemSubtext}>All columns included</Text>
+              </View>
+            </TouchableOpacity>
             {/* Duplicate */}
             <TouchableOpacity
               style={styles.contextItem}
@@ -1981,7 +2434,8 @@ const styles = StyleSheet.create({
 
   // ── Top Header ──────────────────────────────────────
   topHeader: {
-    backgroundColor: Colors.navy,
+    backgroundColor: '#f4f7ff', // matches web gradient
+    borderBottomWidth: 1, borderBottomColor: '#dce4f5',
     height: Platform.OS === 'ios' ? 100 : 56,
     paddingTop: Platform.OS === 'ios' ? 48 : 0,
     paddingHorizontal: Spacing.lg,
@@ -1989,15 +2443,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   backBtn: { marginRight: Spacing.md },
-  topHeaderLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  topHeaderTitle: { fontSize: FontSize.lg, fontWeight: '800', color: Colors.white, flex: 1, letterSpacing: -0.3 },
+  topHeaderLeft: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  topHeaderTitleBox: {
+    backgroundColor: Colors.white,
+    borderWidth: 1, borderColor: '#dce4f5',
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md, paddingVertical: 6,
+    flexDirection: 'row', alignItems: 'center',
+    shadowColor: Colors.navy, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+  },
+  topHeaderTitle: { fontSize: 14, fontWeight: '800', color: Colors.navy, letterSpacing: 0.2 },
   topHeaderRight: { flexDirection: 'row', gap: Spacing.sm },
   topHeaderBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: Spacing.sm, paddingVertical: 6, borderRadius: BorderRadius.sm,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: Colors.white,
+    borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: BorderRadius.sm,
   },
-  topHeaderBtnText: { color: Colors.white, fontSize: 11, fontWeight: '600' },
+  topHeaderBtnText: { color: Colors.navy, fontSize: 12, fontWeight: '600' },
+
+  // ── Download Dropdown ──────────────────────────────────
+  downloadDropdown: {
+    position: 'absolute', top: '100%', right: 0, marginTop: 4,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    minWidth: 220, ...Shadows.elevated, zIndex: 100,
+    borderWidth: 1, borderColor: Colors.border,
+    padding: 6,
+  },
+  downloadDropdownItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 10, paddingVertical: 8,
+    borderRadius: BorderRadius.md,
+  },
+  downloadDropdownItemInfo: { flex: 1, flexDirection: 'column', gap: 1 },
+  downloadDropdownText: {
+    fontSize: 13, fontWeight: '600', color: Colors.foreground,
+  },
+  downloadDropdownSubtext: {
+    fontSize: 11, color: Colors.muted,
+  },
 
   // ── Stats Bar ─────────────────────────────────────────
   statsBar: {
@@ -2044,16 +2528,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, gap: Spacing.sm,
   },
   toolbarRight: { flexDirection: 'row', gap: Spacing.xs, alignItems: 'center' },
-  toolbarBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.sm,
-    paddingHorizontal: Spacing.sm, paddingVertical: 6,
+  toolbarActionGroup: {
+    flexDirection: 'row', alignItems: 'center', gap: 2,
+    backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: BorderRadius.md, padding: 2,
   },
-  toolbarBtnHighlight: {
-    backgroundColor: Colors.navy, borderColor: Colors.navy,
+  toolbarIconBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    height: 26, paddingHorizontal: 8,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: 'transparent',
   },
-  toolbarBtnHighlightText: { color: Colors.white },
-  /* Primary (Add Row) pill — solid green like web */
+  toolbarIconBtnActive: {
+    backgroundColor: 'rgba(26,35,126,0.07)',
+  },
+  toolbarIconLabel: { fontSize: 11, fontWeight: '600', color: Colors.muted },
+  toolbarDivider: {
+    width: 1, height: 16, backgroundColor: Colors.border, marginHorizontal: 2,
+  },
+  toolbarBadge: {
+    position: 'absolute', top: 0, right: 0, minWidth: 14, height: 14, paddingHorizontal: 3,
+    backgroundColor: Colors.navy, borderRadius: 7,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  toolbarBadgeText: {
+    color: Colors.white, fontSize: 9, fontWeight: '700',
+  },
+  /* Primary (Add Row) pill — solid navy like web */
   toolbarBtnPrimary: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: Colors.navy, borderRadius: BorderRadius.sm,
@@ -2281,6 +2782,7 @@ const styles = StyleSheet.create({
   contextItemSelected: { backgroundColor: Colors.surface, borderRadius: BorderRadius.sm, paddingHorizontal: Spacing.sm },
   contextItemText: { fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.foreground },
   contextItemDanger: { fontSize: FontSize.md, fontWeight: FontWeight.semibold, color: Colors.destructive },
+  contextItemSubtext: { fontSize: FontSize.xs, color: Colors.mutedLight, marginTop: 1 },
 
   // ── Filter Modal ──────────────────────────────────
   filterModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.lg },

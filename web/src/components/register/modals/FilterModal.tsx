@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, X, Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, ChevronRight, Filter, Plus } from 'lucide-react';
 import { type Column } from '../../../lib/api';
 
@@ -95,6 +95,7 @@ export function FilterModal({
   const [selectedOp, setSelectedOp] = useState<string | null>(null);
   const [val1, setVal1] = useState('');
   const [val2, setVal2] = useState('');
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const filteredCols = useMemo(() => {
     if (!colSearch) return columns;
@@ -113,6 +114,32 @@ export function FilterModal({
     setVal1('');
     setVal2('');
   };
+
+  // Close panel on outside click
+  useEffect(() => {
+    if (!filterModal) return;
+    const handleClick = (e: MouseEvent) => {
+      // Check if click is inside the panel or its parent wrapper
+      const wrapper = (panelRef.current?.parentElement);
+      if (wrapper && !wrapper.contains(e.target as Node)) {
+        setFilterModal(false);
+        resetWizard();
+      }
+    };
+    // Use a short delay so the opening click doesn't immediately close it
+    const timer = setTimeout(() => document.addEventListener('mousedown', handleClick), 10);
+    return () => { clearTimeout(timer); document.removeEventListener('mousedown', handleClick); };
+  }, [filterModal, setFilterModal]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!filterModal) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setFilterModal(false); resetWizard(); }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [filterModal, setFilterModal]);
 
   const handleAddFilter = () => {
     if (selectedColId === null || !selectedOp) return;
@@ -165,175 +192,179 @@ export function FilterModal({
   if (!filterModal) return null;
 
   return (
-    <div className="modal-overlay" onClick={() => { setFilterModal(false); resetWizard(); }}>
-      <div className="modal-content filter-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="filter-dropdown-panel" ref={panelRef} onClick={(e) => e.stopPropagation()}>
 
-        {/* ── Header ── */}
-        <div className="modal-header-flex">
-          <h3 className="modal-title modal-title-no-margin">
-            <Filter size={16} /> Filter Data
-          </h3>
-          {filters.length > 0 && (
-            <button className="clear-all-btn" onClick={() => setFilters([])}>Clear All</button>
-          )}
+      {/* ── Header ── */}
+      <div className="fdp-header">
+        <div className="fdp-title">
+          <Filter size={14} />
+          <span>Filter Data</span>
         </div>
+        <div className="fdp-header-actions">
+          {filters.length > 0 && (
+            <button className="fdp-clear-btn" onClick={() => setFilters([])}>Clear All</button>
+          )}
+          <button className="fdp-close-btn" onClick={() => { setFilterModal(false); resetWizard(); }} aria-label="Close">
+            <X size={14} />
+          </button>
+        </div>
+      </div>
 
-        {/* ── Active Filters List ── */}
-        {filters.length > 0 && (
-          <div className="filter-active-list">
-            {filters.map((f, idx) => {
-              const col = columns.find(c => c.id === f.columnId);
-              const Icon = getColumnIcon(col?.type || 'text');
+      {/* ── Active Filters List ── */}
+      {filters.length > 0 && (
+        <div className="fdp-active-list">
+          {filters.map((f, idx) => {
+            const col = columns.find(c => c.id === f.columnId);
+            const Icon = getColumnIcon(col?.type || 'text');
+            return (
+              <div key={idx} className="fdp-chip">
+                <Icon size={12} />
+                <span className="fdp-chip-col">{col?.name || 'Col'}</span>
+                <span className="fdp-chip-op">{getOpLabel(f.operator, col?.type || 'text')}</span>
+                {!NO_VALUE_OPS.includes(f.operator) && (
+                  <span className="fdp-chip-val">"{f.value}"</span>
+                )}
+                {BETWEEN_OPS.includes(f.operator) && f.value2 && (
+                  <span className="fdp-chip-val">to "{f.value2}"</span>
+                )}
+                <button className="fdp-chip-remove" onClick={() => handleRemoveFilter(idx)} aria-label="Remove filter">
+                  <X size={11} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Add Filter Wizard ── */}
+      {!addingFilter ? (
+        <button className="fdp-add-btn" onClick={() => setAddingFilter(true)}>
+          <Plus size={13} /> Add Filter
+        </button>
+      ) : (
+        <div className="fdp-wizard">
+          <div className="fdp-wizard-header">
+            <span>ADD FILTER</span>
+            <button className="fdp-close-btn" onClick={resetWizard}><X size={13} /></button>
+          </div>
+
+          {/* Step 1: Column list */}
+          <div className="fdp-col-search">
+            <Search size={13} />
+            <input
+              placeholder="Search columns..."
+              value={colSearch}
+              onChange={(e) => setColSearch(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          <div className="fdp-col-list">
+            {filteredCols.map(col => {
+              const Icon = getColumnIcon(col.type);
+              const isSelected = col.id === selectedColId;
               return (
-                <div key={idx} className="filter-chip">
+                <button
+                  key={col.id}
+                  className={`fdp-col-item ${isSelected ? 'active' : ''}`}
+                  onClick={() => { setSelectedColId(col.id); setSelectedOp(null); setVal1(''); setVal2(''); }}
+                >
                   <Icon size={13} />
-                  <span className="filter-chip-col">{col?.name || 'Col'}</span>
-                  <span className="filter-chip-op">{getOpLabel(f.operator, col?.type || 'text')}</span>
-                  {!NO_VALUE_OPS.includes(f.operator) && (
-                    <span className="filter-chip-val">"{f.value}"</span>
-                  )}
-                  {BETWEEN_OPS.includes(f.operator) && f.value2 && (
-                    <span className="filter-chip-val">to "{f.value2}"</span>
-                  )}
-                  <button className="filter-chip-remove" onClick={() => handleRemoveFilter(idx)} aria-label="Remove filter">
-                    <X size={12} />
-                  </button>
-                </div>
+                  <span>{col.name}</span>
+                  {isSelected && <ChevronRight size={13} className="fdp-arrow" />}
+                </button>
               );
             })}
           </div>
-        )}
 
-        {/* ── Add Filter Wizard ── */}
-        {!addingFilter ? (
-          <button className="filter-add-btn" onClick={() => setAddingFilter(true)}>
-            <Plus size={14} /> Add Filter
-          </button>
-        ) : (
-          <div className="filter-wizard">
-            <div className="filter-wizard-header">
-              <span className="filter-wizard-title">ADD FILTER</span>
-              <button className="filter-wizard-close" onClick={resetWizard}><X size={14} /></button>
-            </div>
-
-            {/* Step 1: Column list */}
-            <div className="filter-col-search">
-              <Search size={14} />
-              <input
-                placeholder="Search columns..."
-                value={colSearch}
-                onChange={(e) => setColSearch(e.target.value)}
-                autoFocus
-              />
-            </div>
-
-            <div className="filter-col-list">
-              {filteredCols.map(col => {
-                const Icon = getColumnIcon(col.type);
-                const isSelected = col.id === selectedColId;
-                return (
+          {/* Step 2: Condition list */}
+          {selectedCol && (
+            <>
+              <div className="fdp-section-label">{selectedCol.name.toUpperCase()}</div>
+              <div className="fdp-op-list">
+                {ops.map(op => (
                   <button
-                    key={col.id}
-                    className={`filter-col-item ${isSelected ? 'active' : ''}`}
-                    onClick={() => { setSelectedColId(col.id); setSelectedOp(null); setVal1(''); setVal2(''); }}
+                    key={op.key}
+                    className={`fdp-op-item ${selectedOp === op.key ? 'active' : ''}`}
+                    onClick={() => { setSelectedOp(op.key); setVal1(''); setVal2(''); }}
                   >
-                    <Icon size={14} />
-                    <span>{col.name}</span>
-                    {isSelected && <ChevronRight size={14} className="filter-col-arrow" />}
+                    <div className={`fdp-radio ${selectedOp === op.key ? 'checked' : ''}`} />
+                    <span>{op.label}</span>
                   </button>
-                );
-              })}
-            </div>
-
-            {/* Step 2: Condition list (shows when column is selected) */}
-            {selectedCol && (
-              <>
-                <div className="filter-section-label">{selectedCol.name.toUpperCase()}</div>
-                <div className="filter-op-list">
-                  {ops.map(op => (
-                    <button
-                      key={op.key}
-                      className={`filter-op-item ${selectedOp === op.key ? 'active' : ''}`}
-                      onClick={() => { setSelectedOp(op.key); setVal1(''); setVal2(''); }}
-                    >
-                      <div className={`filter-radio ${selectedOp === op.key ? 'checked' : ''}`} />
-                      <span>{op.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* Step 3: Value input (shows when condition needs a value) */}
-            {selectedOp && !NO_VALUE_OPS.includes(selectedOp) && (
-              <div className="filter-value-area">
-                {selectedCol?.type === 'dropdown' ? (
-                  <select
-                    className="modal-input"
-                    value={val1}
-                    onChange={(e) => setVal1(e.target.value)}
-                  >
-                    <option value="">Select value...</option>
-                    {(selectedCol.dropdownOptions || []).map(opt => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    className="modal-input"
-                    type={getInputType(selectedOp, selectedCol?.type || 'text')}
-                    placeholder={BETWEEN_OPS.includes(selectedOp) ? 'From value...' : 'Enter value...'}
-                    value={val1}
-                    onChange={(e) => setVal1(e.target.value)}
-                    autoFocus
-                  />
-                )}
-                {BETWEEN_OPS.includes(selectedOp) && (
-                  <input
-                    className="modal-input"
-                    type={getInputType(selectedOp, selectedCol?.type || 'text')}
-                    placeholder="To value..."
-                    value={val2}
-                    onChange={(e) => setVal2(e.target.value)}
-                  />
-                )}
+                ))}
               </div>
-            )}
+            </>
+          )}
 
-            {/* Wizard footer */}
-            <div className="filter-wizard-actions">
-              <button className="modal-cancel-btn" onClick={resetWizard}>Cancel</button>
-              <button
-                className="modal-confirm-btn filter-confirm-btn"
-                disabled={
-                  selectedColId === null ||
-                  !selectedOp ||
-                  (!NO_VALUE_OPS.includes(selectedOp) && !val1) ||
-                  (BETWEEN_OPS.includes(selectedOp) && !val2)
-                }
-                onClick={handleAddFilter}
-              >
-                Add Filter
-              </button>
+          {/* Step 3: Value input */}
+          {selectedOp && !NO_VALUE_OPS.includes(selectedOp) && (
+            <div className="fdp-value-area">
+              {selectedCol?.type === 'dropdown' ? (
+                <select
+                  className="fdp-input"
+                  value={val1}
+                  onChange={(e) => setVal1(e.target.value)}
+                >
+                  <option value="">Select value...</option>
+                  {(selectedCol.dropdownOptions || []).map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  className="fdp-input"
+                  type={getInputType(selectedOp, selectedCol?.type || 'text')}
+                  placeholder={BETWEEN_OPS.includes(selectedOp) ? 'From value...' : 'Enter value...'}
+                  value={val1}
+                  onChange={(e) => setVal1(e.target.value)}
+                  autoFocus
+                />
+              )}
+              {BETWEEN_OPS.includes(selectedOp) && (
+                <input
+                  className="fdp-input"
+                  type={getInputType(selectedOp, selectedCol?.type || 'text')}
+                  placeholder="To value..."
+                  value={val2}
+                  onChange={(e) => setVal2(e.target.value)}
+                />
+              )}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* ── Empty state ── */}
-        {filters.length === 0 && !addingFilter && (
-          <div className="filter-empty-state">
-            <Filter size={28} />
-            <p>No filters applied. Tap <strong>Add Filter</strong> to narrow your results.</p>
+          {/* Wizard footer */}
+          <div className="fdp-wizard-actions">
+            <button className="fdp-cancel-btn" onClick={resetWizard}>Cancel</button>
+            <button
+              className="fdp-confirm-btn"
+              disabled={
+                selectedColId === null ||
+                !selectedOp ||
+                (!NO_VALUE_OPS.includes(selectedOp) && !val1) ||
+                (BETWEEN_OPS.includes(selectedOp) && !val2)
+              }
+              onClick={handleAddFilter}
+            >
+              Add
+            </button>
           </div>
-        )}
-
-        {/* ── Modal Footer ── */}
-        <div className="modal-actions">
-          <button className="modal-cancel-btn" onClick={handleClearClose}>Clear & Close</button>
-          <button className="modal-confirm-btn" onClick={handleApply}>
-            Apply Filters {filters.length > 0 && `(${filters.length})`}
-          </button>
         </div>
+      )}
+
+      {/* ── Empty state ── */}
+      {filters.length === 0 && !addingFilter && (
+        <div className="fdp-empty">
+          <Filter size={20} />
+          <p>No filters applied</p>
+        </div>
+      )}
+
+      {/* ── Footer ── */}
+      <div className="fdp-footer">
+        <button className="fdp-cancel-btn" onClick={handleClearClose}>Clear & Close</button>
+        <button className="fdp-apply-btn" onClick={handleApply}>
+          Apply {filters.length > 0 && `(${filters.length})`}
+        </button>
       </div>
     </div>
   );

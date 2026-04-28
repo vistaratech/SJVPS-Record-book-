@@ -34,7 +34,13 @@ import {
   createRegister,
   importExcelData,
   importData,
+  listFolders,
+  createFolder,
+  renameFolder,
+  deleteFolder,
+  moveRegisterToFolder,
   type RegisterSummary,
+  type Folder,
 } from '../../lib/api';
 import { CATEGORIES, TEMPLATES, type Template } from '../../lib/templates';
 import { Colors, Spacing, BorderRadius, FontSize, FontWeight, Shadows } from '../../constants/theme';
@@ -56,6 +62,17 @@ export default function HomeScreen() {
   // Import JSON modal
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [importDataString, setImportDataString] = useState('');
+
+  // Folder system
+  const [folderCreateModal, setFolderCreateModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [folderMenuId, setFolderMenuId] = useState<number | null>(null);
+  const [renameFolderId, setRenameFolderId] = useState<number | null>(null);
+  const [renameFolderValue, setRenameFolderValue] = useState('');
+  const [renameFolderModal, setRenameFolderModal] = useState(false);
+  const [expandedFolders, setExpandedFolders] = useState<Record<number, boolean>>({});
+  const [moveToFolderRegisterId, setMoveToFolderRegisterId] = useState<number | null>(null);
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
 
   // ─── Business ─────────────────────────────────────────────
   const { data: businesses, isLoading: isBusinessesLoading } = useQuery({
@@ -94,6 +111,34 @@ export default function HomeScreen() {
     mutationFn: (id: number) => deleteRegister(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['registers'] }),
   });
+
+  // ─── Folders ──────────────────────────────────────────────
+  const { data: folders = [] } = useQuery({
+    queryKey: ['folders', businessId],
+    queryFn: () => listFolders(businessId!),
+    enabled: !!businessId,
+  });
+
+  const createFolderMutation = useMutation({
+    mutationFn: (name: string) => createFolder(businessId!, name),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['folders', businessId] }); setFolderCreateModal(false); setNewFolderName(''); },
+  });
+
+  const renameFolderMutation = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => renameFolder(id, name),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['folders', businessId] }); setRenameFolderModal(false); },
+  });
+
+  const deleteFolderMutation = useMutation({
+    mutationFn: (id: number) => deleteFolder(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['folders', businessId] }); queryClient.invalidateQueries({ queryKey: ['registers', businessId] }); setFolderMenuId(null); },
+  });
+
+  const moveToFolderMutation = useMutation({
+    mutationFn: ({ registerId, folderId }: { registerId: number; folderId: number | null }) => moveRegisterToFolder(registerId, folderId),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['registers', businessId] }); setMoveToFolderRegisterId(null); setRegisterMenuId(null); },
+  });
+
 
   // ─── Create Register from Template ────────────────────────
   const createMutation = useMutation({
@@ -228,6 +273,10 @@ export default function HomeScreen() {
     r.name.toLowerCase().includes(search.toLowerCase())
   );
 
+  // Derived: registers grouped by folder
+  const unfiledRegisters = filteredRegisters?.filter(r => !(r as any).folderId) || [];
+  const folderRegisters = (fId: number) => filteredRegisters?.filter(r => (r as any).folderId === fId) || [];
+
   // ─── Float animation  ────────────────────────────────────
   const floatAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -256,20 +305,20 @@ export default function HomeScreen() {
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <View style={styles.container}>
         {/* ─── Sidebar-style Header ─────────────────────────── */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.businessRow}>
-          <View style={styles.businessAvatar}>
-            <Text style={styles.businessAvatarText}>
-              {businesses?.[0]?.name?.[0] || 'B'}
-            </Text>
+      <View style={{ backgroundColor: Colors.white }}>
+        <View style={styles.sidebarBrand}>
+          <View style={styles.sidebarBrandGroup}>
+            <View style={styles.sidebarBrandNameRow}>
+              <View style={styles.sidebarBrandLogo}>
+                <Text style={{ fontWeight: 'bold', color: Colors.navy, fontSize: 16 }}>AG</Text>
+              </View>
+              <Text style={styles.sidebarBrandName}>AG Trust</Text>
+            </View>
+            <Text style={styles.sidebarBrandSub}>Trusted Partners</Text>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.businessName} numberOfLines={1}>
-              {businesses?.[0]?.name || 'My Business'}
-            </Text>
-          </View>
-          <Ionicons name="chevron-down" size={16} color={Colors.muted} />
-        </TouchableOpacity>
+        </View>
+
+        <View style={styles.header}>
 
         {/* Search bar — matches web sidebar search */}
         <View style={styles.searchRow}>
@@ -286,30 +335,52 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* + Add New Register & Options */}
-        <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
-          <TouchableOpacity
-            style={[styles.addButton, { flex: 1 }]}
-            onPress={() => router.push('/templates')}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="add" size={18} color={Colors.white} />
-            <Text style={styles.addButtonText}>Add New</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.importTopButton}
-            onPress={handlePickExcel}
-            activeOpacity={0.85}
-          >
-            {excelMutation.isPending ? (
-              <ActivityIndicator size="small" color={Colors.navy} />
-            ) : (
-              <>
-                <Ionicons name="cloud-upload-outline" size={18} color={Colors.navy} />
-                <Text style={styles.importTopButtonText}>Import Excel</Text>
-              </>
-            )}
-          </TouchableOpacity>
+        {/* + Add Button and Dropdown matches web sidebar */}
+        <View style={{ zIndex: 10 }}>
+          <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+            <TouchableOpacity
+              style={[styles.addButton, { flex: 1 }]}
+              onPress={() => setIsAddMenuOpen(!isAddMenuOpen)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="add" size={18} color={Colors.white} />
+              <Text style={styles.addButtonText}>Add</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.importTopButton}
+              onPress={() => router.push('/history')}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="time-outline" size={18} color={Colors.navy} />
+              <Text style={styles.importTopButtonText}>History</Text>
+            </TouchableOpacity>
+          </View>
+
+          {isAddMenuOpen && (
+            <View style={styles.addDropdown}>
+              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); router.push('/templates'); }}>
+                <Ionicons name="add-circle-outline" size={18} color={Colors.navy} />
+                <Text style={styles.addDropdownText}>New Register</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); setFolderCreateModal(true); }}>
+                <Ionicons name="folder-outline" size={18} color={Colors.navy} />
+                <Text style={styles.addDropdownText}>New Folder</Text>
+              </TouchableOpacity>
+              
+              <View style={styles.addDropdownDivider} />
+
+              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); handlePickExcel(); }}>
+                {excelMutation.isPending ? <ActivityIndicator size="small" color="#107c41" /> : <Ionicons name="document-text-outline" size={18} color="#107c41" />}
+                <Text style={[styles.addDropdownText, { color: '#107c41' }]}>Input Excel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); setImportModalVisible(true); }}>
+                <Ionicons name="code-slash-outline" size={18} color="#f59e0b" />
+                <Text style={[styles.addDropdownText, { color: '#f59e0b' }]}>Input JSON</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
         </View>
       </View>
 
@@ -346,24 +417,62 @@ export default function HomeScreen() {
           </Animated.View>
         </View>
       ) : (
-        /* ── Register List (web sidebar list) ─────────── */
-        <FlatList
-          data={filteredRegisters}
-          keyExtractor={(item) => item.id.toString()}
+        /* ── Register List with Folders (web sidebar) ─── */
+        <ScrollView
+          style={{ flex: 1 }}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefetching}
-              onRefresh={refetch}
-              tintColor={Colors.navy}
-              colors={[Colors.navy]}
-            />
-          }
-          renderItem={({ item }) => (
+        >
+          {/* Folders */}
+          {folders.map(folder => {
+            const regsInFolder = folderRegisters(folder.id);
+            const isExpanded = expandedFolders[folder.id] ?? true;
+            return (
+              <View key={`folder-${folder.id}`} style={{ marginBottom: 4 }}>
+                <TouchableOpacity
+                  style={styles.folderRow}
+                  onPress={() => setExpandedFolders(prev => ({ ...prev, [folder.id]: !isExpanded }))}
+                  onLongPress={() => setFolderMenuId(folder.id)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={16} color={Colors.muted} />
+                  <Ionicons name="folder" size={20} color="#f59e0b" />
+                  <Text style={styles.folderName} numberOfLines={1}>{folder.name}</Text>
+                  <Text style={styles.folderCount}>{regsInFolder.length}</Text>
+                  <TouchableOpacity onPress={() => setFolderMenuId(folder.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Ionicons name="ellipsis-vertical" size={14} color={Colors.mutedLight} />
+                  </TouchableOpacity>
+                </TouchableOpacity>
+                {isExpanded && regsInFolder.map(item => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.registerRow, { paddingLeft: 44 }]}
+                    onPress={() => router.push(`/register/${item.id}`)}
+                    onLongPress={() => setRegisterMenuId(item.id)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.registerIconBg, (item as any).iconColor && { backgroundColor: `${(item as any).iconColor}20` }]}>
+                      <Ionicons name={(item.icon as any) || 'document'} size={20} color={(item as any).iconColor || Colors.navy} />
+                    </View>
+                    <View style={styles.registerInfo}>
+                      <Text style={styles.registerName} numberOfLines={1}>{item.name}</Text>
+                      <Text style={styles.registerMeta}>{item.entryCount} entries • {new Date(item.updatedAt).toLocaleDateString()}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setRegisterMenuId(item.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                      <Ionicons name="ellipsis-vertical" size={16} color={Colors.mutedLight} />
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            );
+          })}
+
+          {/* Unfiled registers */}
+          {unfiledRegisters.map(item => (
             <TouchableOpacity
+              key={item.id}
               style={styles.registerRow}
               onPress={() => router.push(`/register/${item.id}`)}
               onLongPress={() => setRegisterMenuId(item.id)}
@@ -374,17 +483,25 @@ export default function HomeScreen() {
               </View>
               <View style={styles.registerInfo}>
                 <Text style={styles.registerName} numberOfLines={1}>{item.name}</Text>
-                <Text style={styles.registerMeta}>
-                  {item.entryCount} entries • {new Date(item.updatedAt).toLocaleDateString()}
-                </Text>
+                <Text style={styles.registerMeta}>{item.entryCount} entries • {new Date(item.updatedAt).toLocaleDateString()}</Text>
                 {item.lastActivity ? <Text style={[styles.registerMeta, { fontStyle: 'italic', marginTop: 2 }]} numberOfLines={1}>{item.lastActivity}</Text> : null}
               </View>
               <TouchableOpacity onPress={() => setRegisterMenuId(item.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                 <Ionicons name="ellipsis-vertical" size={16} color={Colors.mutedLight} />
               </TouchableOpacity>
             </TouchableOpacity>
-          )}
-        />
+          ))}
+
+          {/* Create Folder button */}
+          <TouchableOpacity
+            style={styles.createFolderBtn}
+            onPress={() => setFolderCreateModal(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="folder-open-outline" size={16} color={Colors.muted} />
+            <Text style={styles.createFolderText}>Create Folder</Text>
+          </TouchableOpacity>
+        </ScrollView>
       )}
 
       {/* ── Template Category Modal (matches web home.tsx Dialog) ── */}
@@ -513,16 +630,20 @@ export default function HomeScreen() {
               <Ionicons name="pencil" size={18} color={Colors.navy} />
               <Text style={styles.contextItemText}>Rename</Text>
             </TouchableOpacity>
-            {/* Duplicate */}
-            <TouchableOpacity
-              style={styles.contextItem}
-              onPress={() => {
-                if (registerMenuId) duplicateMutation.mutate(registerMenuId);
-              }}
-            >
+            <TouchableOpacity style={styles.contextItem} onPress={() => { if (registerMenuId) duplicateMutation.mutate(registerMenuId); }}>
               <Ionicons name="copy-outline" size={18} color={Colors.navy} />
               <Text style={styles.contextItemText}>Duplicate</Text>
             </TouchableOpacity>
+            {/* Move to Folder */}
+            {folders.length > 0 && (
+              <TouchableOpacity
+                style={styles.contextItem}
+                onPress={() => { if (registerMenuId) { setMoveToFolderRegisterId(registerMenuId); setRegisterMenuId(null); } }}
+              >
+                <Ionicons name="folder-outline" size={18} color={Colors.navy} />
+                <Text style={styles.contextItemText}>Move to Folder</Text>
+              </TouchableOpacity>
+            )}
             {/* Delete */}
             <TouchableOpacity
               style={styles.contextItem}
@@ -625,6 +746,122 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </Modal>
 
+      {/* ── Create Folder Modal ── */}
+      <Modal visible={folderCreateModal} transparent animationType="slide" onRequestClose={() => setFolderCreateModal(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setFolderCreateModal(false)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} style={{ width: '100%', alignItems: 'center' }}>
+            <TouchableOpacity activeOpacity={1} style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Create Folder</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={newFolderName}
+                onChangeText={setNewFolderName}
+                placeholder="Folder name"
+                placeholderTextColor={Colors.placeholder}
+                autoFocus
+              />
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setFolderCreateModal(false)}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalConfirmBtn, !newFolderName.trim() && { opacity: 0.5 }]}
+                  onPress={() => newFolderName.trim() && createFolderMutation.mutate(newFolderName.trim())}
+                  disabled={!newFolderName.trim() || createFolderMutation.isPending}
+                >
+                  {createFolderMutation.isPending ? (
+                    <ActivityIndicator size="small" color={Colors.white} />
+                  ) : (
+                    <Text style={styles.modalConfirmText}>Create</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── Rename Folder Modal ── */}
+      <Modal visible={renameFolderModal} transparent animationType="slide" onRequestClose={() => setRenameFolderModal(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setRenameFolderModal(false)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} style={{ width: '100%', alignItems: 'center' }}>
+            <TouchableOpacity activeOpacity={1} style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Rename Folder</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={renameFolderValue}
+                onChangeText={setRenameFolderValue}
+                placeholder="Folder name"
+                placeholderTextColor={Colors.placeholder}
+                autoFocus
+              />
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setRenameFolderModal(false)}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalConfirmBtn, !renameFolderValue.trim() && { opacity: 0.5 }]}
+                  onPress={() => renameFolderId && renameFolderValue.trim() && renameFolderMutation.mutate({ id: renameFolderId, name: renameFolderValue.trim() })}
+                  disabled={!renameFolderValue.trim() || renameFolderMutation.isPending}
+                >
+                  {renameFolderMutation.isPending ? (
+                    <ActivityIndicator size="small" color={Colors.white} />
+                  ) : (
+                    <Text style={styles.modalConfirmText}>Rename</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── Move to Folder Modal ── */}
+      <Modal visible={moveToFolderRegisterId !== null} transparent animationType="fade" onRequestClose={() => setMoveToFolderRegisterId(null)}>
+        <TouchableOpacity style={styles.contextOverlay} onPress={() => setMoveToFolderRegisterId(null)} activeOpacity={1}>
+          <View style={styles.contextMenu}>
+            <Text style={styles.contextTitle}>Move to Folder</Text>
+            <TouchableOpacity style={styles.contextItem} onPress={() => { if (moveToFolderRegisterId) moveToFolderMutation.mutate({ registerId: moveToFolderRegisterId, folderId: null }); }}>
+              <Ionicons name="document-outline" size={18} color={Colors.navy} />
+              <Text style={styles.contextItemText}>No Folder (Root)</Text>
+            </TouchableOpacity>
+            {folders.map(f => (
+              <TouchableOpacity key={f.id} style={styles.contextItem} onPress={() => { if (moveToFolderRegisterId) moveToFolderMutation.mutate({ registerId: moveToFolderRegisterId, folderId: f.id }); }}>
+                <Ionicons name="folder" size={18} color="#f59e0b" />
+                <Text style={styles.contextItemText}>{f.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── Folder Context Menu ── */}
+      <Modal visible={folderMenuId !== null} transparent animationType="fade" onRequestClose={() => setFolderMenuId(null)}>
+        <TouchableOpacity style={styles.contextOverlay} onPress={() => setFolderMenuId(null)} activeOpacity={1}>
+          <View style={styles.contextMenu}>
+            <Text style={styles.contextTitle}>{folders.find(f => f.id === folderMenuId)?.name || 'Folder'}</Text>
+            <TouchableOpacity style={styles.contextItem} onPress={() => {
+              const f = folders.find(fl => fl.id === folderMenuId);
+              if (f) { setRenameFolderId(f.id); setRenameFolderValue(f.name); setFolderMenuId(null); setRenameFolderModal(true); }
+            }}>
+              <Ionicons name="pencil" size={18} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Rename</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.contextItem} onPress={() => {
+              if (folderMenuId) {
+                Alert.alert('Delete Folder', 'Delete this folder? Registers will be moved to root.', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Delete', style: 'destructive', onPress: () => deleteFolderMutation.mutate(folderMenuId) },
+                ]);
+              }
+            }}>
+              <Ionicons name="trash-outline" size={18} color={Colors.destructive} />
+              <Text style={styles.contextItemDanger}>Delete</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       </View>
     </TouchableWithoutFeedback>
   );
@@ -646,39 +883,28 @@ const styles = StyleSheet.create({
   },
 
   // ── Header (web sidebar top) ────────────────────────────
+  sidebarBrand: {
+    backgroundColor: Colors.navy,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Platform.OS === 'ios' ? 60 : 30,
+    paddingBottom: Spacing.lg,
+  },
+  sidebarBrandGroup: { flexDirection: 'column' },
+  sidebarBrandNameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  sidebarBrandLogo: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.white,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  sidebarBrandName: { color: Colors.white, fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
+  sidebarBrandSub: { color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: '500', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2, marginLeft: 44 },
+
   header: {
     backgroundColor: Colors.white,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
     paddingHorizontal: Spacing.lg,
-    paddingTop: Platform.OS === 'ios' ? 56 : 12,
+    paddingTop: Spacing.lg,
     paddingBottom: Spacing.lg,
-  },
-  businessRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.lg,
-    marginBottom: Spacing.md,
-  },
-  businessAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.navy,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  businessAvatarText: {
-    color: Colors.white,
-    fontWeight: FontWeight.bold,
-    fontSize: FontSize.md,
-  },
-  businessName: {
-    fontWeight: FontWeight.semibold,
-    fontSize: FontSize.md,
-    color: Colors.foreground,
   },
   searchRow: {
     flexDirection: 'row',
@@ -712,6 +938,24 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontWeight: FontWeight.bold,
     fontSize: FontSize.sm,
+  },
+  addDropdown: {
+    position: 'absolute', top: 50, left: 0, width: 220,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    padding: 6, ...Shadows.elevated,
+    borderWidth: 1, borderColor: Colors.border,
+    zIndex: 100,
+  },
+  addDropdownItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 12, paddingVertical: 10,
+    borderRadius: BorderRadius.md,
+  },
+  addDropdownText: {
+    fontSize: 14, fontWeight: '600', color: Colors.foreground,
+  },
+  addDropdownDivider: {
+    height: 1, backgroundColor: Colors.borderLight, marginVertical: 4,
   },
 
   // ── Register List (web sidebar list) ────────────────────
@@ -749,6 +993,50 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.muted,
     marginTop: 2,
+  },
+
+  // ── Folder styles (web sidebar folders) ─────────────────
+  folderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    marginBottom: 2,
+    backgroundColor: '#fefce8',
+  },
+  folderName: {
+    flex: 1,
+    fontWeight: FontWeight.semibold,
+    fontSize: FontSize.sm,
+    color: Colors.foreground,
+  },
+  folderCount: {
+    fontSize: FontSize.xs,
+    color: Colors.muted,
+    backgroundColor: Colors.borderLight,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  createFolderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    marginTop: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderStyle: 'dashed',
+    borderRadius: BorderRadius.md,
+  },
+  createFolderText: {
+    fontSize: FontSize.sm,
+    color: Colors.muted,
+    fontWeight: FontWeight.semibold,
   },
 
   // ── Empty State (web welcome) ───────────────────────────
