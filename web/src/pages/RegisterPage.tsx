@@ -2286,22 +2286,57 @@ export default function RegisterPage() {
   visibleColumnsRef.current = visibleColumns;
   columnsRef.current = columns;
 
-  // Memoize column width CSS so it doesn't recalculate on cell edits
-  // For registers with many columns, scale down the default width to reduce horizontal bloat
+  // ── Fixed viewport grid: exactly 6 columns × 9 rows visible ──
+  // Measure the actual container to compute column/row sizing dynamically
+  const TARGET_COLS = 6;
+  const TARGET_ROWS = 9;
+  const SERIAL_COL_W = 50; // S.NO column width
+  const HEADER_OVERHEAD = 42; // column header row height
+
+  const [wrapperSize, setWrapperSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      setWrapperSize((prev) =>
+        prev.w === Math.round(width) && prev.h === Math.round(height)
+          ? prev
+          : { w: Math.round(width), h: Math.round(height) }
+      );
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Column width: fill 6 columns exactly into available width
   const defaultColWidth = useMemo(() => {
-    const count = visibleColumns.length;
-    if (count <= 8) return 150;
-    if (count <= 15) return 130;
-    if (count <= 30) return 120;
-    return 100; // 30+ columns: compact mode
-  }, [visibleColumns.length]);
+    if (wrapperSize.w > 0) {
+      return Math.max(130, Math.floor((wrapperSize.w - SERIAL_COL_W) / TARGET_COLS));
+    }
+    return 155; // fallback for ~1024px screens
+  }, [wrapperSize.w]);
+
+  // Row height: fit 9 rows exactly into available height (minus header row)
+  const dynamicRowHeight = useMemo(() => {
+    if (wrapperSize.h > 0) {
+      const available = wrapperSize.h - HEADER_OVERHEAD;
+      const h = Math.floor(available / TARGET_ROWS);
+      return Math.max(36, Math.min(h, 60)); // clamp between 36–60px
+    }
+    return 42; // default
+  }, [wrapperSize.h]);
 
   const colWidthsCss = useMemo(() => {
-    return visibleColumns.map((col, idx) => {
+    // Column width CSS + row height CSS injected together
+    const colCss = visibleColumns.map((col, idx) => {
       const w = colWidths[col.id] || defaultColWidth;
       return `.spreadsheet tr>:nth-child(${idx + 2}){width:${w}px!important;min-width:${w}px!important;max-width:${w}px!important}.spreadsheet tr>:nth-child(${idx + 2}) .col-header-inner{width:${w}px!important;min-width:${w}px!important;max-width:${w}px!important}`;
     }).join('');
-  }, [visibleColumns, colWidths, defaultColWidth]);
+    // Inject consistent row height
+    const rowCss = `.spreadsheet td:not(.spacer){height:${dynamicRowHeight}px!important;max-height:${dynamicRowHeight}px!important;line-height:${dynamicRowHeight}px!important}.spreadsheet td:not(.spacer) .cell-input,.spreadsheet td:not(.spacer) .cell-url-wrap,.spreadsheet td:not(.spacer) .cell-date,.spreadsheet td:not(.spacer) .cell-dropdown,.spreadsheet td:not(.spacer) .cell-formula,.spreadsheet td:not(.spacer) .cell-currency,.spreadsheet td:not(.spacer) .cell-checkbox-wrap,.spreadsheet td:not(.spacer) .cell-rating,.spreadsheet td:not(.spacer) .cell-image-wrap,.spreadsheet td:not(.spacer) .cell-auto-increment-readonly{height:${dynamicRowHeight}px!important;max-height:${dynamicRowHeight}px!important;line-height:${dynamicRowHeight}px!important}`;
+    return colCss + rowCss;
+  }, [visibleColumns, colWidths, defaultColWidth, dynamicRowHeight]);
 
   // Defer formula/stats recalculation so it doesn't block keystrokes (Fix #3)
   // Optimized single-pass statistics calculation (Fix performance #4)
@@ -2428,7 +2463,7 @@ export default function RegisterPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayEntries.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: useCallback(() => 42, []),
+    estimateSize: useCallback(() => dynamicRowHeight, [dynamicRowHeight]),
     overscan: 15,
     enabled: useVirtual,
   });

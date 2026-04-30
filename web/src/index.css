@@ -5038,15 +5038,13 @@ body.modal-open {
 }
 
 /* ── Table Layout Stability ── */
-/* Lock cell dimensions so typing never causes layout shift — exclude virtual spacer cells */
+/* Structural cell properties — heights are injected dynamically via JS for 6×9 grid */
 .spreadsheet td:not(.spacer) {
-  height: 42px !important;
-  max-height: 42px !important;
   overflow: hidden !important;
   box-sizing: border-box !important;
   padding: 0 !important;
-  line-height: 42px !important;
   vertical-align: middle !important;
+  white-space: nowrap !important;
 }
 /* Spacer cells must be unconstrained for virtualizer scroll height */
 .spreadsheet td.spacer {
@@ -5057,27 +5055,13 @@ body.modal-open {
   border: none !important;
   line-height: 0 !important;
 }
-.spreadsheet td .cell-input,
-.spreadsheet td .cell-url-wrap,
-.spreadsheet td .cell-date,
-.spreadsheet td .cell-dropdown,
-.spreadsheet td .cell-formula,
-.spreadsheet td .cell-currency,
-.spreadsheet td .cell-checkbox-wrap,
-.spreadsheet td .cell-rating,
-.spreadsheet td .cell-image-wrap,
-.spreadsheet td .cell-auto-increment-readonly {
-  height: 42px !important;
-  max-height: 42px !important;
-  overflow: hidden !important;
-  box-sizing: border-box !important;
-  line-height: 42px !important;
-}
 /* Prevent text from expanding cells */
 .spreadsheet td .cell-input {
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
   padding: 0 8px !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
 }
 /* Prevent the cell-url-wrap children from growing */
 .spreadsheet td .cell-url-wrap .cell-input {
