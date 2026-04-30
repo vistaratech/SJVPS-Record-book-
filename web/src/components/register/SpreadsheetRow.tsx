@@ -48,6 +48,8 @@ interface SpreadsheetTextInputProps {
   colIdx: number;
   totalRows: number;
   handleCellChange: (entryId: number, columnId: string, value: string) => void;
+  type?: string;
+  placeholder?: string;
 }
 
 // Currency cell: shows ₹ formatted display, edits as raw number
@@ -114,9 +116,21 @@ const CurrencyCell = React.memo(({ idx, col, entry, colIdx, totalRows, visibleCo
         inputMode="decimal"
         value={val}
         autoFocus
-        onChange={(e) => { setVal(e.target.value); handleCellChange(entry.id, col.id.toString(), e.target.value); }}
-        onBlur={() => setEditing(false)}
-        onKeyDown={handleKeyDown}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={() => {
+          setEditing(false);
+          if (val !== rawValue) {
+            handleCellChange(entry.id, col.id.toString(), val);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === 'Tab') {
+            if (val !== rawValue) {
+              handleCellChange(entry.id, col.id.toString(), val);
+            }
+          }
+          handleKeyDown(e);
+        }}
         placeholder="0.00"
       />
     );
@@ -137,7 +151,7 @@ const CurrencyCell = React.memo(({ idx, col, entry, colIdx, totalRows, visibleCo
   );
 });
 
-const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colIdx, totalRows, handleCellChange }: SpreadsheetTextInputProps) => {
+const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colIdx, totalRows, handleCellChange, type = 'text', placeholder }: SpreadsheetTextInputProps) => {
   const initialValue = entry.cells?.[col.id.toString()] || '';
   const [val, setVal] = useState(initialValue);
 
@@ -147,11 +161,14 @@ const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colI
   }, [initialValue]);
 
   const onChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const newVal = e.target.value;
-    setVal(newVal);
-    // handleCellChange already debounces the server write; no local debounce needed
-    handleCellChange(entry.id, col.id.toString(), newVal);
-  }, [entry.id, col.id, handleCellChange]);
+    setVal(e.target.value);
+  }, []);
+
+  const onBlur = useCallback(() => {
+    if (val !== (entry.cells?.[col.id.toString()] || '')) {
+      handleCellChange(entry.id, col.id.toString(), val);
+    }
+  }, [val, entry, col.id, handleCellChange]);
 
   const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
@@ -166,6 +183,9 @@ const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colI
 
     if (e.key === 'Tab' || e.key === 'Enter') {
       e.preventDefault();
+      if (val !== (entry.cells?.[col.id.toString()] || '')) {
+        handleCellChange(entry.id, col.id.toString(), val);
+      }
       if (e.shiftKey) {
         // Shift+Enter/Tab: Move left, wrap to previous row
         const prevCol = visibleColumns[colIdx - 1];
@@ -223,9 +243,12 @@ const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colI
       className="cell-input"
       value={val}
       onChange={onChange}
+      onBlur={onBlur}
       onKeyDown={onKeyDown}
-      type="text"
+      type={type}
+      placeholder={placeholder}
       inputMode={col.type === 'number' ? 'decimal' : undefined}
+      autoComplete="off"
     />
   );
 });
@@ -344,14 +367,9 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
             <FormulaCell idx={idx} col={col} entry={entry} registerColumns={registerColumns} onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} />
           ) : col.type === 'date' ? (
             <div className="cell-url-wrap">
-              <input 
-                id={`cell-${idx}-${col.id}`} 
-                className="cell-input" 
-                value={entry.cells?.[col.id.toString()] || ''} 
-                onChange={(e) => handleCellChange(entry.id, col.id.toString(), e.target.value)} 
-                onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} 
+              <SpreadsheetTextInput 
+                idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange}
                 placeholder="DD/MM/YYYY" 
-                autoComplete="off"
               />
               <button 
                 className="cell-url-link" 
@@ -416,17 +434,17 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
             </div>
           ) : col.type === 'email' ? (
             <div className="cell-url-wrap">
-              <input id={`cell-${idx}-${col.id}`} className="cell-input" value={entry.cells?.[col.id.toString()] || ''} onChange={(e) => handleCellChange(entry.id, col.id.toString(), e.target.value)} onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} placeholder="name@example.com" type="email" />
+              <SpreadsheetTextInput idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange} type="email" placeholder="name@example.com" />
               {entry.cells?.[col.id.toString()] && <a href={`mailto:${entry.cells[col.id.toString()]}`} className="cell-url-link" title="Send email" tabIndex={-1}><Mail size={11} /></a>}
             </div>
           ) : col.type === 'phone' ? (
             <div className="cell-url-wrap">
-              <input id={`cell-${idx}-${col.id}`} className="cell-input" value={entry.cells?.[col.id.toString()] || ''} onChange={(e) => handleCellChange(entry.id, col.id.toString(), e.target.value)} onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} placeholder="+91 98765 43210" type="tel" />
+              <SpreadsheetTextInput idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange} type="tel" placeholder="+91 98765 43210" />
               {entry.cells?.[col.id.toString()] && <a href={`tel:${entry.cells[col.id.toString()]}`} className="cell-url-link" title="Call" tabIndex={-1}><Phone size={11} /></a>}
             </div>
           ) : col.type === 'url' ? (
             <div className="cell-url-wrap">
-              <input id={`cell-${idx}-${col.id}`} className="cell-input" value={entry.cells?.[col.id.toString()] || ''} onChange={(e) => handleCellChange(entry.id, col.id.toString(), e.target.value)} onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} placeholder="https://..." type="url" />
+              <SpreadsheetTextInput idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange} type="url" placeholder="https://..." />
               {entry.cells?.[col.id.toString()] && <a href={entry.cells[col.id.toString()]} target="_blank" rel="noreferrer" className="cell-url-link" title="Open" tabIndex={-1}><Globe size={11} /></a>}
             </div>
           ) : col.type === 'auto_increment' ? (

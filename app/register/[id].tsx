@@ -2,7 +2,7 @@
 // Implements: search filter, sort, filter modal, calculation bar, multi-page,
 // CSV download, share, date picker, dropdown editor, column rename, row duplication,
 // bulk select/delete, and frozen serial column
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,6 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-  Dimensions,
   KeyboardAvoidingView,
   Platform,
   Modal,
@@ -65,10 +64,10 @@ import {
 } from '../../lib/api';
 import { Colors, Spacing, BorderRadius, FontSize, FontWeight, Shadows } from '../../constants/theme';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const COL_WIDTH = 150;
-const SERIAL_COL_WIDTH = 52;
+const SERIAL_COL_WIDTH = 50;
 const CHECKBOX_COL_WIDTH = 40;
+const MIN_MOCK_ROWS = 7;
 
 type SortDirection = 'asc' | 'desc' | null;
 type CalcType = 'sum' | 'average' | 'count' | 'min' | 'max';
@@ -80,7 +79,7 @@ interface FilterCondition {
 }
 
 // ─── SKELETON LOADER ─────────────────────────────────────────
-function RegisterSkeleton() {
+const RegisterSkeleton = memo(function RegisterSkeleton() {
   const pulseAnim = useRef(new Animated.Value(0.4)).current;
 
   useEffect(() => {
@@ -134,7 +133,7 @@ function RegisterSkeleton() {
       </Animated.View>
     </View>
   );
-}
+});
 
 export default function RegisterScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -478,7 +477,7 @@ export default function RegisterScreen() {
         case 'BULK_DELETE_ENTRIES':
           const sorted = [...action.entries].sort((a, b) => a.originalIndex - b.originalIndex);
           setLocalEntries(prev => { const n = [...prev]; sorted.forEach(({ entry, originalIndex }) => n.splice(Math.min(originalIndex, n.length), 0, entry)); return n; });
-          await bulkRestoreEntries(registerId, action.entries);
+          await bulkRestoreEntries(registerId, action.entries.map(e => ({ entry: e.entry, index: e.originalIndex })));
           redoStack.current.push(action);
           break;
       }
@@ -865,73 +864,81 @@ export default function RegisterScreen() {
   const columns = register.columns || [];
   const pages = register.pages || [{ id: 1, name: 'Page 1', index: 0 }];
 
-  // ─── Filter & Sort entries (page-scoped) ──────────────────
-  let pageEntries = localEntries.filter((e) => (e.pageIndex || 0) === activePageIndex);
+  // ─── Memoised Filter & Sort entries (page-scoped) ─────────
+  const displayEntries = useMemo(() => {
+    let entries = localEntries.filter((e) => (e.pageIndex || 0) === activePageIndex);
 
-  // Apply search filter
-  if (search.trim()) {
-    const searchLower = search.toLowerCase();
-    pageEntries = pageEntries.filter((entry) =>
-      columns.some((col) => {
-        const val = entry.cells?.[col.id.toString()] || '';
-        return val.toLowerCase().includes(searchLower);
-      })
-    );
-  }
+    // Apply search filter
+    if (search.trim()) {
+      const searchLower = search.toLowerCase();
+      entries = entries.filter((entry) =>
+        columns.some((col) => {
+          const val = entry.cells?.[col.id.toString()] || '';
+          return val.toLowerCase().includes(searchLower);
+        })
+      );
+    }
 
-  // Apply active filters
-  if (activeFilters.length > 0) {
-    pageEntries = pageEntries.filter((entry) =>
-      activeFilters.every((filter) => {
-        const val = entry.cells?.[filter.columnId] || '';
-        const numVal = parseFloat(val);
-        const filterNum = parseFloat(filter.value);
-        switch (filter.operator) {
-          case 'contains': return val.toLowerCase().includes(filter.value.toLowerCase());
-          case 'equals': return val.toLowerCase() === filter.value.toLowerCase();
-          case 'gt': return !isNaN(numVal) && !isNaN(filterNum) && numVal > filterNum;
-          case 'lt': return !isNaN(numVal) && !isNaN(filterNum) && numVal < filterNum;
-          case 'gte': return !isNaN(numVal) && !isNaN(filterNum) && numVal >= filterNum;
-          case 'lte': return !isNaN(numVal) && !isNaN(filterNum) && numVal <= filterNum;
-          case 'empty': return !val || val.trim() === '';
-          case 'not_empty': return val && val.trim() !== '';
-          default: return true;
+    // Apply active filters
+    if (activeFilters.length > 0) {
+      entries = entries.filter((entry) =>
+        activeFilters.every((filter) => {
+          const val = entry.cells?.[filter.columnId] || '';
+          const numVal = parseFloat(val);
+          const filterNum = parseFloat(filter.value);
+          switch (filter.operator) {
+            case 'contains': return val.toLowerCase().includes(filter.value.toLowerCase());
+            case 'equals': return val.toLowerCase() === filter.value.toLowerCase();
+            case 'gt': return !isNaN(numVal) && !isNaN(filterNum) && numVal > filterNum;
+            case 'lt': return !isNaN(numVal) && !isNaN(filterNum) && numVal < filterNum;
+            case 'gte': return !isNaN(numVal) && !isNaN(filterNum) && numVal >= filterNum;
+            case 'lte': return !isNaN(numVal) && !isNaN(filterNum) && numVal <= filterNum;
+            case 'empty': return !val || val.trim() === '';
+            case 'not_empty': return val && val.trim() !== '';
+            default: return true;
+          }
+        })
+      );
+    }
+
+    // Apply sort
+    if (sortColumnId !== null && sortDirection) {
+      const colIdStr = sortColumnId.toString();
+      const col = columns.find((c) => c.id === sortColumnId);
+      entries = [...entries].sort((a, b) => {
+        const aVal = a.cells?.[colIdStr] || '';
+        const bVal = b.cells?.[colIdStr] || '';
+        if (col?.type === 'number') {
+          return sortDirection === 'asc'
+            ? (parseFloat(aVal) || 0) - (parseFloat(bVal) || 0)
+            : (parseFloat(bVal) || 0) - (parseFloat(aVal) || 0);
         }
-      })
-    );
-  }
+        return sortDirection === 'asc'
+          ? aVal.localeCompare(bVal)
+          : bVal.localeCompare(aVal);
+      });
+    }
 
-  // Apply sort
-  if (sortColumnId !== null && sortDirection) {
-    const colIdStr = sortColumnId.toString();
-    const col = columns.find((c) => c.id === sortColumnId);
-    pageEntries = [...pageEntries].sort((a, b) => {
-      const aVal = a.cells?.[colIdStr] || '';
-      const bVal = b.cells?.[colIdStr] || '';
-      if (col?.type === 'number') {
-        const aNum = parseFloat(aVal) || 0;
-        const bNum = parseFloat(bVal) || 0;
-        return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
-      }
-      return sortDirection === 'asc'
-        ? aVal.localeCompare(bVal)
-        : bVal.localeCompare(aVal);
-    });
-  }
+    // Fill minimum rows (mock rows are tappable — they auto-create real entries)
+    const result = [...entries];
+    while (result.length < MIN_MOCK_ROWS) {
+      result.push({ _mock: true, id: `mock-${result.length}`, cells: {} } as any);
+    }
+    return result;
+  }, [localEntries, activePageIndex, search, activeFilters, sortColumnId, sortDirection, columns]);
 
-  // Fill minimum 7 rows (mock rows are tappable — they auto-create real entries)
-  const displayEntries = [...pageEntries];
-  while (displayEntries.length < Math.max(7, pageEntries.length)) {
-    displayEntries.push({ _mock: true, id: `mock-${displayEntries.length}`, cells: {} } as any);
-  }
-
-  // Stats count
-  const totalEntries = localEntries.filter((e) => (e.pageIndex || 0) === activePageIndex).length;
-
-  // Track if we have no entries yet (for first-time guidance banner)
+  // Memoised page-scoped counts
+  const pageEntries = useMemo(() =>
+    localEntries.filter((e) => (e.pageIndex || 0) === activePageIndex),
+    [localEntries, activePageIndex]
+  );
+  const totalEntries = pageEntries.length;
   const hasNoEntries = totalEntries === 0;
 
-  const visibleColumns = columns.filter((col) => !hiddenColumns.has(col.id));
+  const visibleColumns = useMemo(() =>
+    columns.filter((col) => !hiddenColumns.has(col.id)),
+    [columns, hiddenColumns]
+  );
 
   // ════════════════════════════════════════════════════════════
   return (
@@ -948,116 +955,61 @@ export default function RegisterScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        {/* ─── Top Header (matches web: bg-primary h-14) ─────────── */}
-        <View style={styles.topHeader}>
-          <TouchableOpacity onPress={() => require('expo-router').router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color={Colors.navy} />
+        {/* ── Header ── */}
+        <View style={styles.registerHeader}>
+          <TouchableOpacity onPress={() => require('expo-router').router.back()} style={styles.registerHeaderBtn}>
+            <Ionicons name="arrow-back" size={14} color="#64748b" />
           </TouchableOpacity>
-          <View style={styles.topHeaderLeft}>
-            <View style={styles.topHeaderTitleBox}>
-              <Ionicons name={(register.icon as any) || 'document'} size={16} color={Colors.navy} style={{ marginRight: 6 }} />
-              <Text style={styles.topHeaderTitle} numberOfLines={1}>{register.name}</Text>
-            </View>
-          </View>
-          <View style={styles.topHeaderRight}>
-            <View>
-              <TouchableOpacity style={styles.topHeaderBtn} onPress={() => setDownloadMenuOpen(!downloadMenuOpen)}>
-                <Ionicons name="download-outline" size={16} color={Colors.navy} />
-                <Text style={styles.topHeaderBtnText}>Export</Text>
-                <Ionicons name="chevron-down" size={12} color={Colors.muted} />
-              </TouchableOpacity>
-              {downloadMenuOpen && (
-                <View style={styles.downloadDropdown}>
-                  <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleDownloadExcel(); }}>
-                    <Ionicons name="document-outline" size={18} color={Colors.navy} />
-                    <View style={styles.downloadDropdownItemInfo}>
-                      <Text style={styles.downloadDropdownText}>Excel (.xlsx)</Text>
-                      <Text style={styles.downloadDropdownSubtext}>Full dataset export</Text>
-                    </View>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleDownloadCSV(); }}>
-                    <Ionicons name="code-slash-outline" size={18} color={Colors.navy} />
-                    <View style={styles.downloadDropdownItemInfo}>
-                      <Text style={styles.downloadDropdownText}>CSV (.csv)</Text>
-                      <Text style={styles.downloadDropdownSubtext}>Raw comma separated</Text>
-                    </View>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleDownloadPDF(); }}>
-                    <Ionicons name="print-outline" size={18} color={Colors.navy} />
-                    <View style={styles.downloadDropdownItemInfo}>
-                      <Text style={styles.downloadDropdownText}>PDF</Text>
-                      <Text style={styles.downloadDropdownSubtext}>Formatted print view</Text>
-                    </View>
-                  </TouchableOpacity>
-                  <View style={{ height: 1, backgroundColor: Colors.border, marginVertical: 4 }} />
-                  <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleSaveAsTemplate(); }}>
-                    <Ionicons name="bookmark-outline" size={18} color={Colors.navy} />
-                    <View style={styles.downloadDropdownItemInfo}>
-                      <Text style={styles.downloadDropdownText}>Save as Template</Text>
-                      <Text style={styles.downloadDropdownSubtext}>Reuse these columns</Text>
-                    </View>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-            <TouchableOpacity
-              style={styles.topHeaderBtn}
-              onPress={() => {
-                setShareModal(true);
-                handleGenerateShareLink();
-              }}
-            >
-              <Ionicons name="share-outline" size={16} color={Colors.navy} />
-              <Text style={styles.topHeaderBtnText}>Share</Text>
+          <Text style={styles.registerHeaderTitle}>{register.name}</Text>
+          <View style={{ flex: 1 }} />
+          <TouchableOpacity style={styles.registerHeaderBtn} onPress={() => { setShareModal(true); handleGenerateShareLink(); }}>
+            <Ionicons name="share-social-outline" size={14} color="#64748b" />
+            <Text style={styles.registerHeaderBtnText}>Share</Text>
+          </TouchableOpacity>
+          <View style={{ position: 'relative', zIndex: 100 }}>
+            <TouchableOpacity style={styles.registerHeaderBtn} onPress={() => setDownloadMenuOpen(!downloadMenuOpen)}>
+              <Ionicons name="download-outline" size={14} color="#64748b" />
+              <Text style={styles.registerHeaderBtnText}>Download</Text>
+              <Ionicons name="chevron-down" size={12} color="#64748b" />
             </TouchableOpacity>
+            {downloadMenuOpen && (
+              <View style={styles.downloadDropdown}>
+                <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleDownloadExcel(); }}>
+                  <Ionicons name="document-outline" size={16} color={Colors.navy} />
+                  <View style={styles.downloadDropdownItemInfo}>
+                    <Text style={styles.downloadDropdownText}>Excel (.xlsx)</Text>
+                    <Text style={styles.downloadDropdownSubtext}>Spreadsheet with formulas & dropdowns</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleDownloadPDF(); }}>
+                  <Ionicons name="document-text-outline" size={16} color={Colors.navy} />
+                  <View style={styles.downloadDropdownItemInfo}>
+                    <Text style={styles.downloadDropdownText}>PDF (.pdf)</Text>
+                    <Text style={styles.downloadDropdownSubtext}>Formatted table ready to print</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={{ height: 1, backgroundColor: Colors.border, marginVertical: 4 }} />
+                <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleSaveAsTemplate(); }}>
+                  <Ionicons name="bookmark-outline" size={16} color={Colors.navy} />
+                  <View style={styles.downloadDropdownItemInfo}>
+                    <Text style={styles.downloadDropdownText}>Save as Template</Text>
+                    <Text style={styles.downloadDropdownSubtext}>Save column layout for reuse</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
 
-        {/* ─── Stats bar ─────────────────────────────────── */}
-        <View style={styles.statsBar}>
-          <View style={styles.statItem}>
-            <Ionicons name="grid-outline" size={12} color={Colors.muted} />
-            <Text style={styles.statText}>{columns.length} columns</Text>
-          </View>
-          <View style={styles.statSep} />
-          <View style={styles.statItem}>
-            <Ionicons name="list-outline" size={12} color={Colors.muted} />
-            <Text style={styles.statText}>{totalEntries} entries</Text>
-          </View>
-          <View style={styles.statSep} />
-          <View style={styles.statItem}>
-            <Ionicons name="copy-outline" size={12} color={Colors.muted} />
-            <Text style={styles.statText}>{pages.length} pages</Text>
-          </View>
-          {activeFilters.length > 0 && (
-            <>
-              <View style={styles.statSep} />
-              <TouchableOpacity style={styles.statItemActive} onPress={() => setActiveFilters([])}>
-                <Ionicons name="funnel" size={12} color={Colors.white} />
-                <Text style={styles.statTextActive}>{activeFilters.length} filter{activeFilters.length > 1 ? 's' : ''}</Text>
-                <Ionicons name="close" size={12} color={Colors.white} />
-              </TouchableOpacity>
-            </>
-          )}
-          {sortColumnId !== null && (
-            <>
-              <View style={styles.statSep} />
-              <TouchableOpacity style={styles.statItemActive} onPress={() => { setSortColumnId(null); setSortDirection(null); }}>
-                <Ionicons name="swap-vertical" size={12} color={Colors.white} />
-                <Text style={styles.statTextActive}>Sorted</Text>
-                <Ionicons name="close" size={12} color={Colors.white} />
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-
-        {/* ─── Tabs Row (multi-page support) ─────────────── */}
-        <View style={styles.tabsRow}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsScroll}>
-            {pages.map((page, idx) => (
-              <View key={page.id} style={[styles.tabBtn, idx === activePageIndex && styles.activeTab, { flexDirection: 'row', alignItems: 'center' }]}>
+        {/* ── Combined Pages + Actions Bar ── */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, backgroundColor: '#f8fafc', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' }} contentContainerStyle={{ flexGrow: 1 }}>
+          <View style={styles.pagesActionsBar}>
+            {/* Left: Page tabs + Add Page + Add Column + Add Row */}
+            <View style={styles.pagesActionsTabs}>
+              {pages.map((page, idx) => (
                 <TouchableOpacity
-                  style={{ flex: 1 }}
+                  key={page.id}
+                  style={[styles.pageTab, idx === activePageIndex && styles.pageTabActive]}
                   onPress={() => setActivePageIndex(idx)}
                   onLongPress={() => {
                     setRenamePageId(page.id);
@@ -1065,135 +1017,79 @@ export default function RegisterScreen() {
                     setRenamePageModal(true);
                   }}
                 >
-                  <Text style={[styles.tabBtnText, idx === activePageIndex && styles.activeTabText]}>
-                    {page.name}
-                  </Text>
-                </TouchableOpacity>
-                {pages.length > 1 && (
-                  <TouchableOpacity
-                    style={{ marginLeft: 4, padding: 2 }}
-                    onPress={() => {
-                      Alert.alert(
-                        'Delete Page',
-                        `Delete "${page.name}" and all its rows?`,
-                        [
+                  <Ionicons name="document-text" size={11} color={idx === activePageIndex ? Colors.white : "#64748b"} />
+                  <Text style={[styles.pageTabText, idx === activePageIndex && styles.pageTabTextActive]}>{page.name}</Text>
+                  {pages.length > 1 && (
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        Alert.alert('Delete Page', `Delete "${page.name}" and all its rows?`, [
                           { text: 'Cancel', style: 'cancel' },
-                          { text: 'Delete', style: 'destructive', onPress: () => deletePageMutation.mutate(page.id) },
-                        ]
-                      );
-                    }}
-                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                  >
-                    <Ionicons name="close" size={12} color={idx === activePageIndex ? Colors.white : Colors.muted} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            ))}
-            <TouchableOpacity
-              style={styles.addTabBtn}
-              onPress={() => addPageMutation.mutate()}
-              disabled={addPageMutation.isPending}
-            >
-              {addPageMutation.isPending ? (
-                <ActivityIndicator size="small" color={Colors.muted} />
-              ) : (
-                <Ionicons name="add" size={16} color={Colors.muted} />
-              )}
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-
-        {/* ─── Toolbar ─── matches web: Search | Filter | +Add Row | +Add Column ── */}
-        <View style={styles.toolbar}>
-          {/* Left: Search */}
-          <View style={styles.searchBox}>
-            <Ionicons name="search" size={14} color={Colors.muted} />
-            <TextInput
-              style={styles.searchBoxInput}
-              placeholder="Search rows..."
-              placeholderTextColor={Colors.placeholder}
-              value={search}
-              onChangeText={setSearch}
-            />
-            {search.length > 0 && (
-              <TouchableOpacity onPress={() => setSearch('')}>
-                <Ionicons name="close-circle" size={16} color={Colors.mutedLight} />
+                          { text: 'Delete', style: 'destructive', onPress: () => deletePageMutation.mutate(page.id) }
+                        ]);
+                      }}
+                      style={{ marginLeft: 6, opacity: 0.7 }}
+                    >
+                      <Ionicons name="close" size={11} color={idx === activePageIndex ? Colors.white : "#64748b"} />
+                    </TouchableOpacity>
+                  )}
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity style={styles.pageAddBtn} onPress={() => addPageMutation.mutate()}>
+                <Ionicons name="add" size={14} color="#64748b" />
               </TouchableOpacity>
-            )}
-          </View>
+              
+              <View style={styles.pabDivider} />
 
-          {/* Right: Action Group + Primary Add Row */}
-          <View style={styles.toolbarRight}>
-            <View style={styles.toolbarActionGroup}>
-              {/* Filter */}
-              <TouchableOpacity
-                style={[styles.toolbarIconBtn, activeFilters.length > 0 && styles.toolbarIconBtnActive]}
-                onPress={() => {
-                  setFilters([...activeFilters]);
-                  setFilterModal(true);
-                }}
-              >
-                <Ionicons name="funnel" size={14} color={activeFilters.length > 0 ? Colors.navy : Colors.muted} />
+              <TouchableOpacity style={styles.pabTabActionBtn} onPress={() => setNewColumnModal(true)}>
+                <Ionicons name="add" size={12} color={Colors.navy} />
+                <Text style={styles.pabTabActionBtnText}>Add Column</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.pabTabActionBtn, styles.pabTabActionBtnPrimary]} onPress={() => addEntryMutation.mutate()}>
+                <Ionicons name="add" size={12} color={Colors.white} />
+                <Text style={styles.pabTabActionBtnTextPrimary}>Add Row</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Right: stats + search + filter + contextual */}
+            <View style={styles.pagesActionsRight}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Text style={styles.pabStat}># {displayEntries.length} rows</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Ionicons name="document-text-outline" size={11} color="#94a3b8" />
+                <Text style={styles.pabStat}>{columns.length} cols</Text>
+              </View>
+
+              <View style={styles.pabDivider} />
+
+              <View style={styles.pabSearchWrap}>
+                <Ionicons name="search" size={14} color="#94a3b8" />
+                <TextInput
+                  style={styles.pabSearchInput}
+                  placeholder="Search rows..."
+                  placeholderTextColor="#94a3b8"
+                  value={search}
+                  onChangeText={setSearch}
+                />
+              </View>
+
+              <TouchableOpacity style={[styles.pabIconBtn, activeFilters.length > 0 && styles.pabIconBtnActive]} onPress={() => setFilterModal(true)}>
+                <Ionicons name="funnel" size={14} color={activeFilters.length > 0 ? Colors.navy : "#64748b"} />
                 {activeFilters.length > 0 && <View style={styles.toolbarBadge}><Text style={styles.toolbarBadgeText}>{activeFilters.length}</Text></View>}
               </TouchableOpacity>
 
-              <View style={styles.toolbarDivider} />
-
-              {/* Undo */}
-              <TouchableOpacity
-                style={[styles.toolbarIconBtn, undoStack.current.length > 0 && styles.toolbarIconBtnActive]}
-                onPress={undo}
-                disabled={undoStack.current.length === 0}
-              >
-                <Ionicons name="arrow-undo" size={14} color={undoStack.current.length > 0 ? Colors.navy : Colors.mutedLight} />
-                {undoStack.current.length > 0 && <View style={styles.toolbarBadge}><Text style={styles.toolbarBadgeText}>{undoStack.current.length}</Text></View>}
-              </TouchableOpacity>
-
-              {/* Redo */}
-              <TouchableOpacity
-                style={[styles.toolbarIconBtn, redoStack.current.length > 0 && styles.toolbarIconBtnActive]}
-                onPress={redo}
-                disabled={redoStack.current.length === 0}
-              >
-                <Ionicons name="arrow-redo" size={14} color={redoStack.current.length > 0 ? Colors.navy : Colors.mutedLight} />
-                {redoStack.current.length > 0 && <View style={styles.toolbarBadge}><Text style={styles.toolbarBadgeText}>{redoStack.current.length}</Text></View>}
-              </TouchableOpacity>
-
-              <View style={styles.toolbarDivider} />
-
-              {/* Add Column */}
-              <TouchableOpacity
-                style={styles.toolbarIconBtn}
-                onPress={() => setNewColumnModal(true)}
-              >
-                <Ionicons name="add" size={14} color={Colors.muted} />
-                <Text style={styles.toolbarIconLabel}>Col</Text>
+              <TouchableOpacity style={styles.pabIconBtn} onPress={undo} disabled={undoStack.current.length === 0}>
+                <Ionicons name="arrow-undo" size={14} color={undoStack.current.length > 0 ? "#64748b" : "#cbd5e1"} />
               </TouchableOpacity>
               
-              {hiddenColumns.size > 0 && (
-                <TouchableOpacity
-                  style={styles.toolbarIconBtn}
-                  onPress={() => {
-                    setHiddenColumns(new Set());
-                    hiddenColumns.forEach((colId) => hideColumn(registerId, colId, false));
-                  }}
-                >
-                  <Ionicons name="eye" size={14} color={Colors.navy} />
-                  <View style={styles.toolbarBadge}><Text style={styles.toolbarBadgeText}>{hiddenColumns.size}</Text></View>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity style={styles.pabIconBtn} onPress={redo} disabled={redoStack.current.length === 0}>
+                <Ionicons name="arrow-redo" size={14} color={redoStack.current.length > 0 ? "#64748b" : "#cbd5e1"} />
+              </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={styles.toolbarBtnPrimary}
-              onPress={() => addEntryMutation.mutate()}
-              disabled={addEntryMutation.isPending}
-            >
-              <Ionicons name="add" size={15} color={Colors.white} />
-              <Text style={styles.toolbarBtnPrimaryText}>Row</Text>
-            </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
 
         {/* ─── Bulk Actions Bar ──────────────────────────── */}
         {bulkMode && selectedRows.size > 0 && (
@@ -1261,9 +1157,11 @@ export default function RegisterScreen() {
                     </TouchableOpacity>
                   )}
                   <View style={styles.serialHeader}>
-                    <Text style={styles.serialHeaderText}>S No.</Text>
+                    <Text style={styles.serialHeaderText}>S.NO.</Text>
                   </View>
-                  {visibleColumns.map((col) => (
+                  {visibleColumns.map((col) => {
+                    const isPayment = col.name.toLowerCase().includes('amount') || col.name.toLowerCase().includes('fee') || col.name.toLowerCase().includes('payment') || col.name.toLowerCase().includes('balance');
+                    return (
                     <TouchableOpacity
                       key={col.id}
                       style={styles.colHeader}
@@ -1274,37 +1172,45 @@ export default function RegisterScreen() {
                         <View style={styles.colTypeChip}>
                           <Ionicons
                             name={
+                              col.type === 'currency' || isPayment ? 'cash' :
                               col.type === 'number' ? 'calculator' :
                               col.type === 'date' ? 'calendar' :
-                              col.type === 'dropdown' ? 'chevron-down-circle' :
+                              col.type === 'dropdown' ? 'chevron-down' :
                               col.type === 'formula' ? 'flask' :
                               'text'
                             }
                             size={12}
-                            color={col.type === 'formula' ? Colors.navy : Colors.muted}
+                            color={Colors.navy}
                           />
                         </View>
                         <Text style={styles.colHeaderText} numberOfLines={1}>{col.name}</Text>
+                        {col.type === 'formula' && (
+                          <View style={{ backgroundColor: 'rgba(26, 35, 126, 0.1)', paddingHorizontal: 4, borderRadius: 4, marginLeft: 'auto' }}>
+                            <Text style={{ fontSize: 9, fontWeight: '800', color: Colors.navy }}>Fx</Text>
+                          </View>
+                        )}
                         {sortColumnId === col.id && sortDirection && (
-                          <Ionicons
-                            name={sortDirection === 'asc' ? 'arrow-up' : 'arrow-down'}
-                            size={12}
-                            color={Colors.navy}
-                          />
+                          <Text style={{ color: Colors.navy, fontSize: 10 }}>
+                            {sortDirection === 'asc' ? '▲' : '▼'}
+                          </Text>
                         )}
                       </View>
                     </TouchableOpacity>
-                  ))}
+                  )})}
                   <TouchableOpacity style={styles.addColBtn} onPress={() => setNewColumnModal(true)}>
                     <Ionicons name="add" size={20} color={Colors.muted} />
                   </TouchableOpacity>
                 </View>
 
-                {/* Data Rows */}
                 <FlatList
                   data={displayEntries}
                   keyExtractor={(item: any, idx) => (item.id ? item.id.toString() : `mock-${idx}`)}
                   showsVerticalScrollIndicator={false}
+                  initialNumToRender={15}
+                  maxToRenderPerBatch={10}
+                  windowSize={5}
+                  updateCellsBatchingPeriod={50}
+                  removeClippedSubviews={Platform.OS === 'android'}
                   contentContainerStyle={{ paddingBottom: 140 }}
                   renderItem={({ item: entry, index }: { item: any; index: number }) => {
                     const isMock = !!(entry as any)._mock;
@@ -1460,7 +1366,7 @@ export default function RegisterScreen() {
                 {/* Calculation Bar */}
                 <View style={styles.calcBar}>
                   <View style={[styles.calcSerial, bulkMode && { marginLeft: CHECKBOX_COL_WIDTH }]}>
-                    <Text style={styles.calcSerialText}>⊞ Calc</Text>
+                    <Text style={styles.calcSerialText}>Σ</Text>
                   </View>
                   {visibleColumns.map((col) => {
                     const colIdStr = col.id.toString();
@@ -1484,12 +1390,15 @@ export default function RegisterScreen() {
                         }}
                       >
                         {realEntries.length > 0 ? (
-                          <View>
-                            <Text style={styles.calcLabel}>{calcType.toUpperCase()}</Text>
-                            <Text style={styles.calcValue}>{typeof displayVal === 'number' ? (Number.isInteger(displayVal) ? displayVal : displayVal.toFixed(2)) : displayVal}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 }}>
+                            <Ionicons name="chevron-down" size={11} color="#94a3b8" />
+                            <View style={{ alignItems: 'flex-end' }}>
+                              <Text style={styles.calcLabel}>{calcType.toUpperCase()}</Text>
+                              <Text style={styles.calcValue}>{typeof displayVal === 'number' ? (Number.isInteger(displayVal) ? displayVal : displayVal.toFixed(2)) : displayVal}</Text>
+                            </View>
                           </View>
                         ) : (
-                          <Text style={styles.calcPlaceholder}>Click to calc</Text>
+                          <Text style={styles.calcPlaceholder}>-</Text>
                         )}
                       </TouchableOpacity>
                     );
@@ -1498,22 +1407,6 @@ export default function RegisterScreen() {
                 </View>
               </View>
             </ScrollView>
-
-            {/* Add Row Bar */}
-            <View style={styles.addRowBar}>
-              <TouchableOpacity
-                style={styles.addRowFab}
-                onPress={() => addEntryMutation.mutate()}
-                disabled={addEntryMutation.isPending}
-                activeOpacity={0.85}
-              >
-                {addEntryMutation.isPending ? (
-                  <ActivityIndicator size="small" color={Colors.white} />
-                ) : (
-                  <Ionicons name="add" size={26} color={Colors.white} />
-                )}
-              </TouchableOpacity>
-            </View>
           </View>
         )}
       </KeyboardAvoidingView>
@@ -2432,35 +2325,29 @@ const styles = StyleSheet.create({
   errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background, gap: Spacing.md },
   errorTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.foreground },
 
-  // ── Top Header ──────────────────────────────────────
-  topHeader: {
-    backgroundColor: '#f4f7ff', // matches web gradient
-    borderBottomWidth: 1, borderBottomColor: '#dce4f5',
-    height: Platform.OS === 'ios' ? 100 : 56,
-    paddingTop: Platform.OS === 'ios' ? 48 : 0,
-    paddingHorizontal: Spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backBtn: { marginRight: Spacing.md },
-  topHeaderLeft: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  topHeaderTitleBox: {
-    backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: '#dce4f5',
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md, paddingVertical: 6,
+  // ── Register Header ──────────────────────────────────────
+  registerHeader: {
     flexDirection: 'row', alignItems: 'center',
-    shadowColor: Colors.navy, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1,
+    paddingHorizontal: 24, paddingVertical: 12,
+    backgroundColor: '#f8fafc',
+    borderBottomWidth: 1, borderBottomColor: '#e2e8f0',
+    gap: 16,
+    paddingTop: Platform.OS === 'ios' ? 48 : 12,
   },
-  topHeaderTitle: { fontSize: 14, fontWeight: '800', color: Colors.navy, letterSpacing: 0.2 },
-  topHeaderRight: { flexDirection: 'row', gap: Spacing.sm },
-  topHeaderBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
+  registerHeaderBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: Colors.border,
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: BorderRadius.sm,
+    borderWidth: 1, borderColor: '#e2e8f0',
+    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6,
   },
-  topHeaderBtnText: { color: Colors.navy, fontSize: 12, fontWeight: '600' },
+  registerHeaderBtnText: { color: '#64748b', fontSize: 13, fontWeight: '600' },
+  registerHeaderTitle: {
+    fontSize: 16, fontWeight: '700', color: '#1e293b',
+    backgroundColor: Colors.white,
+    borderWidth: 1, borderColor: '#e2e8f0',
+    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6,
+    overflow: 'hidden'
+  },
 
   // ── Download Dropdown ──────────────────────────────────
   downloadDropdown: {
@@ -2483,92 +2370,54 @@ const styles = StyleSheet.create({
     fontSize: 11, color: Colors.muted,
   },
 
-  // ── Stats Bar ─────────────────────────────────────────
-  statsBar: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.lg,
-    paddingVertical: 6, backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.border,
-    gap: Spacing.sm, flexWrap: 'wrap',
-  },
-  statItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  statText: { fontSize: 10, color: Colors.muted, fontWeight: FontWeight.medium },
-  statSep: { width: 1, height: 12, backgroundColor: Colors.border },
-  statItemActive: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: Colors.navy, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12,
-  },
-  statTextActive: { fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold },
-
-  // ── Tabs Row ──────────────────────────────────────
-  tabsRow: {
-    height: 40, backgroundColor: Colors.borderLight, borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  tabsScroll: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm },
-  tabBtn: {
-    paddingHorizontal: Spacing.lg, paddingVertical: 7,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1, borderColor: 'transparent',
-    marginHorizontal: 2,
-  },
-  tabBtnText: { color: Colors.muted, fontWeight: FontWeight.semibold, fontSize: FontSize.xs },
-  activeTab: {
-    backgroundColor: Colors.white,
-    borderColor: Colors.border,
-  },
-  activeTabText: { color: Colors.navy, fontWeight: FontWeight.bold },
-  addTabBtn: { paddingHorizontal: Spacing.md, paddingVertical: 7,
-    borderWidth: 1, borderColor: Colors.mutedLight, borderRadius: BorderRadius.sm,
-    borderStyle: 'dashed', marginLeft: 4,
-  },
-
-  // ── Toolbar ───────────────────────────────────────
-  toolbar: {
-    backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.border,
+  // ── Pages Actions Bar ─────────────────────────────────────
+  pagesActionsBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, gap: Spacing.sm,
+    paddingHorizontal: 24, paddingVertical: 8, minWidth: 800, flex: 1,
   },
-  toolbarRight: { flexDirection: 'row', gap: Spacing.xs, alignItems: 'center' },
-  toolbarActionGroup: {
-    flexDirection: 'row', alignItems: 'center', gap: 2,
-    backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border,
-    borderRadius: BorderRadius.md, padding: 2,
+  pagesActionsTabs: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  pageTab: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'transparent', paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 6,
   },
-  toolbarIconBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    height: 26, paddingHorizontal: 8,
-    borderRadius: BorderRadius.sm,
-    backgroundColor: 'transparent',
+  pageTabActive: { backgroundColor: Colors.navy },
+  pageTabText: { fontSize: 13, fontWeight: '600', color: '#64748b' },
+  pageTabTextActive: { color: Colors.white },
+  pageAddBtn: {
+    paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6,
   },
-  toolbarIconBtnActive: {
-    backgroundColor: 'rgba(26,35,126,0.07)',
+  pabDivider: { width: 1, height: 20, backgroundColor: '#e2e8f0', marginHorizontal: 8 },
+  pabTabActionBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'transparent', borderWidth: 1, borderColor: '#cbd5e1',
+    borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6,
   },
-  toolbarIconLabel: { fontSize: 11, fontWeight: '600', color: Colors.muted },
-  toolbarDivider: {
-    width: 1, height: 16, backgroundColor: Colors.border, marginHorizontal: 2,
+  pabTabActionBtnText: { fontSize: 13, fontWeight: '600', color: Colors.navy },
+  pabTabActionBtnPrimary: { backgroundColor: Colors.navy, borderColor: Colors.navy },
+  pabTabActionBtnTextPrimary: { fontSize: 13, fontWeight: '600', color: Colors.white },
+  
+  pagesActionsRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  pabStat: { fontSize: 11, color: '#94a3b8', fontWeight: '500' },
+  pabSearchWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: '#e2e8f0',
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, width: 140,
   },
+  pabSearchInput: { flex: 1, fontSize: 12, color: '#1e293b', padding: 0 },
+  pabIconBtn: {
+    width: 28, height: 28, borderRadius: 6,
+    backgroundColor: 'transparent', borderWidth: 1, borderColor: 'transparent',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  pabIconBtnActive: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' },
+  
   toolbarBadge: {
-    position: 'absolute', top: 0, right: 0, minWidth: 14, height: 14, paddingHorizontal: 3,
+    position: 'absolute', top: -4, right: -4, minWidth: 14, height: 14, paddingHorizontal: 3,
     backgroundColor: Colors.navy, borderRadius: 7,
     justifyContent: 'center', alignItems: 'center',
   },
-  toolbarBadgeText: {
-    color: Colors.white, fontSize: 9, fontWeight: '700',
-  },
-  /* Primary (Add Row) pill — solid navy like web */
-  toolbarBtnPrimary: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: Colors.navy, borderRadius: BorderRadius.sm,
-    paddingHorizontal: Spacing.md, paddingVertical: 6,
-    ...Shadows.button,
-  },
-  toolbarBtnPrimaryText: { fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white },
-  toolbarBtnMuted: { fontSize: 11, fontWeight: FontWeight.semibold, color: Colors.muted },
-  searchBox: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
-    backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border,
-    borderRadius: BorderRadius.sm, paddingHorizontal: Spacing.sm, height: 34,
-  },
-  searchBoxInput: { flex: 1, fontSize: 12, color: Colors.foreground },
+  toolbarBadgeText: { color: Colors.white, fontSize: 9, fontWeight: '700' },
 
   // ── Bulk Actions Bar ──────────────────────────────
   bulkBar: {
@@ -2587,28 +2436,27 @@ const styles = StyleSheet.create({
 
   // ── Spreadsheet ───────────────────────────────────
   headerRow: {
-    flexDirection: 'row', backgroundColor: Colors.surface,
-    borderBottomWidth: 2, borderBottomColor: Colors.border,
+    flexDirection: 'row', backgroundColor: '#f8fafc',
+    borderBottomWidth: 2, borderBottomColor: '#e2e8f0',
   },
   checkboxHeader: {
     width: CHECKBOX_COL_WIDTH, justifyContent: 'center', alignItems: 'center',
-    borderRightWidth: 1, borderRightColor: Colors.border,
+    borderRightWidth: 1, borderRightColor: '#e2e8f0',
   },
   serialHeader: {
-    width: SERIAL_COL_WIDTH, paddingVertical: Spacing.md, justifyContent: 'center', alignItems: 'center',
-    borderRightWidth: 1, borderRightColor: Colors.border, backgroundColor: Colors.borderLight,
+    width: 50, paddingVertical: 12, justifyContent: 'center', alignItems: 'center',
+    borderRightWidth: 1, borderRightColor: '#e2e8f0', backgroundColor: '#f1f5f9',
   },
-  serialHeaderText: { fontSize: FontSize.xs, fontWeight: FontWeight.semibold, color: Colors.muted },
+  serialHeaderText: { fontSize: 11.5, fontWeight: '700', color: '#1e293b' },
   colHeader: {
-    width: COL_WIDTH, paddingVertical: Spacing.md, paddingHorizontal: Spacing.sm,
-    borderRightWidth: 1, borderRightColor: Colors.border, justifyContent: 'center',
+    width: COL_WIDTH, paddingVertical: 0, paddingHorizontal: 0,
+    borderRightWidth: 1, borderRightColor: '#e2e8f0', justifyContent: 'center',
   },
-  colHeaderInner: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
+  colHeaderInner: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6, height: '100%' },
   colTypeChip: {
-    backgroundColor: Colors.borderLight, paddingHorizontal: 5, paddingVertical: 4,
-    borderRadius: 4, justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center', alignItems: 'center', width: 14, height: 14,
   },
-  colHeaderText: { fontSize: FontSize.xs, fontWeight: FontWeight.bold, color: Colors.navy, flex: 1, textTransform: 'uppercase', letterSpacing: 0.3 },
+  colHeaderText: { fontSize: 11.5, fontWeight: '700', color: Colors.navy, flex: 1, textTransform: 'uppercase', letterSpacing: 0.35 },
   addColBtn: { width: 44, justifyContent: 'center', alignItems: 'center' },
 
   dataRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: Colors.border, minHeight: 44 },
@@ -2682,21 +2530,21 @@ const styles = StyleSheet.create({
 
   // ── Calc Bar ──────────────────────────────────────
   calcBar: {
-    flexDirection: 'row', backgroundColor: Colors.surface,
-    borderTopWidth: 2, borderTopColor: Colors.border, minHeight: 52,
+    flexDirection: 'row', backgroundColor: '#f8fafc',
+    borderTopWidth: 2, borderTopColor: '#e2e8f0', minHeight: 48,
   },
   calcSerial: {
-    width: SERIAL_COL_WIDTH, backgroundColor: Colors.borderLight, borderRightWidth: 1,
-    borderRightColor: Colors.border, justifyContent: 'center', alignItems: 'center',
+    width: 50, backgroundColor: '#f1f5f9', borderRightWidth: 1,
+    borderRightColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center',
   },
-  calcSerialText: { fontSize: 9, fontWeight: FontWeight.bold, color: Colors.navy },
+  calcSerialText: { fontSize: 14, fontWeight: '800', color: Colors.navy },
   calcCell: {
-    width: COL_WIDTH, borderRightWidth: 1, borderRightColor: Colors.border,
-    justifyContent: 'center', paddingHorizontal: Spacing.sm,
+    width: COL_WIDTH, borderRightWidth: 1, borderRightColor: '#e2e8f0',
+    justifyContent: 'center', paddingHorizontal: 6,
   },
-  calcLabel: { fontSize: 8, fontWeight: FontWeight.bold, color: Colors.navy, letterSpacing: 0.5 },
-  calcValue: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.foreground, marginTop: 1 },
-  calcPlaceholder: { fontSize: FontSize.xs, color: 'rgba(0,0,0,0.2)' },
+  calcLabel: { fontSize: 9, fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.3 },
+  calcValue: { fontSize: 13, fontWeight: '700', color: '#0f172a', marginTop: 1 },
+  calcPlaceholder: { fontSize: 12, color: '#94a3b8', fontStyle: 'italic' },
 
   // ── Add Row Bar ───────────────────────────────────
   addRowBar: {

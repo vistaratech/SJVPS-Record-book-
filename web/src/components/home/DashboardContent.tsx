@@ -1,4 +1,5 @@
 import { Plus, Upload, FileText, FolderOpen } from 'lucide-react';
+import { startTransition } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { RegisterSummary } from '../../lib/api';
 
@@ -45,7 +46,7 @@ export function DashboardContent({ filtered, excelMutation, handleFileUpload, on
         </p>
         <div className="categories-grid categories-grid--no-pad">
           {filtered.map((reg) => (
-            <div key={reg.id} className="category-card" onClick={() => navigate(`/register/${reg.id}`)}>
+            <div key={reg.id} className="category-card" onClick={() => startTransition(() => navigate(`/register/${reg.id}`))}>
               <div className="category-icon" {...{ style: { '--dyn-bg': reg.iconColor || 'var(--navy)' } as React.CSSProperties }}>
                 <FileText size={24} />
               </div>

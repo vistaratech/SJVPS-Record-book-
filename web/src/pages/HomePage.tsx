@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useNavigate, Routes, Route, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -14,11 +14,12 @@ import { Sidebar } from '../components/home/Sidebar';
 import RegisterPage from './RegisterPage';
 import TemplatesPage from './TemplatesPage';
 import HistoryPage from './HistoryPage';
+import RecycleBinPage from './RecycleBinPage';
 
-const RegisterPageWrapper = () => {
+const RegisterPageWrapper = memo(() => {
   const { id } = useParams();
   return <RegisterPage key={id} />;
-};
+});
 
 
 export interface ImportSession {
@@ -37,6 +38,7 @@ export default function HomePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [importSession, setImportSession] = useState<ImportSession | null>(null);
   const [clipboard, setClipboard] = useState<{ id: number, type: 'move' | 'copy' } | null>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === 'true');
 
   // ── Resizable sidebar ──
   const SIDEBAR_MIN = 200;
@@ -102,6 +104,7 @@ export default function HomePage() {
         return (old || []).filter(r => r.id !== deletedId);
       });
       queryClient.invalidateQueries({ queryKey: ['registers', businessId] }); 
+      queryClient.invalidateQueries({ queryKey: ['deletedRegisters', businessId] }); 
       setMenuId(null); 
     },
   });
@@ -213,15 +216,25 @@ export default function HomePage() {
         clipboard={clipboard}
         setClipboard={setClipboard}
         sidebarWidth={sidebarWidth}
+        isCollapsed={isSidebarCollapsed}
+        toggleCollapse={() => {
+          setIsSidebarCollapsed(prev => {
+            const next = !prev;
+            localStorage.setItem('sidebar-collapsed', String(next));
+            return next;
+          });
+        }}
       />
 
       {/* ── Draggable resize handle ── */}
-      <div
-        className="sidebar-resize-handle"
-        onMouseDown={onResizeStart}
-        onDoubleClick={() => { setSidebarWidth(SIDEBAR_DEFAULT); localStorage.setItem('sidebar-width', String(SIDEBAR_DEFAULT)); }}
-        title="Drag to resize sidebar · Double-click to reset"
-      />
+      {!isSidebarCollapsed && (
+        <div
+          className="sidebar-resize-handle"
+          onMouseDown={onResizeStart}
+          onDoubleClick={() => { setSidebarWidth(SIDEBAR_DEFAULT); localStorage.setItem('sidebar-width', String(SIDEBAR_DEFAULT)); }}
+          title="Drag to resize sidebar · Double-click to reset"
+        />
+      )}
 
       <Routes>
         <Route index element={
@@ -236,6 +249,7 @@ export default function HomePage() {
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="templates/:categoryId" element={<TemplatesPage />} />
         <Route path="history" element={<HistoryPage />} />
+        <Route path="recycle-bin" element={<RecycleBinPage />} />
       </Routes>
 
       {/* ── Register Context Menu ── */}

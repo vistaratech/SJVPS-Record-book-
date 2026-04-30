@@ -91,7 +91,6 @@ export default function RegisterPage() {
 
   // ── State ──
   const [search, setSearch] = useState(() => localStorage.getItem(`rb_search_${registerId}`) || '');
-  const [searchExpanded, setSearchExpanded] = useState(false);
   const [currentPageIndex, setCurrentPageIndex] = useState(() => {
     const saved = localStorage.getItem(`rb_page_${registerId}`);
     return saved ? parseInt(saved, 10) : 0;
@@ -131,8 +130,17 @@ export default function RegisterPage() {
   const [sortColId, setSortColId] = useState<number | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc' | null>(null);
   const [detailViewEntry, setDetailViewEntry] = useState<Entry | null>(null);
+  const detailViewEntryIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    detailViewEntryIdRef.current = detailViewEntry?.id || null;
+  }, [detailViewEntry]);
+
   const [detailEdits, setDetailEdits] = useState<Record<string, string>>({});
   const [detailErrors, setDetailErrors] = useState<Record<string, string | null>>({});
+  const detailErrorsRef = useRef<Record<string, string | null>>({});
+  useEffect(() => {
+    detailErrorsRef.current = detailErrors;
+  }, [detailErrors]);
   const detailInputRefs = useRef<Map<number, HTMLElement>>(new Map());
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
@@ -164,19 +172,27 @@ export default function RegisterPage() {
   const deferredSearch = useDeferredValue(search);
   const deferredActiveFilters = useDeferredValue(activeFilters);
 
-  // Date picker for cell
+  // Date picker for cell — refs to avoid re-render on open
   const [dateDay, setDateDay] = useState('');
   const [dateMonth, setDateMonth] = useState('');
   const [dateYear, setDateYear] = useState('');
-  const [dateEntryId, setDateEntryId] = useState<number | null>(null);
-  const [dateColumnId, setDateColumnId] = useState<number | null>(null);
+  const dateEntryIdRef = useRef<number | null>(null);
+  const dateColumnIdRef = useRef<number | null>(null);
+  const dateRectRef = useRef<{ top: number, bottom: number, left: number, width: number } | null>(null);
+  // Expose as stable getters for OtherModals
+  const dateEntryId = dateEntryIdRef.current;
+  const dateColumnId = dateColumnIdRef.current;
+  const dateRect = dateRectRef.current;
 
-  // Dropdown for cell
-  const [dropdownOptions, setDropdownOptions] = useState<string[]>([]);
-  const [dropdownEntryId, setDropdownEntryId] = useState<number | null>(null);
-  const [dropdownColumnId, setDropdownColumnId] = useState<number | null>(null);
-  const [dropdownRect, setDropdownRect] = useState<{ top: number, bottom: number, left: number, width: number } | null>(null);
-  const [dateRect, setDateRect] = useState<{ top: number, bottom: number, left: number, width: number } | null>(null);
+  // Dropdown for cell — refs to avoid re-render on open
+  const dropdownOptionsRef = useRef<string[]>([]);
+  const dropdownEntryIdRef = useRef<number | null>(null);
+  const dropdownColumnIdRef = useRef<number | null>(null);
+  const dropdownRectRef = useRef<{ top: number, bottom: number, left: number, width: number } | null>(null);
+  const dropdownOptions = dropdownOptionsRef.current;
+  const dropdownEntryId = dropdownEntryIdRef.current;
+  const dropdownColumnId = dropdownColumnIdRef.current;
+  const dropdownRect = dropdownRectRef.current;
 
   // Share
   const [sharePhone, setSharePhone] = useState('');
@@ -1292,13 +1308,27 @@ export default function RegisterPage() {
     const startX = e.clientX;
     const startWidth = innerDiv.offsetWidth;
 
-    // Use a dynamic style tag to resize the entire column efficiently without React re-renders
     let styleTag = document.getElementById('col-resize-style');
     if (!styleTag) {
       styleTag = document.createElement('style');
       styleTag.id = 'col-resize-style';
-      document.head.appendChild(styleTag);
+      document.body.appendChild(styleTag);
     }
+
+    let dragLine = document.getElementById('col-resize-line');
+    if (!dragLine) {
+      dragLine = document.createElement('div');
+      dragLine.id = 'col-resize-line';
+      dragLine.style.position = 'fixed';
+      dragLine.style.top = '0';
+      dragLine.style.bottom = '0';
+      dragLine.style.width = '2px';
+      dragLine.style.backgroundColor = 'var(--primary)';
+      dragLine.style.zIndex = '9999';
+      dragLine.style.pointerEvents = 'none';
+      document.body.appendChild(dragLine);
+    }
+    dragLine.style.left = `${startX}px`;
 
     const colIdx = visibleColumnsRef.current.findIndex(c => c.id === colId);
 
@@ -1306,21 +1336,24 @@ export default function RegisterPage() {
       const newWidth = Math.max(40, startWidth + (ev.clientX - startX));
       if (styleTag && colIdx !== -1) {
         styleTag.textContent = `
-          .spreadsheet tr > :nth-child(${colIdx + 2}) {
+          html body .spreadsheet tr > :nth-child(${colIdx + 2}) {
             width: ${newWidth}px !important;
             min-width: ${newWidth}px !important;
             max-width: ${newWidth}px !important;
           }
-          .spreadsheet tr > :nth-child(${colIdx + 2}) .col-header-inner {
+          html body .spreadsheet tr > :nth-child(${colIdx + 2}) .col-header-inner {
             width: ${newWidth}px !important;
             min-width: ${newWidth}px !important;
             max-width: ${newWidth}px !important;
           }
-          .spreadsheet td:nth-child(${colIdx + 2}) {
+          html body .spreadsheet td:nth-child(${colIdx + 2}) {
             overflow: hidden !important;
             text-overflow: ellipsis !important;
           }
         `;
+      }
+      if (dragLine) {
+        dragLine.style.left = `${ev.clientX}px`;
       }
     };
 
@@ -1333,6 +1366,7 @@ export default function RegisterPage() {
       updateColumnWidthMutation.mutate({ colId, width: newWidth });
       
       if (styleTag) styleTag.textContent = ''; // Clear temp style
+      if (dragLine) dragLine.remove();
       
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
@@ -1667,9 +1701,9 @@ export default function RegisterPage() {
     }));
 
     // Sync with Row Detail Modal if open for this entry
-    if (detailViewEntry?.id === entryId) {
+    if (detailViewEntryIdRef.current === entryId) {
       setDetailEdits(prev => ({ ...prev, [columnId]: value }));
-      if (detailErrors[columnId]) setDetailErrors(prev => ({ ...prev, [columnId]: null }));
+      if (detailErrorsRef.current[columnId]) setDetailErrors(prev => ({ ...prev, [columnId]: null }));
     }
 
     // 2. Debounce the Firestore write — no invalidateQueries, just patch the cache
@@ -1711,7 +1745,7 @@ export default function RegisterPage() {
         });
       });
     }, 600);
-  }, [registerId, queryClient, detailViewEntry, detailErrors, pushToUndoStack]);
+  }, [registerId, queryClient, pushToUndoStack]);
 
   // Excel-like sort: permanently reorders localEntries and persists to Firestore
   const handleSort = useCallback((colId: number, direction: 'asc' | 'desc') => {
@@ -1761,12 +1795,9 @@ export default function RegisterPage() {
     // Support various separators like /, . or - for parsing
     const parts = (currentVal || '').split(/[./-]/);
     setDateDay(parts[0] || ''); setDateMonth(parts[1] || ''); setDateYear(parts[2] || '');
-    setDateEntryId(entryId); setDateColumnId(colId); 
-    if (rect) {
-      setDateRect({ top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width });
-    } else {
-      setDateRect(null);
-    }
+    dateEntryIdRef.current = entryId;
+    dateColumnIdRef.current = colId;
+    dateRectRef.current = rect ? { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width } : null;
     setDateModal(true);
   }, []);
 
@@ -1797,12 +1828,10 @@ export default function RegisterPage() {
   };
 
   const openDropdown = useCallback((entryId: number, colId: number, options: string[], rect?: DOMRect) => {
-    setDropdownEntryId(entryId); setDropdownColumnId(colId); setDropdownOptions(options);
-    if (rect) {
-      setDropdownRect({ top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width });
-    } else {
-      setDropdownRect(null);
-    }
+    dropdownEntryIdRef.current = entryId;
+    dropdownColumnIdRef.current = colId;
+    dropdownOptionsRef.current = options;
+    dropdownRectRef.current = rect ? { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width } : null;
     setDropdownModal(true);
   }, []);
 
@@ -2257,6 +2286,14 @@ export default function RegisterPage() {
   visibleColumnsRef.current = visibleColumns;
   columnsRef.current = columns;
 
+  // Memoize column width CSS so it doesn't recalculate on cell edits
+  const colWidthsCss = useMemo(() => {
+    return visibleColumns.map((col, idx) => {
+      const w = colWidths[col.id] || 150;
+      return `.spreadsheet tr>:nth-child(${idx + 2}){width:${w}px!important;min-width:${w}px!important;max-width:${w}px!important}.spreadsheet tr>:nth-child(${idx + 2}) .col-header-inner{width:${w}px!important;min-width:${w}px!important;max-width:${w}px!important}`;
+    }).join('');
+  }, [visibleColumns, colWidths]);
+
   // Defer formula/stats recalculation so it doesn't block keystrokes (Fix #3)
   // Optimized single-pass statistics calculation (Fix performance #4)
   const columnStats = useMemo(() => {
@@ -2485,27 +2522,17 @@ export default function RegisterPage() {
 
           <div className="pab-divider" />
 
-          {/* Search — icon-only, expands on click */}
-          <div className={`pab-search${search || searchExpanded ? ' open' : ''}`} id="pab-search-wrap">
+          {/* Search */}
+          <div className="pab-search" id="pab-search-wrap">
+            <Search size={13} className="pab-search-icon" />
             <input
               id="pab-search-input"
               className="pab-search-input"
               placeholder="Search rows…"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Escape') { setSearch(''); setSearchExpanded(false); } }}
-              onBlur={() => { if (!search) setSearchExpanded(false); }}
+              onKeyDown={e => { if (e.key === 'Escape') setSearch(''); }}
             />
-            <button
-              className="pab-icon-btn"
-              title="Search" aria-label="Search rows"
-              onClick={() => {
-                setSearchExpanded(prev => !prev);
-                setTimeout(() => (document.getElementById('pab-search-input') as HTMLInputElement)?.focus(), 60);
-              }}
-            >
-              <Search size={13} />
-            </button>
           </div>
 
           {/* Filter — highlighted button + inline dropdown panel */}
@@ -2576,24 +2603,8 @@ export default function RegisterPage() {
 
 
 
-      {/* ── Dynamic Column Widths ── */}
-      <style>{`
-        ${visibleColumns.map((col, idx) => {
-          const w = colWidths[col.id] || 150;
-          return `
-            .spreadsheet tr > :nth-child(${idx + 2}) {
-              width: ${w}px !important;
-              min-width: ${w}px !important;
-              max-width: ${w}px !important;
-            }
-            .spreadsheet tr > :nth-child(${idx + 2}) .col-header-inner {
-              width: ${w}px !important;
-              min-width: ${w}px !important;
-              max-width: ${w}px !important;
-            }
-          `;
-        }).join('')}
-      `}</style>
+      {/* ── Dynamic Column Widths (memoized) ── */}
+      <style dangerouslySetInnerHTML={{ __html: colWidthsCss }} />
 
       {/* ── Spreadsheet ── */}
       <div 

@@ -1,4 +1,4 @@
-import { useCallback, memo, useState } from 'react';
+import { useCallback, memo, useState, startTransition } from 'react';
 import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2, History, PlusCircle, FolderPlus, User } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
@@ -20,6 +20,8 @@ interface SidebarProps {
   clipboard: { id: number, type: 'move' | 'copy' } | null;
   setClipboard: (v: { id: number, type: 'move' | 'copy' } | null) => void;
   sidebarWidth?: number;
+  isCollapsed: boolean;
+  toggleCollapse: () => void;
 }
 
 export const Sidebar = memo(function Sidebar({
@@ -38,6 +40,8 @@ export const Sidebar = memo(function Sidebar({
   clipboard,
   setClipboard,
   sidebarWidth,
+  isCollapsed,
+  toggleCollapse,
 }: SidebarProps) {
   const navigate = useNavigate();
   const { id: currentRegId } = useParams();
@@ -134,9 +138,10 @@ export const Sidebar = memo(function Sidebar({
         e.dataTransfer.effectAllowed = 'move';
       }}
       className={`register-item ${Number(currentRegId) === reg.id ? 'active' : ''}`}
-      onClick={() => { navigate(`/register/${reg.id}`); closeSidebar(); }}
+      onClick={() => { startTransition(() => { navigate(`/register/${reg.id}`); closeSidebar(); }); }}
       onMouseEnter={() => prefetchRegister(reg.id)}
-      style={indent ? { paddingLeft: `${16 + indent}px` } : undefined}
+      style={!isCollapsed && indent ? { paddingLeft: `${16 + indent}px` } : undefined}
+      data-tooltip={isCollapsed ? reg.name : undefined}
     >
       <div
         className="register-icon-bg"
@@ -146,8 +151,8 @@ export const Sidebar = memo(function Sidebar({
       </div>
       <div className="register-item-info">
         <div className="register-item-name">{reg.name}</div>
-        <div className="register-item-meta">{reg.entryCount} entries • {new Date(reg.updatedAt).toLocaleDateString()}</div>
-        {reg.lastActivity ? <div className="register-item-activity">{reg.lastActivity}</div> : null}
+        <div className="register-item-meta">{reg.entryCount} entries {!isCollapsed && `• ${new Date(reg.updatedAt).toLocaleDateString()}`}</div>
+        {!isCollapsed && reg.lastActivity && <div className="register-item-activity">{reg.lastActivity}</div>}
       </div>
       <button
         className="register-item-menu"
@@ -210,18 +215,29 @@ export const Sidebar = memo(function Sidebar({
 
       {/* ── Sidebar ── */}
       <div
-        className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''}`}
-        style={sidebarWidth ? { width: sidebarWidth, minWidth: sidebarWidth } : undefined}
+        className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''}`}
+        style={sidebarWidth && !isCollapsed ? { width: sidebarWidth, minWidth: sidebarWidth } : undefined}
       >
         {/* AG Trust Blue Header */}
         <div className="sidebar-brand">
-          <div className="sidebar-brand-group" style={{ display: 'flex', flexDirection: 'column' }}>
+          <div className="sidebar-brand-group" style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
             <div className="sidebar-brand-name" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-brand-logo" />
               <span>AG Trust</span>
             </div>
             <div className="sidebar-brand-sub">Trusted Partners</div>
           </div>
+          <button 
+            className="sidebar-collapse-btn" 
+            onClick={toggleCollapse}
+            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {isCollapsed ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><polyline points="13 8 17 12 13 16"></polyline></svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="15" y1="3" x2="15" y2="21"></line><polyline points="11 8 7 12 11 16"></polyline></svg>
+            )}
+          </button>
         </div>
 
         {/* Sidebar Add Button */}
@@ -229,8 +245,9 @@ export const Sidebar = memo(function Sidebar({
           <button 
             className="sidebar-add-btn"
             onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
+            title="Add new item"
           >
-            <Plus size={18} /> Add
+            <Plus size={18} /> <span className="sidebar-add-text">Add</span>
           </button>
 
           {isAddMenuOpen && (
@@ -348,14 +365,17 @@ export const Sidebar = memo(function Sidebar({
                   }}
                   onClick={() => setExpandedFolders(prev => ({...prev, [folder.id]: !prev[folder.id] ? true : false}))}
                   style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', cursor: 'pointer', gap: '8px', color: 'var(--navy)', userSelect: 'none' }}
+                  data-tooltip={isCollapsed ? folder.name : undefined}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '16px' }}>
-                    {isExpanded ? (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                    ) : (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                    )}
-                  </div>
+                  {!isCollapsed && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '16px' }}>
+                      {isExpanded ? (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                      ) : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                      )}
+                    </div>
+                  )}
                   <Folder size={16} color="var(--primary)" fill="var(--primary)" fillOpacity={0.2} />
                   <span style={{ fontSize: '13px', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folder.name}</span>
                   <button
@@ -407,7 +427,7 @@ export const Sidebar = memo(function Sidebar({
           </div>
         </div>
 
-        {(isSearchOpen || search.length > 0) && (
+        {(isSearchOpen || search.length > 0) && !isCollapsed && (
           <div className="sidebar-search" style={{ borderTop: '1px solid var(--border)', background: 'var(--surface)' }}>
             <Search size={14} color="var(--muted)" />
             <input 
@@ -432,22 +452,41 @@ export const Sidebar = memo(function Sidebar({
             <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-footer-logo" style={{ margin: 0 }} />
             <span className="sidebar-footer-text">AG Trust · Record Book</span>
           </div>
-          <button 
-            onClick={() => setIsActionsMenuOpen(true)}
-            style={{
-              background: 'var(--bg-secondary)',
-              color: 'var(--muted)',
-              border: '1px solid var(--border)',
-              width: '28px', height: '28px',
-              borderRadius: '50%',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'all 0.15s'
-            }}
-            aria-label="Actions menu"
-          >
-            <Menu size={14} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button 
+              onClick={() => navigate('/recycle-bin')}
+              style={{
+                background: 'transparent',
+                color: 'var(--muted)',
+                border: 'none',
+                width: '28px', height: '28px',
+                borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.15s'
+              }}
+              title="Recycle Bin"
+              aria-label="Recycle Bin"
+            >
+              <Trash2 size={15} />
+            </button>
+            <button 
+              onClick={() => setIsActionsMenuOpen(true)}
+              style={{
+                background: 'var(--bg-secondary)',
+                color: 'var(--muted)',
+                border: '1px solid var(--border)',
+                width: '28px', height: '28px',
+                borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.15s'
+              }}
+              aria-label="Actions menu"
+            >
+              <Menu size={14} />
+            </button>
+          </div>
         </div>
 
         {/* ── Actions Menu ── */}

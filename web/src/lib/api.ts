@@ -102,7 +102,7 @@ export async function renameFolder(folderId: number, newName: string): Promise<F
 export interface RegisterSummary {
   id: number; businessId: number; folderId?: number; name: string; icon: string; iconColor?: string;
   category: string; template: string; createdAt: string; updatedAt: string; entryCount: number;
-  lastActivity?: string;
+  lastActivity?: string; deletedAt?: string;
 }
 
 export interface Column {
@@ -267,17 +267,73 @@ export function bustRegisterCache(registerId: number): void {
 export async function listRegisters(businessId: number): Promise<RegisterSummary[]> {
   const q = query(registersCol(), where('businessId', '==', businessId));
   const snap = await getDocs(q);
-  return snap.docs.map(d => {
-    // Use stored scalar fields only — never iterate r.entries[] here so we don't
-    // deserialise thousands of cells just to count them (Fix #4)
-    const r = d.data() as RegisterDetail;
-    return {
-      id: r.id, businessId: r.businessId, folderId: r.folderId, name: r.name, icon: r.icon, iconColor: r.iconColor,
-      category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
-      entryCount: r.entryCount ?? (r.entries?.length ?? 0),
-      lastActivity: r.lastActivity ?? '',
-    };
-  });
+  const seenIds = new Set<number>();
+  
+  const results = snap.docs
+    .map(d => {
+      let r = d.data() as RegisterDetail;
+      if (firestoreRegisterCache.has(r.id)) {
+        r = firestoreRegisterCache.get(r.id)!;
+      }
+      seenIds.add(r.id);
+      return {
+        id: r.id, businessId: r.businessId, folderId: r.folderId, name: r.name, icon: r.icon, iconColor: r.iconColor,
+        category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
+        entryCount: r.entryCount ?? (r.entries?.length ?? 0),
+        lastActivity: r.lastActivity ?? '',
+        deletedAt: r.deletedAt,
+      };
+    });
+
+  for (const [id, r] of firestoreRegisterCache.entries()) {
+    if (!seenIds.has(id) && r.businessId === businessId) {
+      results.push({
+        id: r.id, businessId: r.businessId, folderId: r.folderId, name: r.name, icon: r.icon, iconColor: r.iconColor,
+        category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
+        entryCount: r.entryCount ?? (r.entries?.length ?? 0),
+        lastActivity: r.lastActivity ?? '',
+        deletedAt: r.deletedAt,
+      });
+    }
+  }
+
+  return results.filter(r => !r.deletedAt);
+}
+
+export async function listDeletedRegisters(businessId: number): Promise<RegisterSummary[]> {
+  const q = query(registersCol(), where('businessId', '==', businessId));
+  const snap = await getDocs(q);
+  const seenIds = new Set<number>();
+  
+  const results = snap.docs
+    .map(d => {
+      let r = d.data() as RegisterDetail;
+      if (firestoreRegisterCache.has(r.id)) {
+        r = firestoreRegisterCache.get(r.id)!;
+      }
+      seenIds.add(r.id);
+      return {
+        id: r.id, businessId: r.businessId, folderId: r.folderId, name: r.name, icon: r.icon, iconColor: r.iconColor,
+        category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
+        entryCount: r.entryCount ?? (r.entries?.length ?? 0),
+        lastActivity: r.lastActivity ?? '',
+        deletedAt: r.deletedAt,
+      };
+    });
+
+  for (const [id, r] of firestoreRegisterCache.entries()) {
+    if (!seenIds.has(id) && r.businessId === businessId) {
+      results.push({
+        id: r.id, businessId: r.businessId, folderId: r.folderId, name: r.name, icon: r.icon, iconColor: r.iconColor,
+        category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
+        entryCount: r.entryCount ?? (r.entries?.length ?? 0),
+        lastActivity: r.lastActivity ?? '',
+        deletedAt: r.deletedAt,
+      });
+    }
+  }
+
+  return results.filter(r => !!r.deletedAt);
 }
 
 export async function getRegister(registerId: number): Promise<RegisterDetail> {
@@ -344,9 +400,23 @@ export async function createRegister(data: {
 
 export async function deleteRegister(registerId: number): Promise<void> {
   const reg = await getRegDoc(registerId);
+  reg.deletedAt = new Date().toISOString();
+  await saveRegDocImmediate(reg);
+  await logAction(reg.businessId, 'Trash Register', `Moved register to recycle bin: ${reg.name}`, { registerId, registerName: reg.name });
+}
+
+export async function permanentlyDeleteRegister(registerId: number): Promise<void> {
+  const reg = await getRegDoc(registerId);
   await deleteDoc(regDoc(registerId));
   firestoreRegisterCache.delete(registerId);
-  await logAction(reg.businessId, 'Delete Register', `Deleted register: ${reg.name}`, { registerId, registerName: reg.name });
+  await logAction(reg.businessId, 'Delete Register', `Permanently deleted register: ${reg.name}`, { registerId, registerName: reg.name });
+}
+
+export async function restoreRegister(registerId: number): Promise<void> {
+  const reg = await getRegDoc(registerId);
+  delete reg.deletedAt;
+  await saveRegDocImmediate(reg);
+  await logAction(reg.businessId, 'Restore Register', `Restored register: ${reg.name}`, { registerId, registerName: reg.name });
 }
 
 export async function renameRegister(registerId: number, newName: string): Promise<RegisterDetail> {

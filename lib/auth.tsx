@@ -30,8 +30,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Simplified session restoration
   useEffect(() => {
     let isMounted = true;
-    console.log('[Auth] Startup...');
-
     const init = async () => {
       try {
         const storage = await getStorage();
@@ -42,10 +40,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(null);
         }
       } catch (err: any) {
-        console.log('[Auth] Storage error:', err.message);
+        // Storage error — ignore silently
       } finally {
         if (isMounted) {
-          console.log('[Auth] Ready.');
           setIsLoading(false);
         }
       }
@@ -53,13 +50,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     init();
     
-    // Safety fallback: always stop loading after a short bit
+    // Safety fallback: always stop loading quickly
     const timer = setTimeout(() => {
       if (isMounted && isLoading) {
-        console.log('[Auth] Safety timeout.');
         setIsLoading(false);
       }
-    }, 1500);
+    }, 800);
 
     return () => { 
       isMounted = false; 

@@ -1,18 +1,15 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   TextInput,
-  FlatList,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   Alert,
-  RefreshControl,
   Animated,
   ScrollView,
   Modal,
-  Dimensions,
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
@@ -45,7 +42,7 @@ import {
 import { CATEGORIES, TEMPLATES, type Template } from '../../lib/templates';
 import { Colors, Spacing, BorderRadius, FontSize, FontWeight, Shadows } from '../../constants/theme';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
 
 export default function HomeScreen() {
   const queryClient = useQueryClient();
@@ -268,14 +265,21 @@ export default function HomeScreen() {
   const categoryData = CATEGORIES.find((c) => c.id === selectedCategory);
   const subTemplates = selectedCategory ? TEMPLATES[selectedCategory] || [] : [];
 
-  // ─── Filter registers ─────────────────────────────────────
-  const filteredRegisters = registers?.filter((r) =>
-    r.name.toLowerCase().includes(search.toLowerCase())
+  // ─── Filter registers (memoised) ────────────────────────────
+  const filteredRegisters = useMemo(() =>
+    registers?.filter((r) => r.name.toLowerCase().includes(search.toLowerCase())),
+    [registers, search]
   );
 
-  // Derived: registers grouped by folder
-  const unfiledRegisters = filteredRegisters?.filter(r => !(r as any).folderId) || [];
-  const folderRegisters = (fId: number) => filteredRegisters?.filter(r => (r as any).folderId === fId) || [];
+  // Derived: registers grouped by folder (memoised)
+  const unfiledRegisters = useMemo(() =>
+    filteredRegisters?.filter(r => !(r as any).folderId) || [],
+    [filteredRegisters]
+  );
+  const folderRegisters = useCallback((fId: number) =>
+    filteredRegisters?.filter(r => (r as any).folderId === fId) || [],
+    [filteredRegisters]
+  );
 
   // ─── Float animation  ────────────────────────────────────
   const floatAnim = useRef(new Animated.Value(0)).current;
@@ -305,7 +309,6 @@ export default function HomeScreen() {
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <View style={styles.container}>
         {/* ─── Sidebar-style Header ─────────────────────────── */}
-      <View style={{ backgroundColor: Colors.white }}>
         <View style={styles.sidebarBrand}>
           <View style={styles.sidebarBrandGroup}>
             <View style={styles.sidebarBrandNameRow}>
@@ -318,11 +321,42 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <View style={styles.header}>
+        <View style={styles.sidebarAddSection}>
+          <TouchableOpacity
+            style={styles.sidebarAddBtn}
+            onPress={() => setIsAddMenuOpen(!isAddMenuOpen)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="add" size={18} color={Colors.white} />
+            <Text style={styles.sidebarAddBtnText}>Add</Text>
+          </TouchableOpacity>
 
-        {/* Search bar — matches web sidebar search */}
-        <View style={styles.searchRow}>
-          <Ionicons name="search" size={16} color={Colors.muted} style={{ marginRight: 8 }} />
+          {isAddMenuOpen && (
+            <View style={styles.addDropdown}>
+              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); router.push('/templates'); }}>
+                <Ionicons name="add-circle-outline" size={16} color={Colors.navy} />
+                <Text style={styles.addDropdownText}>New Register</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); setFolderCreateModal(true); }}>
+                <Ionicons name="folder-outline" size={16} color={Colors.navy} />
+                <Text style={styles.addDropdownText}>New File</Text>
+              </TouchableOpacity>
+              <View style={styles.addDropdownDivider} />
+              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); handlePickExcel(); }}>
+                {excelMutation.isPending ? <ActivityIndicator size="small" color="#107c41" /> : <Ionicons name="document-text-outline" size={16} color="#107c41" />}
+                <Text style={[styles.addDropdownText, { color: '#107c41' }]}>Input Excel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); setImportModalVisible(true); }}>
+                <Ionicons name="code-slash-outline" size={16} color="#f59e0b" />
+                <Text style={[styles.addDropdownText, { color: '#f59e0b' }]}>Input JSON</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* Search */}
+        <View style={styles.sidebarSearch}>
+          <Ionicons name="search" size={14} color={Colors.muted} />
           <TextInput
             style={styles.searchInput}
             placeholder="Search register"
@@ -330,96 +364,35 @@ export default function HomeScreen() {
             value={search}
             onChangeText={setSearch}
           />
-          <TouchableOpacity style={styles.bellBtn}>
-            <Ionicons name="notifications-outline" size={18} color={Colors.muted} />
-          </TouchableOpacity>
-        </View>
-
-        {/* + Add Button and Dropdown matches web sidebar */}
-        <View style={{ zIndex: 10 }}>
-          <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
-            <TouchableOpacity
-              style={[styles.addButton, { flex: 1 }]}
-              onPress={() => setIsAddMenuOpen(!isAddMenuOpen)}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="add" size={18} color={Colors.white} />
-              <Text style={styles.addButtonText}>Add</Text>
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch('')}>
+              <Ionicons name="close" size={14} color={Colors.muted} />
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.importTopButton}
-              onPress={() => router.push('/history')}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="time-outline" size={18} color={Colors.navy} />
-              <Text style={styles.importTopButtonText}>History</Text>
-            </TouchableOpacity>
-          </View>
-
-          {isAddMenuOpen && (
-            <View style={styles.addDropdown}>
-              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); router.push('/templates'); }}>
-                <Ionicons name="add-circle-outline" size={18} color={Colors.navy} />
-                <Text style={styles.addDropdownText}>New Register</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); setFolderCreateModal(true); }}>
-                <Ionicons name="folder-outline" size={18} color={Colors.navy} />
-                <Text style={styles.addDropdownText}>New Folder</Text>
-              </TouchableOpacity>
-              
-              <View style={styles.addDropdownDivider} />
-
-              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); handlePickExcel(); }}>
-                {excelMutation.isPending ? <ActivityIndicator size="small" color="#107c41" /> : <Ionicons name="document-text-outline" size={18} color="#107c41" />}
-                <Text style={[styles.addDropdownText, { color: '#107c41' }]}>Input Excel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.addDropdownItem} onPress={() => { setIsAddMenuOpen(false); setImportModalVisible(true); }}>
-                <Ionicons name="code-slash-outline" size={18} color="#f59e0b" />
-                <Text style={[styles.addDropdownText, { color: '#f59e0b' }]}>Input JSON</Text>
-              </TouchableOpacity>
-            </View>
           )}
         </View>
-        </View>
-      </View>
 
       {/* ─── Main Content ─────────────────────────────────── */}
       {(!filteredRegisters || filteredRegisters.length === 0) ? (
         /* ── Empty State (web "Welcome to Record Book") ─── */
         <View style={styles.emptyContainer}>
-          <Animated.View style={[styles.emptyCard, { transform: [{ translateY: floatAnim }] }]}>
-            <View style={[styles.floatingShape, styles.shapeBlue]} />
-            <View style={[styles.floatingShape, styles.shapeRed]} />
-
-            <View style={styles.iconCircle}>
-              <Ionicons name="book" size={44} color={Colors.navy} />
-            </View>
-
-            <Text style={styles.welcomeTitle}>Welcome to AG Trust</Text>
-            <Text style={styles.welcomeSub}>Tap on your register to start:</Text>
-
-            <TouchableOpacity
-              style={styles.emptyAddBtn}
-              onPress={() => router.push('/templates')}
-            >
-              <Text style={styles.emptyAddBtnText}>Add New Register</Text>
-              <Ionicons name="arrow-forward" size={16} color={Colors.white} />
+          <Ionicons name="shield-checkmark" size={100} color={Colors.navy} style={{ marginBottom: 24 }} />
+          <Text style={styles.welcomeTitle}>Welcome to AG Trust</Text>
+          <Text style={styles.welcomeSub}>Create your first register by selecting a template, starting from scratch, or uploading Excel data.</Text>
+          <View style={styles.emptyActions}>
+            <TouchableOpacity style={styles.emptyBtn} onPress={() => router.push('/templates')}>
+              <Ionicons name="add" size={16} color={Colors.white} />
+              <Text style={styles.emptyBtnText}>Add New Register</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.emptyAddBtn, { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, marginTop: 12, shadowOpacity: 0 }]}
-              onPress={handlePickExcel}
-            >
-              <Text style={[styles.emptyAddBtnText, { color: Colors.navy }]}>{excelMutation.isPending ? 'Importing...' : 'Upload Excel / CSV'}</Text>
-              <Ionicons name="arrow-up-circle-outline" size={16} color={Colors.navy} />
+            <TouchableOpacity style={[styles.emptyBtn, styles.emptyBtnSecondary]} onPress={handlePickExcel}>
+              <Ionicons name="cloud-upload-outline" size={16} color={Colors.foreground} />
+              <Text style={[styles.emptyBtnText, { color: Colors.foreground }]}>{excelMutation.isPending ? 'Importing...' : 'Import Excel'}</Text>
             </TouchableOpacity>
-          </Animated.View>
+          </View>
         </View>
       ) : (
         /* ── Register List with Folders (web sidebar) ─── */
         <ScrollView
-          style={{ flex: 1 }}
+          style={{ flex: 1, backgroundColor: Colors.white }}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
@@ -430,77 +403,77 @@ export default function HomeScreen() {
             const regsInFolder = folderRegisters(folder.id);
             const isExpanded = expandedFolders[folder.id] ?? true;
             return (
-              <View key={`folder-${folder.id}`} style={{ marginBottom: 4 }}>
+              <View key={`folder-${folder.id}`} style={styles.sidebarFolderGroup}>
                 <TouchableOpacity
-                  style={styles.folderRow}
+                  style={styles.sidebarFolderHeader}
                   onPress={() => setExpandedFolders(prev => ({ ...prev, [folder.id]: !isExpanded }))}
                   onLongPress={() => setFolderMenuId(folder.id)}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={16} color={Colors.muted} />
-                  <Ionicons name="folder" size={20} color="#f59e0b" />
+                  <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={14} color={Colors.muted} style={{ width: 16 }} />
+                  <Ionicons name="folder" size={16} color={Colors.navy} />
                   <Text style={styles.folderName} numberOfLines={1}>{folder.name}</Text>
-                  <Text style={styles.folderCount}>{regsInFolder.length}</Text>
                   <TouchableOpacity onPress={() => setFolderMenuId(folder.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                    <Ionicons name="ellipsis-vertical" size={14} color={Colors.mutedLight} />
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: Colors.muted }}>⋮</Text>
                   </TouchableOpacity>
                 </TouchableOpacity>
-                {isExpanded && regsInFolder.map(item => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[styles.registerRow, { paddingLeft: 44 }]}
-                    onPress={() => router.push(`/register/${item.id}`)}
-                    onLongPress={() => setRegisterMenuId(item.id)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[styles.registerIconBg, (item as any).iconColor && { backgroundColor: `${(item as any).iconColor}20` }]}>
-                      <Ionicons name={(item.icon as any) || 'document'} size={20} color={(item as any).iconColor || Colors.navy} />
-                    </View>
-                    <View style={styles.registerInfo}>
-                      <Text style={styles.registerName} numberOfLines={1}>{item.name}</Text>
-                      <Text style={styles.registerMeta}>{item.entryCount} entries • {new Date(item.updatedAt).toLocaleDateString()}</Text>
-                    </View>
-                    <TouchableOpacity onPress={() => setRegisterMenuId(item.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                      <Ionicons name="ellipsis-vertical" size={16} color={Colors.mutedLight} />
-                    </TouchableOpacity>
-                  </TouchableOpacity>
-                ))}
+
+                {isExpanded && (
+                  <View style={styles.sidebarFolderChildren}>
+                    {regsInFolder.length === 0 ? (
+                      <Text style={styles.emptyFolderText}>Empty folder</Text>
+                    ) : (
+                      regsInFolder.map(item => (
+                        <TouchableOpacity
+                          key={item.id}
+                          style={[styles.registerItem, { paddingLeft: 44 }]}
+                          onPress={() => router.push(`/register/${item.id}`)}
+                          onLongPress={() => setRegisterMenuId(item.id)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[styles.registerIconBg, (item as any).iconColor && { backgroundColor: `${(item as any).iconColor}20` }]}>
+                            <Ionicons name={(item.icon as any) || 'document'} size={16} color={(item as any).iconColor || Colors.navy} />
+                          </View>
+                          <View style={styles.registerInfo}>
+                            <Text style={styles.registerName} numberOfLines={1}>{item.name}</Text>
+                            <Text style={styles.registerMeta}>{item.entryCount} entries • {new Date(item.updatedAt).toLocaleDateString()}</Text>
+                          </View>
+                          <TouchableOpacity onPress={() => setRegisterMenuId(item.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                            <Text style={{ fontSize: 15, fontWeight: '800', color: Colors.muted }}>⋮</Text>
+                          </TouchableOpacity>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </View>
+                )}
               </View>
             );
           })}
 
-          {/* Unfiled registers */}
-          {unfiledRegisters.map(item => (
-            <TouchableOpacity
-              key={item.id}
-              style={styles.registerRow}
-              onPress={() => router.push(`/register/${item.id}`)}
-              onLongPress={() => setRegisterMenuId(item.id)}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.registerIconBg, (item as any).iconColor && { backgroundColor: `${(item as any).iconColor}20` }]}>
-                <Ionicons name={(item.icon as any) || 'document'} size={20} color={(item as any).iconColor || Colors.navy} />
-              </View>
-              <View style={styles.registerInfo}>
-                <Text style={styles.registerName} numberOfLines={1}>{item.name}</Text>
-                <Text style={styles.registerMeta}>{item.entryCount} entries • {new Date(item.updatedAt).toLocaleDateString()}</Text>
-                {item.lastActivity ? <Text style={[styles.registerMeta, { fontStyle: 'italic', marginTop: 2 }]} numberOfLines={1}>{item.lastActivity}</Text> : null}
-              </View>
-              <TouchableOpacity onPress={() => setRegisterMenuId(item.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Ionicons name="ellipsis-vertical" size={16} color={Colors.mutedLight} />
+          <View style={styles.unassignedZone}>
+            <Text style={styles.unassignedLabel}>UNASSIGNED</Text>
+            {unfiledRegisters.map(item => (
+              <TouchableOpacity
+                key={item.id}
+                style={styles.registerItem}
+                onPress={() => router.push(`/register/${item.id}`)}
+                onLongPress={() => setRegisterMenuId(item.id)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.registerIconBg, (item as any).iconColor && { backgroundColor: `${(item as any).iconColor}20` }]}>
+                  <Ionicons name={(item.icon as any) || 'document'} size={16} color={(item as any).iconColor || Colors.navy} />
+                </View>
+                <View style={styles.registerInfo}>
+                  <Text style={styles.registerName} numberOfLines={1}>{item.name}</Text>
+                  <Text style={styles.registerMeta}>{item.entryCount} entries • {new Date(item.updatedAt).toLocaleDateString()}</Text>
+                  {item.lastActivity ? <Text style={[styles.registerMeta, { fontStyle: 'italic', marginTop: 2 }]} numberOfLines={1}>{item.lastActivity}</Text> : null}
+                </View>
+                <TouchableOpacity onPress={() => setRegisterMenuId(item.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Text style={{ fontSize: 15, fontWeight: '800', color: Colors.muted }}>⋮</Text>
+                </TouchableOpacity>
               </TouchableOpacity>
-            </TouchableOpacity>
-          ))}
-
-          {/* Create Folder button */}
-          <TouchableOpacity
-            style={styles.createFolderBtn}
-            onPress={() => setFolderCreateModal(true)}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="folder-open-outline" size={16} color={Colors.muted} />
-            <Text style={styles.createFolderText}>Create Folder</Text>
-          </TouchableOpacity>
+            ))}
+          </View>
         </ScrollView>
       )}
 
@@ -885,63 +858,48 @@ const styles = StyleSheet.create({
   // ── Header (web sidebar top) ────────────────────────────
   sidebarBrand: {
     backgroundColor: Colors.navy,
-    paddingHorizontal: Spacing.xl,
+    paddingHorizontal: 20,
     paddingTop: Platform.OS === 'ios' ? 60 : 30,
-    paddingBottom: Spacing.lg,
+    paddingBottom: 16,
+    flexDirection: 'column',
   },
   sidebarBrandGroup: { flexDirection: 'column' },
-  sidebarBrandNameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  sidebarBrandNameRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   sidebarBrandLogo: {
-    width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.white,
+    width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.white,
     justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.25, shadowRadius: 3, elevation: 2,
   },
-  sidebarBrandName: { color: Colors.white, fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
-  sidebarBrandSub: { color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: '500', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2, marginLeft: 44 },
+  sidebarBrandName: { color: Colors.white, fontSize: 13, fontWeight: '800', letterSpacing: 0.2 },
+  sidebarBrandSub: { color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: '500', textTransform: 'uppercase', letterSpacing: 0.5 },
 
-  header: {
+  sidebarAddSection: {
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 8,
     backgroundColor: Colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing.lg,
+    zIndex: 10,
   },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F0F4FF',
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    height: 40,
-    marginBottom: Spacing.md,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: FontSize.sm,
-    color: Colors.foreground,
-  },
-  bellBtn: {
-    marginLeft: Spacing.sm,
-    padding: Spacing.xs,
-  },
-  addButton: {
+  sidebarAddBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+    marginBottom: 12,
+    height: 40,
     backgroundColor: Colors.navy,
-    borderRadius: BorderRadius.md,
-    paddingVertical: 12,
-    gap: Spacing.sm,
-    ...Shadows.button,
+    borderRadius: 8,
+    width: '100%',
+    shadowColor: Colors.navy, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4,
   },
-  addButtonText: {
+  sidebarAddBtnText: {
     color: Colors.white,
-    fontWeight: FontWeight.bold,
-    fontSize: FontSize.sm,
+    fontSize: 13,
+    fontWeight: '600',
   },
   addDropdown: {
-    position: 'absolute', top: 50, left: 0, width: 220,
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    position: 'absolute', top: 56, left: 12, width: 220,
+    backgroundColor: Colors.white, borderRadius: 8,
     padding: 6, ...Shadows.elevated,
     borderWidth: 1, borderColor: Colors.border,
     zIndex: 100,
@@ -949,7 +907,7 @@ const styles = StyleSheet.create({
   addDropdownItem: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 12, paddingVertical: 10,
-    borderRadius: BorderRadius.md,
+    borderRadius: 8,
   },
   addDropdownText: {
     fontSize: 14, fontWeight: '600', color: Colors.foreground,
@@ -957,86 +915,103 @@ const styles = StyleSheet.create({
   addDropdownDivider: {
     height: 1, backgroundColor: Colors.borderLight, marginVertical: 4,
   },
+  sidebarSearch: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    height: 38,
+    marginHorizontal: 20,
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: Colors.foreground,
+    marginLeft: 8,
+  },
 
   // ── Register List (web sidebar list) ────────────────────
   listContent: {
-    padding: Spacing.md,
     paddingBottom: 100,
   },
-  registerRow: {
+  sidebarFolderGroup: {
+    marginBottom: 4,
+  },
+  sidebarFolderHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    borderRadius: BorderRadius.lg,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    gap: 8,
+    marginHorizontal: 8,
+    borderRadius: 8,
+  },
+  folderName: {
+    flex: 1,
+    fontWeight: '600',
+    fontSize: 13,
+    color: Colors.navy,
+  },
+  sidebarFolderChildren: {
+    paddingBottom: 4,
+  },
+  emptyFolderText: {
+    fontSize: 12,
+    color: Colors.muted,
+    paddingVertical: 4,
+    paddingLeft: 44,
+    fontStyle: 'italic',
+  },
+  registerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginHorizontal: 8,
     marginBottom: 2,
   },
   registerIconBg: {
     width: 36,
     height: 36,
+    borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  registerEmoji: {
-    fontSize: 20,
+    backgroundColor: 'rgba(27,42,74,0.08)',
   },
   registerInfo: {
     flex: 1,
   },
   registerName: {
-    fontWeight: FontWeight.semibold,
-    fontSize: FontSize.sm,
+    fontWeight: '600',
+    fontSize: 13,
     color: Colors.foreground,
   },
   registerMeta: {
-    fontSize: FontSize.xs,
+    fontSize: 11,
     color: Colors.muted,
     marginTop: 2,
   },
-
-  // ── Folder styles (web sidebar folders) ─────────────────
-  folderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    borderRadius: BorderRadius.lg,
-    marginBottom: 2,
-    backgroundColor: '#fefce8',
+  unassignedZone: {
+    paddingBottom: 20,
+    minHeight: 100,
+    marginTop: 16,
   },
-  folderName: {
-    flex: 1,
-    fontWeight: FontWeight.semibold,
-    fontSize: FontSize.sm,
-    color: Colors.foreground,
-  },
-  folderCount: {
-    fontSize: FontSize.xs,
+  unassignedLabel: {
+    fontSize: 12,
+    fontWeight: '600',
     color: Colors.muted,
-    backgroundColor: Colors.borderLight,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  createFolderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-    marginTop: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderStyle: 'dashed',
-    borderRadius: BorderRadius.md,
-  },
-  createFolderText: {
-    fontSize: FontSize.sm,
-    color: Colors.muted,
-    fontWeight: FontWeight.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    marginBottom: 4,
   },
 
   // ── Empty State (web welcome) ───────────────────────────
@@ -1044,64 +1019,52 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: Spacing.xxl,
-  },
-  emptyCard: {
+    padding: 40,
     backgroundColor: Colors.white,
-    borderRadius: 20,
-    padding: Spacing.huge,
-    alignItems: 'center',
-    width: '100%',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.06)',
-    borderStyle: 'dashed',
-    ...Shadows.card,
-    overflow: 'hidden',
-  },
-  iconCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: '#F6C943',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: Spacing.xl,
-    zIndex: 2,
-    borderWidth: 4,
-    borderColor: '#FFF8E1',
   },
   welcomeTitle: {
-    fontSize: 22,
+    fontSize: 28,
     fontWeight: '800',
     color: Colors.navy,
-    marginBottom: Spacing.sm,
+    marginBottom: 12,
     textAlign: 'center',
   },
   welcomeSub: {
-    fontSize: FontSize.md,
+    fontSize: 16,
     color: Colors.muted,
     textAlign: 'center',
-    marginBottom: Spacing.xxl,
+    marginBottom: 32,
+    maxWidth: 460,
   },
-  emptyAddBtn: {
+  emptyActions: {
+    flexDirection: 'column',
+    gap: 16,
+    width: '100%',
+    maxWidth: 300,
+  },
+  emptyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: Colors.navy,
-    paddingHorizontal: Spacing.xxl,
+    paddingHorizontal: 24,
     paddingVertical: 14,
-    borderRadius: BorderRadius.full,
-    gap: Spacing.sm,
-    zIndex: 2,
+    borderRadius: 16,
+    gap: 8,
     ...Shadows.button,
   },
-  emptyAddBtnText: {
+  emptyBtnText: {
     color: Colors.white,
-    fontSize: FontSize.md,
-    fontWeight: FontWeight.bold,
+    fontSize: 15,
+    fontWeight: '700',
   },
-  floatingShape: { position: 'absolute', borderRadius: 8, opacity: 0.7 },
-  shapeBlue: { width: 40, height: 40, backgroundColor: '#D0E3F5', top: 30, right: 25, transform: [{ rotate: '15deg' }] },
-  shapeRed: { width: 55, height: 45, backgroundColor: '#FCD2D8', bottom: -10, left: 35, transform: [{ rotate: '-20deg' }] },
+  emptyBtnSecondary: {
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
 
   // ── Template Modal (matches web Dialog) ─────────────────
   modalOverlay: {

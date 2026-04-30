@@ -534,7 +534,7 @@ a { text-decoration: none; color: inherit; }
   overflow: hidden;           /* names never push menu button off edge */
   min-width: 0;
 }
-.register-item:hover { background: var(--bg-light); }
+.register-item:hover { background: var(--surface-hover); }
 .register-item.active { 
   background: #eff6ff; 
   color: var(--primary);
@@ -1601,7 +1601,6 @@ a { text-decoration: none; color: inherit; }
   position: sticky;
   left: 0;
   z-index: 11;
-  resize: vertical;
   overflow: hidden;
 }
 .spreadsheet td.serial-header-checkbox {
@@ -4887,3 +4886,185 @@ body.modal-open {
   width: 80%;
 }
 
+.sidebar {
+  transition: width 0.2s ease, min-width 0.2s ease;
+}
+
+.sidebar--collapsed {
+  width: 70px !important;
+  min-width: 70px !important;
+}
+
+.sidebar--collapsed .sidebar-brand-name span,
+.sidebar--collapsed .sidebar-brand-sub,
+.sidebar--collapsed .sidebar-add-text,
+.sidebar--collapsed .sidebar-folder-header span,
+.sidebar--collapsed .register-item-info,
+.sidebar--collapsed .sidebar-footer-text,
+.sidebar--collapsed .sidebar-unassigned-zone > div > span,
+.sidebar--collapsed .sidebar-unassigned-zone button,
+.sidebar--collapsed .sidebar-folder-header .register-item-menu,
+.sidebar--collapsed .register-item .register-item-menu,
+.sidebar--collapsed .sidebar-import-session,
+.sidebar--collapsed .sidebar-new-section {
+  display: none !important;
+}
+
+.sidebar--collapsed .sidebar-folder-header,
+.sidebar--collapsed .register-item,
+.sidebar--collapsed .sidebar-footer {
+  justify-content: center;
+}
+.sidebar--collapsed .register-item {
+  padding: 10px 0;
+  overflow: visible !important;
+}
+.sidebar--collapsed .sidebar-folder-header {
+  overflow: visible !important;
+}
+
+/* Custom CSS Tooltip for fast and responsive hover */
+.sidebar--collapsed .register-item::after,
+.sidebar--collapsed .sidebar-folder-header::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%) translateX(4px);
+  background: var(--navy-dark);
+  color: white;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s ease, transform 0.1s ease, visibility 0.1s;
+  z-index: 10000;
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+  margin-left: 8px;
+}
+.sidebar--collapsed .register-item:hover::after,
+.sidebar--collapsed .sidebar-folder-header:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) translateX(8px);
+}
+
+.sidebar--collapsed .sidebar-add-btn {
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 12px;
+}
+
+.sidebar-collapse-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.sidebar-collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.sidebar--collapsed .sidebar-brand-logo {
+  margin: 0 auto;
+}
+.sidebar--collapsed .sidebar-brand-group {
+  display: none !important;
+}
+.sidebar--collapsed .sidebar-brand {
+  justify-content: center;
+  padding: 16px 0;
+}
+.sidebar--collapsed .sidebar-collapse-btn {
+  margin: 0 auto;
+}
+
+/* Col resize handle overrides */
+.spreadsheet th .col-header-inner {
+  overflow: visible !important;
+}
+
+.col-resize-handle {
+  position: absolute !important;
+  top: 0 !important;
+  right: -6px !important;
+  width: 14px !important;
+  height: 100% !important;
+  cursor: col-resize !important;
+  z-index: 20 !important;
+}
+
+.col-resize-handle:hover,
+.col-resize-handle:active {
+  background: var(--primary) !important;
+  opacity: 0.3 !important;
+}
+
+/* Search Bar Overrides */
+.pab-search {
+  flex-direction: row !important;
+  max-width: 200px !important;
+  border-radius: 6px !important;
+  border: 1px solid rgba(26,35,126,0.2) !important;
+  background: #ffffff !important;
+  height: 28px !important;
+  padding: 0 8px !important;
+  gap: 6px !important;
+}
+.pab-search:focus-within {
+  border-color: var(--navy) !important;
+  box-shadow: 0 0 0 2px rgba(26,35,126,0.06) !important;
+}
+.pab-search-input {
+  width: 150px !important;
+  min-width: 150px !important;
+  padding: 0 !important;
+}
+.pab-search-icon {
+  color: var(--placeholder) !important;
+}
+
+/* ── Table Layout Stability ── */
+/* Lock cell dimensions so typing never causes layout shift */
+.spreadsheet td {
+  height: 42px !important;
+  max-height: 42px !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+.spreadsheet td .cell-input,
+.spreadsheet td .cell-url-wrap,
+.spreadsheet td .cell-date,
+.spreadsheet td .cell-dropdown,
+.spreadsheet td .cell-formula,
+.spreadsheet td .cell-currency,
+.spreadsheet td .cell-checkbox-wrap,
+.spreadsheet td .cell-rating,
+.spreadsheet td .cell-image-wrap,
+.spreadsheet td .cell-auto-increment-readonly {
+  height: 42px !important;
+  max-height: 42px !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+/* Prevent text from expanding cells */
+.spreadsheet td .cell-input {
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+/* Prevent the cell-url-wrap children from growing */
+.spreadsheet td .cell-url-wrap .cell-input {
+  min-width: 0 !important;
+}
