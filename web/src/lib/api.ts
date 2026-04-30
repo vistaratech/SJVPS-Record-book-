@@ -141,6 +141,14 @@ export interface HistoryEntry {
 const registersCol = () => collection(db, 'registers');
 const regDoc = (id: number) => doc(db, 'registers', id.toString());
 
+// Chunked storage: entries are split into subcollection documents of this size
+// to stay well under Firestore's 1 MiB document limit.
+const ENTRIES_PER_CHUNK = 200;
+const chunksCol = (registerId: number) =>
+  collection(db, 'registers', registerId.toString(), 'chunks');
+const chunkDoc = (registerId: number, chunkIndex: number) =>
+  doc(db, 'registers', registerId.toString(), 'chunks', chunkIndex.toString());
+
 // In-memory cache so reads never hit Firestore after the first load
 const firestoreRegisterCache = new Map<number, RegisterDetail>();
 // Mutation queue: ensures operations on the same register run serially to prevent race conditions
@@ -199,9 +207,7 @@ function populateAutoIncrement(reg: RegisterDetail, columnId: number) {
 }
 
 async function getRegDoc(registerId: number): Promise<RegisterDetail> {
-  // Local filesystem checks removed.
   // Return a shallow-safe clone from cache — avoids a Firestore round-trip on every mutation
-  // structuredClone is ~3× faster than JSON.parse(JSON.stringify) for plain-object graphs
   if (firestoreRegisterCache.has(registerId)) {
     return structuredClone(firestoreRegisterCache.get(registerId)!);
   }
@@ -211,10 +217,22 @@ async function getRegDoc(registerId: number): Promise<RegisterDetail> {
   
   // Ensure basic arrays exist so mutations don't crash
   if (!data.columns) data.columns = [];
-  if (!data.entries) data.entries = [];
   if (!data.pages) data.pages = [];
   if (!data.sharedWith) data.sharedWith = [];
-  
+
+  // ── Chunked entry loading ──
+  // If the main document has no inline entries, load from subcollection chunks.
+  // Legacy registers that still have entries[] inline will use those directly.
+  if (!data.entries || data.entries.length === 0) {
+    const chunkSnap = await getDocs(chunksCol(registerId));
+    const allEntries: Entry[] = [];
+    chunkSnap.docs.forEach(d => {
+      const chunkData = d.data() as { entries: Entry[] };
+      if (chunkData.entries) allEntries.push(...chunkData.entries);
+    });
+    data.entries = allEntries;
+  }
+
   // Ensure every entry has a cells object
   data.entries.forEach(e => { if (!e.cells) e.cells = {}; });
 
@@ -225,20 +243,47 @@ async function getRegDoc(registerId: number): Promise<RegisterDetail> {
 
 /**
  * Immediately persist a register to Firestore — bypasses debounce.
- * Use for structural changes (add/delete/rename column, add/delete entries)
- * that MUST survive a page refresh.
+ * Entries are stored in subcollection chunks (200 per chunk) to stay under
+ * Firestore's 1 MiB document limit. The main document stores metadata,
+ * columns, pages, and settings — but NOT entries.
  */
 async function saveRegDocImmediate(reg: RegisterDetail): Promise<void> {
-  // Firestore does not allow 'undefined' values. JSON conversion is a reliable
-  // way to strip undefined keys before persistence.
-  const cleaned = JSON.parse(JSON.stringify(reg));
-  
   // Update cache immediately so subsequent mutations see this state
   firestoreRegisterCache.set(reg.id, reg);
-  
-  // Do NOT swallow errors here — we want mutations to fail (and roll back optimistically) 
-  // if Firestore rejects the write (e.g. offline, permissions, or invalid data).
-  await setDoc(regDoc(reg.id), cleaned);
+
+  // Separate entries from the main document
+  const entries = reg.entries || [];
+  const mainDoc: any = JSON.parse(JSON.stringify(reg));
+  // Remove entries from the main document — they go into subcollection chunks
+  mainDoc.entries = [];
+  mainDoc.entryCount = entries.length;
+
+  // Write the main document (metadata + columns + pages, NO entries)
+  await setDoc(regDoc(reg.id), mainDoc);
+
+  // ── Write entry chunks to subcollection ──
+  // First, delete any existing chunks that are now beyond the new chunk count
+  const existingChunksSnap = await getDocs(chunksCol(reg.id));
+  const newChunkCount = Math.ceil(entries.length / ENTRIES_PER_CHUNK) || 0;
+
+  const deletePromises: Promise<void>[] = [];
+  existingChunksSnap.docs.forEach(d => {
+    const idx = parseInt(d.id, 10);
+    if (idx >= newChunkCount) {
+      deletePromises.push(deleteDoc(d.ref));
+    }
+  });
+
+  // Write new chunks in parallel
+  const writePromises: Promise<void>[] = [];
+  for (let i = 0; i < entries.length; i += ENTRIES_PER_CHUNK) {
+    const chunkIndex = Math.floor(i / ENTRIES_PER_CHUNK);
+    const chunkEntries = entries.slice(i, i + ENTRIES_PER_CHUNK);
+    const cleaned = JSON.parse(JSON.stringify({ entries: chunkEntries }));
+    writePromises.push(setDoc(chunkDoc(reg.id, chunkIndex), cleaned));
+  }
+
+  await Promise.all([...deletePromises, ...writePromises]);
 }
 
 async function flushPendingWrite(registerId: number): Promise<void> {
@@ -387,13 +432,8 @@ export async function createRegister(data: {
     }
     newReg.entryCount = 10;
   }
-  // Store in memory-cache immediately so in-memory reads see it right away
-  firestoreRegisterCache.set(newId, newReg);
-  // Write directly to Firestore NOW (no debounce) — new docs must be persisted before
-  // listRegisters queries Firestore, otherwise the new register won't appear in the list.
-  // We use JSON.parse(JSON.stringify) to strip any undefined values (like optional iconColor or formula)
-  // which Firebase v9+ natively rejects unless ignoreUndefinedProperties is globally configured.
-  await setDoc(regDoc(newId), JSON.parse(JSON.stringify(newReg)));
+  // Use saveRegDocImmediate which handles chunked entry storage automatically
+  await saveRegDocImmediate(newReg);
   await logAction(data.businessId, 'Create Register', `Created register: ${data.name}`, { registerId: newId, registerName: data.name });
   return newReg;
 }
@@ -407,6 +447,11 @@ export async function deleteRegister(registerId: number): Promise<void> {
 
 export async function permanentlyDeleteRegister(registerId: number): Promise<void> {
   const reg = await getRegDoc(registerId);
+  // Delete all entry chunks in subcollection first
+  const chunkSnap = await getDocs(chunksCol(registerId));
+  const chunkDeletes = chunkSnap.docs.map(d => deleteDoc(d.ref));
+  await Promise.all(chunkDeletes);
+  // Then delete the main document
   await deleteDoc(regDoc(registerId));
   firestoreRegisterCache.delete(registerId);
   await logAction(reg.businessId, 'Delete Register', `Permanently deleted register: ${reg.name}`, { registerId, registerName: reg.name });

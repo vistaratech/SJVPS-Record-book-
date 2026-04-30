@@ -1452,7 +1452,7 @@ a { text-decoration: none; color: inherit; }
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SPREADSHEET
 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-.spreadsheet-wrapper { flex: 1; overflow: auto; position: relative; }
+.spreadsheet-wrapper { flex: 1; overflow: auto; position: relative; overflow-anchor: none; }
 .spreadsheet { table-layout: fixed; border-collapse: collapse; min-width: 100%; }
 .spreadsheet th {
   position: sticky;
@@ -3237,6 +3237,7 @@ a { text-decoration: none; color: inherit; }
     flex: 1;
     /* Limit repaint scope to this container so cell edits don't repaint the full page (Fix #8) */
     contain: layout;
+    overflow-anchor: none;
   }
   .spreadsheet th {
     padding: 0 8px;
