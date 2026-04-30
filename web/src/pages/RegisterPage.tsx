@@ -2287,12 +2287,21 @@ export default function RegisterPage() {
   columnsRef.current = columns;
 
   // Memoize column width CSS so it doesn't recalculate on cell edits
+  // For registers with many columns, scale down the default width to reduce horizontal bloat
+  const defaultColWidth = useMemo(() => {
+    const count = visibleColumns.length;
+    if (count <= 8) return 150;
+    if (count <= 15) return 130;
+    if (count <= 30) return 120;
+    return 100; // 30+ columns: compact mode
+  }, [visibleColumns.length]);
+
   const colWidthsCss = useMemo(() => {
     return visibleColumns.map((col, idx) => {
-      const w = colWidths[col.id] || 150;
+      const w = colWidths[col.id] || defaultColWidth;
       return `.spreadsheet tr>:nth-child(${idx + 2}){width:${w}px!important;min-width:${w}px!important;max-width:${w}px!important}.spreadsheet tr>:nth-child(${idx + 2}) .col-header-inner{width:${w}px!important;min-width:${w}px!important;max-width:${w}px!important}`;
     }).join('');
-  }, [visibleColumns, colWidths]);
+  }, [visibleColumns, colWidths, defaultColWidth]);
 
   // Defer formula/stats recalculation so it doesn't block keystrokes (Fix #3)
   // Optimized single-pass statistics calculation (Fix performance #4)
@@ -2430,11 +2439,11 @@ export default function RegisterPage() {
     for (const vc of visibleColumns) {
       if (frozenColumns.has(vc.id)) {
         offsets[vc.id] = left;
-        left += colWidths[vc.id] || 150;
+        left += colWidths[vc.id] || defaultColWidth;
       }
     }
     return offsets;
-  }, [visibleColumns, frozenColumns, colWidths]);
+  }, [visibleColumns, frozenColumns, colWidths, defaultColWidth]);
 
 
   if (isLoading) return (
@@ -2689,7 +2698,7 @@ export default function RegisterPage() {
               <th className="actions" />
             </tr>
           </thead>
-          <tbody style={{ height: `${totalVirtualHeight}px` }}>
+          <tbody>
             {paddingTop > 0 && (
               <tr>
                 <td style={{ height: `${paddingTop}px` }} colSpan={visibleColumns.length + 2} />
