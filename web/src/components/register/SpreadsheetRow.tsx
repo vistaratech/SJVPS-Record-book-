@@ -257,6 +257,14 @@ interface SpreadsheetRowProps {
   entry: Entry;
   idx: number;
   visibleColumns: Column[];
+  /** Only the columns visible in the current horizontal viewport window */
+  colSlice?: Column[];
+  /** Horizontal left padding (px) to represent off-screen columns left of viewport */
+  paddingLeft?: number;
+  /** Horizontal right padding (px) to represent off-screen columns right of viewport */
+  paddingRight?: number;
+  /** Fixed row height for virtualized stability */
+  rowHeight?: number;
   isSelected: boolean;
   toggleSelectRow: (id: number) => void;
   totalRows: number;
@@ -270,6 +278,8 @@ interface SpreadsheetRowProps {
   onImagePreview?: (src: string) => void;
   frozenColumns?: Set<number>;
   frozenLeftOffsets?: Record<number, number>;
+  colWidths?: Record<number, number>;
+  defaultColWidth?: number;
 }
 
 export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: SpreadsheetRowProps) {
@@ -277,6 +287,10 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     entry,
     idx,
     visibleColumns,
+    colSlice,
+    paddingLeft = 0,
+    paddingRight = 0,
+    rowHeight,
     totalRows,
     handleCellChange,
     openDatePicker,
@@ -287,7 +301,11 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     onImagePreview,
     frozenColumns,
     frozenLeftOffsets,
+    colWidths,
+    defaultColWidth = 150,
   } = props;
+  // Columns to actually render — either the virtual slice or all visible columns
+  const renderColumns = colSlice ?? visibleColumns;
 
 
   const handleCellKeyDown = useCallback((e: React.KeyboardEvent, colId: number | string, colIdx: number) => {
@@ -351,18 +369,22 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     onRowDetail?.(entry);
   }, [entry, onRowDetail]);
   return (
-    <tr>
+    <tr style={rowHeight ? { height: rowHeight, maxHeight: rowHeight } : undefined}>
       <td className="serial" style={{ cursor: 'pointer' }} onClick={handleSerialClick} title="Click to view details">{idx + 1}</td>
-      {visibleColumns.map((col, colIdx) => {
+      {/* Left padding cell for column virtualization */}
+      {paddingLeft > 0 && <td key="pad-left" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />}
+      {renderColumns.map((col, colIdx) => {
         const isFrozen = frozenColumns?.has(col.id);
-        let frozenStyle: React.CSSProperties | undefined;
+        const w = colWidths?.[col.id] || defaultColWidth;
+        let cellStyle: React.CSSProperties = { width: w, minWidth: w, maxWidth: w };
+        
         if (isFrozen) {
           const left = frozenLeftOffsets?.[col.id] || 50;
-          frozenStyle = { position: 'sticky', left, zIndex: 5, background: '#fafbff' };
+          cellStyle = { ...cellStyle, position: 'sticky', left, zIndex: 5, background: '#fafbff' };
         }
         
         return (
-        <td key={col.id} className={isFrozen ? 'frozen-col' : ''} style={frozenStyle}>
+        <td key={col.id} className={isFrozen ? 'frozen-col' : ''} style={cellStyle}>
           {col.type === 'formula' ? (
             <FormulaCell idx={idx} col={col} entry={entry} registerColumns={registerColumns} onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} />
           ) : col.type === 'date' ? (
@@ -485,11 +507,13 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
         </td>
         );
       })}
+      {/* Right padding cell for column virtualization */}
+      {paddingRight > 0 && <td key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />}
       <td className="actions">
-        <button 
-          className="row-menu-btn" 
-          aria-label="Row Options" 
-          title="Row Options" 
+        <button
+          className="row-menu-btn"
+          aria-label="Row Options"
+          title="Row Options"
           onClick={() => toggleMenu(entry.id)}
         >
           <span style={{ fontSize: '15px', fontWeight: 800, letterSpacing: '-1px', lineHeight: 1 }}>⋮</span>

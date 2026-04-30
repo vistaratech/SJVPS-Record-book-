@@ -5049,7 +5049,6 @@ body.modal-open {
 /* Spacer cells must be unconstrained for virtualizer scroll height */
 .spreadsheet td.spacer {
   max-height: none !important;
-  height: auto !important;
   overflow: visible !important;
   padding: 0 !important;
   border: none !important;

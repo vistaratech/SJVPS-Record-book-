@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
+import toast from 'react-hot-toast';
 import { useNavigate, Routes, Route, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -6,7 +7,7 @@ import {
   renameRegister, duplicateRegister, importExcelData,
   type RegisterSummary,
 } from '../lib/api';
-import * as XLSX from 'xlsx';
+// XLSX parsing is now done in a Web Worker (public/xlsxWorker.js) to prevent UI freezes
 import { importLocalFolderToCloud } from '../lib/localFs';
 import { Pencil, Copy, Trash2, Eye, Scissors } from 'lucide-react';
 import { DashboardContent } from '../components/home/DashboardContent';
@@ -139,21 +140,67 @@ export default function HomePage() {
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
+
+    const toastId = toast.loading(`📊 Parsing "${file.name.replace(/\.[^/.]+$/, '')}"…`);
+
     const reader = new FileReader();
     reader.onload = (evt) => {
+      const buffer = evt.target?.result as ArrayBuffer;
+      if (!buffer) { toast.error('Failed to read file', { id: toastId }); return; }
+
       try {
-        const wb = XLSX.read(evt.target?.result, { type: 'binary' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, string>[];
-        excelMutation.mutate({ name: file.name.replace(/\.[^/.]+$/, ''), data }, {
-          onSuccess: (newReg) => navigate(`/register/${newReg.id}`)
-        });
+        // Spin up the web worker to parse off the main thread
+        const worker = new Worker('/xlsxWorker.js');
+        worker.postMessage({ type: 'PARSE', payload: { buffer, fileName: file.name } }, [buffer]);
+
+        worker.onmessage = (ev) => {
+          const { type, payload } = ev.data;
+          if (type === 'PROGRESS') {
+            toast.loading(`📊 ${payload.message}`, { id: toastId });
+          } else if (type === 'RESULT') {
+            worker.terminate();
+            const { rows } = payload as { headers: string[]; rows: Record<string, string>[]; fileName: string };
+            const name = file.name.replace(/\.[^/.]+$/, '');
+            toast.loading(`💾 Saving ${rows.length} rows…`, { id: toastId });
+            excelMutation.mutate({ name, data: rows }, {
+              onSuccess: (newReg) => {
+                toast.success(`✅ Imported ${rows.length} rows`, { id: toastId });
+                navigate(`/register/${newReg.id}`);
+              },
+              onError: (err: Error) => {
+                toast.error(err.message || 'Import failed', { id: toastId });
+              }
+            });
+          } else if (type === 'ERROR') {
+            worker.terminate();
+            toast.error(`Parse error: ${payload.message}`, { id: toastId });
+          }
+        };
+
+        worker.onerror = (err) => {
+          worker.terminate();
+          toast.error(`Worker error: ${err.message}`, { id: toastId });
+        };
       } catch {
-        alert('Failed to parse Excel file.');
+        toast.error('Failed to start parser. Trying fallback…', { id: toastId });
+        // Fallback: dynamic XLSX import (no worker)
+        import('xlsx').then((XLSX) => {
+          try {
+            const wb = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: false });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, string>[];
+            excelMutation.mutate({ name: file.name.replace(/\.[^/.]+$/, ''), data: rows }, {
+              onSuccess: (newReg) => { toast.success('Imported!', { id: toastId }); navigate(`/register/${newReg.id}`); },
+              onError: (err: Error) => toast.error(err.message, { id: toastId })
+            });
+          } catch {
+            toast.error('Failed to parse Excel file.', { id: toastId });
+          }
+        });
       }
     };
-    reader.readAsBinaryString(file);
-    e.target.value = '';
+    reader.readAsArrayBuffer(file);
   }, [excelMutation, navigate]);
 
   const handleFolderUpload = useCallback(async () => {

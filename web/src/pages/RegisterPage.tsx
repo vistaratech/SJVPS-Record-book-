@@ -2328,15 +2328,10 @@ export default function RegisterPage() {
   }, [wrapperSize.h]);
 
   const colWidthsCss = useMemo(() => {
-    // Column width CSS + row height CSS injected together
-    const colCss = visibleColumns.map((col, idx) => {
-      const w = colWidths[col.id] || defaultColWidth;
-      return `.spreadsheet tr>:nth-child(${idx + 2}){width:${w}px!important;min-width:${w}px!important;max-width:${w}px!important}.spreadsheet tr>:nth-child(${idx + 2}) .col-header-inner{width:${w}px!important;min-width:${w}px!important;max-width:${w}px!important}`;
-    }).join('');
-    // Inject consistent row height
+    // Inject consistent row height for all rows (non-spacer)
     const rowCss = `.spreadsheet td:not(.spacer){height:${dynamicRowHeight}px!important;max-height:${dynamicRowHeight}px!important;line-height:${dynamicRowHeight}px!important}.spreadsheet td:not(.spacer) .cell-input,.spreadsheet td:not(.spacer) .cell-url-wrap,.spreadsheet td:not(.spacer) .cell-date,.spreadsheet td:not(.spacer) .cell-dropdown,.spreadsheet td:not(.spacer) .cell-formula,.spreadsheet td:not(.spacer) .cell-currency,.spreadsheet td:not(.spacer) .cell-checkbox-wrap,.spreadsheet td:not(.spacer) .cell-rating,.spreadsheet td:not(.spacer) .cell-image-wrap,.spreadsheet td:not(.spacer) .cell-auto-increment-readonly{height:${dynamicRowHeight}px!important;max-height:${dynamicRowHeight}px!important;line-height:${dynamicRowHeight}px!important}`;
-    return colCss + rowCss;
-  }, [visibleColumns, colWidths, defaultColWidth, dynamicRowHeight]);
+    return rowCss;
+  }, [dynamicRowHeight]);
 
   // Defer formula/stats recalculation so it doesn't block keystrokes (Fix #3)
   // Optimized single-pass statistics calculation (Fix performance #4)
@@ -2454,25 +2449,53 @@ export default function RegisterPage() {
   }, [register, columns, visibleColumns, displayEntries, selectedRows, calcTypes]);
 
   // ── Virtualization ──
-  // For small-to-medium registers (≤500 rows), render all rows directly for buttery-smooth
-  // native scrolling. Only engage virtualization for truly large datasets.
-  const VIRTUALIZATION_THRESHOLD = 500;
-  const useVirtual = displayEntries.length > VIRTUALIZATION_THRESHOLD;
+  // Always-on virtualization for both rows AND columns.
+  // With 200+ columns, rendering all cols even for 30 visible rows = 6,000+ DOM nodes.
+  // Column virtualization is the critical fix for large horizontal datasets.
+  //
+  // Threshold: virtualize whenever >50 rows OR >20 columns to keep the DOM lean.
+  const VIRTUALIZATION_THRESHOLD = 50;
+  const COL_VIRTUALIZATION_THRESHOLD = 20;
+  const useVirtual = displayEntries.length > VIRTUALIZATION_THRESHOLD || visibleColumns.length > COL_VIRTUALIZATION_THRESHOLD;
+  const useColVirtual = visibleColumns.length > COL_VIRTUALIZATION_THRESHOLD;
 
   const parentRef = useRef<HTMLDivElement>(null);
+
+  // ── Row virtualizer ──
   const rowVirtualizer = useVirtualizer({
     count: displayEntries.length,
     getScrollElement: () => parentRef.current,
     estimateSize: useCallback(() => dynamicRowHeight, [dynamicRowHeight]),
-    overscan: 15,
+    overscan: 10,
     enabled: useVirtual,
   });
 
-  const virtualRows = useVirtual ? rowVirtualizer.getVirtualItems() : [];
-  const totalVirtualHeight = useVirtual ? rowVirtualizer.getTotalSize() : 0;
+  // ── Column virtualizer (horizontal) ──
+  // Uses the same scroll container (parentRef) but scrolls horizontally.
+  // The serial S.No column (50px) + actions column (44px) are rendered outside the virtualizer.
+  const ACTIONS_COL_W = 44;
+  const colVirtualizer = useVirtualizer({
+    count: visibleColumns.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: useCallback((idx: number) => {
+      const col = visibleColumns[idx];
+      return col ? (colWidths[col.id] || defaultColWidth) : defaultColWidth;
+    }, [visibleColumns, colWidths, defaultColWidth]),
+    horizontal: true,
+    overscan: 5,
+    enabled: useColVirtual,
+  });
+
+  const virtualRows = useVirtual ? rowVirtualizer.getVirtualItems() : displayEntries.map((_, i) => ({ index: i, start: i * dynamicRowHeight, end: (i + 1) * dynamicRowHeight, size: dynamicRowHeight, key: i, lane: 0 }));
+  const virtualCols = useColVirtual ? colVirtualizer.getVirtualItems() : visibleColumns.map((_, i) => ({ index: i, start: 0, end: 0, size: colWidths[visibleColumns[i]?.id] || defaultColWidth, key: i, lane: 0 }));
+  const totalVirtualHeight = useVirtual ? rowVirtualizer.getTotalSize() : displayEntries.length * dynamicRowHeight;
+  const totalVirtualWidth = useColVirtual ? colVirtualizer.getTotalSize() : visibleColumns.reduce((sum, col) => sum + (colWidths[col.id] || defaultColWidth), 0);
   
   const paddingTop = useVirtual && virtualRows.length > 0 ? virtualRows[0].start : 0;
   const paddingBottom = useVirtual && virtualRows.length > 0 ? totalVirtualHeight - virtualRows[virtualRows.length - 1].end : 0;
+  // Horizontal padding for the column virtualizer
+  const paddingLeft = useColVirtual && virtualCols.length > 0 ? virtualCols[0].start : 0;
+  const paddingRight = useColVirtual && virtualCols.length > 0 ? totalVirtualWidth - virtualCols[virtualCols.length - 1].end : 0;
 
   const frozenLeftOffsets = useMemo(() => {
     const offsets: Record<number, number> = {};
@@ -2666,7 +2689,13 @@ export default function RegisterPage() {
           <thead>
             <tr>
               <th className="serial">S.NO.</th>
-              {visibleColumns.map((col) => {
+              {/* Left horizontal spacer for virtualized columns */}
+              {useColVirtual && paddingLeft > 0 && (
+                <th key="pad-left" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />
+              )}
+              {(useColVirtual ? virtualCols : visibleColumns.map((_, i) => ({ index: i }))).map((vc) => {
+                const col = visibleColumns[vc.index];
+                if (!col) return null;
                 const IconComponent = (() => {
                   const nameL = (col.name || '').toLowerCase();
                   const isPayment = nameL.includes('amount') || nameL.includes('fee') || nameL.includes('payment') || nameL.includes('balance') || nameL.includes('price');
@@ -2690,20 +2719,24 @@ export default function RegisterPage() {
 
                 const isFrozen = frozenColumns.has(col.id);
                 const stickyLeft = isFrozen ? frozenLeftOffsets[col.id] : undefined;
+                const colW = colWidths[col.id] || defaultColWidth;
 
                 return (
-                <th 
-                  key={col.id} 
+                <th
+                  key={col.id}
                   className={`col-header-cell ${draggedColumnId === col.id ? 'dragging' : ''}${isFrozen ? ' frozen-col' : ''}`}
                   ref={(el) => {
                     if (el) colHeaderRefs.current.set(col.id, el);
                     else colHeaderRefs.current.delete(col.id);
                   }}
-                  style={isFrozen ? { position: 'sticky', left: stickyLeft, zIndex: 13, background: 'var(--border-light)' } : undefined}
+                  style={isFrozen
+                    ? { position: 'sticky', left: stickyLeft, zIndex: 13, background: 'var(--border-light)', width: colW, minWidth: colW, maxWidth: colW }
+                    : { width: colW, minWidth: colW, maxWidth: colW }
+                  }
                 >
                   <div className="col-header-inner">
                     {IconComponent}
-                    <span 
+                    <span
                       className="col-header-name"
                       title="Click for options, Drag to reorder"
                       onMouseDown={(e) => handleColDragMouseDown(e, col.id)}
@@ -2729,31 +2762,43 @@ export default function RegisterPage() {
                       </span>
                     )}
                     {frozenColumns.has(col.id) && <Pin size={10} color="var(--muted)" className="frozen-pin" />}
-                    <div 
+                    <div
                       className="col-resize-handle"
                       onMouseDown={(e) => handleColResizeMouseDown(e, col.id)}
                     />
                   </div>
                 </th>
               )})}
+              {/* Right horizontal spacer */}
+              {useColVirtual && paddingRight > 0 && (
+                <th key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />
+              )}
               <th className="actions" />
             </tr>
           </thead>
           <tbody>
-            {/* ── Virtualized mode: spacer + virtual rows ── */}
-            {useVirtual && paddingTop > 0 && (
+            {/* Top row spacer for virtualized rows */}
+            {paddingTop > 0 && (
               <tr>
-                <td className="spacer" style={{ height: `${paddingTop}px`, padding: 0, border: 'none', lineHeight: 0 }} colSpan={visibleColumns.length + 2} />
+                <td className="spacer" style={{ height: `${paddingTop}px`, padding: 0, border: 'none', lineHeight: 0 }} colSpan={virtualCols.length + 4} />
               </tr>
             )}
-            {useVirtual && virtualRows.map((virtualRow) => {
+            {virtualRows.map((virtualRow) => {
               const entry = displayEntries[virtualRow.index];
+              if (!entry) return null;
+              // Pass only the virtually-visible column slice to avoid rendering all 200+ columns
+              const colSlice = useColVirtual
+                ? virtualCols.map(vc => visibleColumns[vc.index]).filter(Boolean)
+                : visibleColumns;
               return (
-                <SpreadsheetRow 
+                <SpreadsheetRow
                   key={entry.id}
                   entry={entry}
                   idx={virtualRow.index}
                   visibleColumns={visibleColumns}
+                  colSlice={colSlice}
+                  paddingLeft={useColVirtual ? paddingLeft : 0}
+                  paddingRight={useColVirtual ? paddingRight : 0}
                   isSelected={selectedRows.has(entry.id)}
                   toggleSelectRow={toggleSelectRow}
                   handleCellChange={handleCellChange}
@@ -2766,37 +2811,18 @@ export default function RegisterPage() {
                   onImagePreview={setPreviewImage}
                   frozenColumns={frozenColumns}
                   frozenLeftOffsets={frozenLeftOffsets}
+                  colWidths={colWidths}
+                  defaultColWidth={defaultColWidth}
                   totalRows={displayEntries.length}
+                  rowHeight={dynamicRowHeight}
                 />
               );
             })}
-            {useVirtual && paddingBottom > 0 && (
+            {paddingBottom > 0 && (
               <tr>
-                <td className="spacer" style={{ height: `${paddingBottom}px`, padding: 0, border: 'none', lineHeight: 0 }} colSpan={visibleColumns.length + 2} />
+                <td className="spacer" style={{ height: `${paddingBottom}px`, padding: 0, border: 'none', lineHeight: 0 }} colSpan={virtualCols.length + 4} />
               </tr>
             )}
-            {/* ── Non-virtualized mode: render all rows directly for smooth native scroll ── */}
-            {!useVirtual && displayEntries.map((entry, idx) => (
-              <SpreadsheetRow 
-                key={entry.id}
-                entry={entry}
-                idx={idx}
-                visibleColumns={visibleColumns}
-                isSelected={selectedRows.has(entry.id)}
-                toggleSelectRow={toggleSelectRow}
-                handleCellChange={handleCellChange}
-                openDatePicker={openDatePicker}
-                openDropdown={openDropdown}
-                isMenuOpen={rowMenuId === entry.id}
-                toggleMenu={toggleMenu}
-                registerColumns={columns}
-                onRowDetail={setDetailViewEntry}
-                onImagePreview={setPreviewImage}
-                frozenColumns={frozenColumns}
-                frozenLeftOffsets={frozenLeftOffsets}
-                totalRows={displayEntries.length}
-              />
-            ))}
             {displayEntries.length === 0 && columns.length > 0 && [1, 2, 3].map((n) => (
               <tr key={`mock-${n}`} className="mock" onClick={() => addEntryMutation.mutate()}>
                 <td className="serial">{n}</td>
@@ -2813,7 +2839,12 @@ export default function RegisterPage() {
                   <td className="sticky-col sticky-col-1 calc-cell-td" style={{ background: 'var(--border-light)', textAlign: 'center' }}>
                     <span className="calc-label" style={{ fontWeight: 800, fontSize: '14px', color: 'var(--navy)' }}>Σ</span>
                   </td>
-                  {visibleColumns.map((col) => {
+                  {useColVirtual && paddingLeft > 0 && (
+                    <td key="pad-left" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none', background: 'var(--border-light)' }} />
+                  )}
+                  {(useColVirtual ? virtualCols : visibleColumns.map((_, i) => ({ index: i }))).map((vc) => {
+                    const col = visibleColumns[vc.index];
+                    if (!col) return null;
                     const isNumeric = col.type === 'number' || col.type === 'formula' || col.type === 'currency';
                     const calcType = calcTypes[col.id] || (isNumeric ? 'sum' : 'count');
                     const isFrozen = frozenColumns.has(col.id);
@@ -2824,11 +2855,13 @@ export default function RegisterPage() {
                       ? formatCurrency(calcValue.toString()) 
                       : calcValue;
 
+                    const colW = colWidths[col.id] || defaultColWidth;
+
                     return (
                       <td
                         key={col.id}
                         className={`calc-cell-td ${isFrozen ? 'frozen-col' : ''}`}
-                        style={isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 11, background: 'var(--border-light)' } : undefined}
+                        style={isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 11, background: 'var(--border-light)', width: colW, minWidth: colW, maxWidth: colW } : { width: colW, minWidth: colW, maxWidth: colW }}
                       >
                         <div className="calc-cell-content" onClick={(e) => handleCalcCellClick(e, col.id)}>
                           <span className="calc-dropdown-icon">
@@ -2846,6 +2879,9 @@ export default function RegisterPage() {
                       </td>
                     );
                   })}
+                  {useColVirtual && paddingRight > 0 && (
+                    <td key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none', background: 'var(--border-light)' }} />
+                  )}
                   <td className="calc-cell-td actions" style={{ background: 'var(--border-light)' }} />
                 </tr>
               </tfoot>
