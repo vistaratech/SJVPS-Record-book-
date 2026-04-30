@@ -2419,19 +2419,25 @@ export default function RegisterPage() {
   }, [register, columns, visibleColumns, displayEntries, selectedRows, calcTypes]);
 
   // ── Virtualization ──
+  // For small-to-medium registers (≤500 rows), render all rows directly for buttery-smooth
+  // native scrolling. Only engage virtualization for truly large datasets.
+  const VIRTUALIZATION_THRESHOLD = 500;
+  const useVirtual = displayEntries.length > VIRTUALIZATION_THRESHOLD;
+
   const parentRef = useRef<HTMLDivElement>(null);
   const rowVirtualizer = useVirtualizer({
     count: displayEntries.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: useCallback(() => window.innerWidth < 768 ? 38 : 42, []),
-    overscan: 30,
+    estimateSize: useCallback(() => 42, []),
+    overscan: 15,
+    enabled: useVirtual,
   });
 
-  const virtualRows = rowVirtualizer.getVirtualItems();
-  const totalVirtualHeight = rowVirtualizer.getTotalSize();
+  const virtualRows = useVirtual ? rowVirtualizer.getVirtualItems() : [];
+  const totalVirtualHeight = useVirtual ? rowVirtualizer.getTotalSize() : 0;
   
-  const paddingTop = virtualRows.length > 0 ? virtualRows[0].start : 0;
-  const paddingBottom = virtualRows.length > 0 ? totalVirtualHeight - virtualRows[virtualRows.length - 1].end : 0;
+  const paddingTop = useVirtual && virtualRows.length > 0 ? virtualRows[0].start : 0;
+  const paddingBottom = useVirtual && virtualRows.length > 0 ? totalVirtualHeight - virtualRows[virtualRows.length - 1].end : 0;
 
   const frozenLeftOffsets = useMemo(() => {
     const offsets: Record<number, number> = {};
@@ -2699,12 +2705,13 @@ export default function RegisterPage() {
             </tr>
           </thead>
           <tbody>
-            {paddingTop > 0 && (
+            {/* ── Virtualized mode: spacer + virtual rows ── */}
+            {useVirtual && paddingTop > 0 && (
               <tr>
-                <td style={{ height: `${paddingTop}px` }} colSpan={visibleColumns.length + 2} />
+                <td className="spacer" style={{ height: `${paddingTop}px`, padding: 0, border: 'none', lineHeight: 0 }} colSpan={visibleColumns.length + 2} />
               </tr>
             )}
-            {virtualRows.map((virtualRow) => {
+            {useVirtual && virtualRows.map((virtualRow) => {
               const entry = displayEntries[virtualRow.index];
               return (
                 <SpreadsheetRow 
@@ -2728,11 +2735,33 @@ export default function RegisterPage() {
                 />
               );
             })}
-            {paddingBottom > 0 && (
+            {useVirtual && paddingBottom > 0 && (
               <tr>
-                <td style={{ height: `${paddingBottom}px` }} colSpan={visibleColumns.length + 2} />
+                <td className="spacer" style={{ height: `${paddingBottom}px`, padding: 0, border: 'none', lineHeight: 0 }} colSpan={visibleColumns.length + 2} />
               </tr>
             )}
+            {/* ── Non-virtualized mode: render all rows directly for smooth native scroll ── */}
+            {!useVirtual && displayEntries.map((entry, idx) => (
+              <SpreadsheetRow 
+                key={entry.id}
+                entry={entry}
+                idx={idx}
+                visibleColumns={visibleColumns}
+                isSelected={selectedRows.has(entry.id)}
+                toggleSelectRow={toggleSelectRow}
+                handleCellChange={handleCellChange}
+                openDatePicker={openDatePicker}
+                openDropdown={openDropdown}
+                isMenuOpen={rowMenuId === entry.id}
+                toggleMenu={toggleMenu}
+                registerColumns={columns}
+                onRowDetail={setDetailViewEntry}
+                onImagePreview={setPreviewImage}
+                frozenColumns={frozenColumns}
+                frozenLeftOffsets={frozenLeftOffsets}
+                totalRows={displayEntries.length}
+              />
+            ))}
             {displayEntries.length === 0 && columns.length > 0 && [1, 2, 3].map((n) => (
               <tr key={`mock-${n}`} className="mock" onClick={() => addEntryMutation.mutate()}>
                 <td className="serial">{n}</td>

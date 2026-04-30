@@ -1452,9 +1452,8 @@ a { text-decoration: none; color: inherit; }
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SPREADSHEET
 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-.spreadsheet-wrapper { flex: 1; overflow: auto; position: relative; overflow-anchor: none; will-change: transform; contain: layout style; }
+.spreadsheet-wrapper { flex: 1; overflow: auto; position: relative; overflow-anchor: none; will-change: transform; }
 .spreadsheet { table-layout: fixed; border-collapse: collapse; min-width: 100%; }
-.spreadsheet tbody tr { height: 42px; max-height: 42px; }
 .spreadsheet th {
   position: sticky;
   top: 0;
@@ -5039,13 +5038,8 @@ body.modal-open {
 }
 
 /* ── Table Layout Stability ── */
-/* Lock ROW dimensions — prevents browser from distributing extra height across visible rows */
-.spreadsheet tbody tr {
-  height: 42px !important;
-  max-height: 42px !important;
-}
-/* Lock cell dimensions so typing never causes layout shift */
-.spreadsheet td {
+/* Lock cell dimensions so typing never causes layout shift — exclude virtual spacer cells */
+.spreadsheet td:not(.spacer) {
   height: 42px !important;
   max-height: 42px !important;
   overflow: hidden !important;
@@ -5053,6 +5047,15 @@ body.modal-open {
   padding: 0 !important;
   line-height: 42px !important;
   vertical-align: middle !important;
+}
+/* Spacer cells must be unconstrained for virtualizer scroll height */
+.spreadsheet td.spacer {
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+  padding: 0 !important;
+  border: none !important;
+  line-height: 0 !important;
 }
 .spreadsheet td .cell-input,
 .spreadsheet td .cell-url-wrap,
