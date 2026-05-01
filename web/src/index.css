@@ -5023,18 +5023,74 @@ body.modal-open {
   height: 28px !important;
   padding: 0 8px !important;
   gap: 6px !important;
+  transition: max-width 0.25s ease, border-color 0.15s, box-shadow 0.15s;
+}
+.pab-search.active {
+  max-width: 320px !important;
+  border-color: #2563EB !important;
+  box-shadow: 0 0 0 2px rgba(37,99,235,0.10) !important;
 }
 .pab-search:focus-within {
   border-color: var(--navy) !important;
   box-shadow: 0 0 0 2px rgba(26,35,126,0.06) !important;
+  max-width: 320px !important;
 }
 .pab-search-input {
   width: 150px !important;
-  min-width: 150px !important;
+  min-width: 100px !important;
   padding: 0 !important;
+  flex: 1 !important;
 }
 .pab-search-icon {
   color: var(--placeholder) !important;
+}
+.pab-search-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+.pab-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.pab-search-clear:hover {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+/* ── Search Highlight ── */
+.search-highlight {
+  background: #FDE68A;
+  color: #92400E;
+  border-radius: 2px;
+  padding: 0 1px;
+  font: inherit;
+}
+/* Highlighted cell overlay — matches cell-input dimensions */
+.cell-input-highlight-wrap {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Table Layout Stability ── */

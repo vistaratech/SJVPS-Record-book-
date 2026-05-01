@@ -691,6 +691,19 @@ export default function RegisterPage() {
     setCurrentPageIndex(0);
   }, [deferredSearch, deferredActiveFilters]);
 
+  // Ctrl+F to focus search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        const el = document.getElementById('pab-search-input');
+        if (el) { el.focus(); (el as HTMLInputElement).select(); }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
   // Index entries by page index for O(1) page access
   const entriesByPage = useMemo(() => {
     const map: Record<number, Entry[]> = {};
@@ -2737,16 +2750,22 @@ export default function RegisterPage() {
           <div className="pab-divider" />
 
           {/* Search */}
-          <div className="pab-search" id="pab-search-wrap">
+          <div className={`pab-search${search ? ' active' : ''}`} id="pab-search-wrap">
             <Search size={13} className="pab-search-icon" />
             <input
               id="pab-search-input"
               className="pab-search-input"
-              placeholder="Search rows…"
+              placeholder="Find in register… (Ctrl+F)"
               value={search}
               onChange={e => setSearch(e.target.value)}
               onKeyDown={e => { if (e.key === 'Escape') setSearch(''); }}
             />
+            {search && (
+              <>
+                <span className="pab-search-count">{displayEntries.length} match{displayEntries.length !== 1 ? 'es' : ''}</span>
+                <button className="pab-search-clear" onClick={() => setSearch('')} title="Clear search">×</button>
+              </>
+            )}
           </div>
 
           {/* Filter — highlighted button + inline dropdown panel */}
@@ -2957,6 +2976,7 @@ export default function RegisterPage() {
                   totalRows={displayEntries.length}
                   rowHeight={dynamicRowHeight}
                   onCellFormatClick={onCellFormatClick}
+                  searchTerm={deferredSearch || undefined}
                 />
               );
             })}
@@ -2965,7 +2985,30 @@ export default function RegisterPage() {
                 <td className="spacer" style={{ height: `${paddingBottom}px`, padding: 0, border: 'none', lineHeight: 0 }} colSpan={virtualCols.length + 4} />
               </tr>
             )}
-            {displayEntries.length === 0 && columns.length > 0 && [1, 2, 3].map((n) => (
+            {/* Empty state when search/filter yields no results */}
+            {displayEntries.length === 0 && (deferredSearch || deferredActiveFilters.length > 0) && (
+              <tr>
+                <td colSpan={visibleColumns.length + 3} style={{
+                  textAlign: 'center', padding: '48px 20px', color: '#94a3b8',
+                  fontSize: '14px', fontWeight: 500, background: '#fafbff',
+                }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                    <Search size={32} style={{ opacity: 0.3 }} />
+                    <span>No matching records found</span>
+                    {deferredSearch && <span style={{ fontSize: '12px', color: '#b0b8c9' }}>Try a different search term or clear filters</span>}
+                    <button
+                      onClick={() => { setSearch(''); setActiveFilters([]); }}
+                      style={{
+                        marginTop: '8px', padding: '6px 16px', borderRadius: '6px',
+                        border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer',
+                        fontSize: '12px', color: '#475569', fontWeight: 500,
+                      }}
+                    >Clear search & filters</button>
+                  </div>
+                </td>
+              </tr>
+            )}
+            {displayEntries.length === 0 && !deferredSearch && deferredActiveFilters.length === 0 && columns.length > 0 && [1, 2, 3].map((n) => (
               <tr key={`mock-${n}`} className="mock" onClick={() => addEntryMutation.mutate()}>
                 <td className="serial">{n}</td>
                 {visibleColumns.map((col) => (

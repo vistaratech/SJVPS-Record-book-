@@ -2,6 +2,22 @@ import { evaluateFormula, type Entry, type Column } from '../../lib/api';
 import { Calendar, ChevronDown, Image as ImageIcon, Mail, Phone, Globe, ListOrdered, IndianRupee, Maximize2 } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
 
+// ── Highlight matching text ──
+const HighlightedText = React.memo(function HighlightedText({ text, searchTerm }: { text: string; searchTerm?: string }) {
+  if (!searchTerm || !text) return <>{text}</>;
+  const lower = text.toLowerCase();
+  const sLower = searchTerm.toLowerCase();
+  const idx = lower.indexOf(sLower);
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="search-highlight">{text.slice(idx, idx + searchTerm.length)}</mark>
+      {text.slice(idx + searchTerm.length)}
+    </>
+  );
+});
+
 // Format number with Indian currency style: ₹1,23,456.00
 function formatCurrency(val: string): string {
   const n = parseFloat(val);
@@ -50,6 +66,7 @@ interface SpreadsheetTextInputProps {
   handleCellChange: (entryId: number, columnId: string, value: string) => void;
   type?: string;
   placeholder?: string;
+  searchTerm?: string;
 }
 
 // Currency cell: shows ₹ formatted display, edits as raw number
@@ -151,7 +168,7 @@ const CurrencyCell = React.memo(({ idx, col, entry, colIdx, totalRows, visibleCo
   );
 });
 
-const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colIdx, totalRows, handleCellChange, type = 'text', placeholder }: SpreadsheetTextInputProps) => {
+const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colIdx, totalRows, handleCellChange, type = 'text', placeholder, searchTerm }: SpreadsheetTextInputProps) => {
   const initialValue = entry.cells?.[col.id.toString()] || '';
   const [val, setVal] = useState(initialValue);
 
@@ -237,13 +254,40 @@ const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colI
   }, [idx, col.id, visibleColumns, colIdx, totalRows]);
 
 
+  const [focused, setFocused] = useState(false);
+  const hasHighlight = !!searchTerm && !!val && val.toLowerCase().includes(searchTerm.toLowerCase());
+
+  const handleFocus = useCallback(() => setFocused(true), []);
+  const handleBlurWrap = useCallback(() => {
+    setFocused(false);
+    onBlur();
+  }, [onBlur]);
+
+  // Show highlighted overlay when search matches and not focused
+  if (hasHighlight && !focused) {
+    return (
+      <div
+        id={`cell-${idx}-${col.id}`}
+        data-cell={`cell-${idx}-${col.id}`}
+        className="cell-input cell-input-highlight-wrap"
+        tabIndex={0}
+        onFocus={handleFocus}
+        onKeyDown={onKeyDown}
+        style={{ cursor: 'text' }}
+      >
+        <HighlightedText text={val} searchTerm={searchTerm} />
+      </div>
+    );
+  }
+
   return (
     <input
       id={`cell-${idx}-${col.id}`}
       className="cell-input"
       value={val}
       onChange={onChange}
-      onBlur={onBlur}
+      onBlur={handleBlurWrap}
+      onFocus={handleFocus}
       onKeyDown={onKeyDown}
       type={type}
       placeholder={placeholder}
@@ -281,6 +325,7 @@ interface SpreadsheetRowProps {
   colWidths?: Record<number, number>;
   defaultColWidth?: number;
   onCellFormatClick?: (entryId: number, colId: string, rect: DOMRect) => void;
+  searchTerm?: string;
 }
 
 export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: SpreadsheetRowProps) {
@@ -305,6 +350,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     colWidths,
     defaultColWidth = 150,
     onCellFormatClick,
+    searchTerm,
   } = props;
   // Columns to actually render — either the virtual slice or all visible columns
   const renderColumns = colSlice ?? visibleColumns;
@@ -406,7 +452,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
             <div className="cell-url-wrap">
               <SpreadsheetTextInput 
                 idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange}
-                placeholder="DD/MM/YYYY" 
+                placeholder="DD/MM/YYYY" searchTerm={searchTerm}
               />
               <button 
                 className="cell-url-link" 
@@ -419,7 +465,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
             </div>
           ) : col.type === 'dropdown' ? (
             <div data-cell={`cell-${idx}-${col.id}`} tabIndex={0} className="cell-dropdown" onClick={(e) => openDropdown(entry.id, col.id, col.dropdownOptions || ['Option 1', 'Option 2', 'Option 3'], e.currentTarget.getBoundingClientRect())} onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); openDropdown(entry.id, col.id, col.dropdownOptions || ['Option 1', 'Option 2', 'Option 3'], e.currentTarget.getBoundingClientRect()); } else handleCellKeyDown(e, col.id, colIdx); }}>
-              {entry.cells?.[col.id.toString()] || <span className="cell-placeholder"><ChevronDown size={12} /> Select</span>}
+              {entry.cells?.[col.id.toString()] ? <HighlightedText text={entry.cells[col.id.toString()]} searchTerm={searchTerm} /> : <span className="cell-placeholder"><ChevronDown size={12} /> Select</span>}
             </div>
           ) : col.type === 'checkbox' ? (
             <div className="cell-checkbox-wrap">
@@ -471,17 +517,17 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
             </div>
           ) : col.type === 'email' ? (
             <div className="cell-url-wrap">
-              <SpreadsheetTextInput idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange} type="email" placeholder="name@example.com" />
+              <SpreadsheetTextInput idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange} type="email" placeholder="name@example.com" searchTerm={searchTerm} />
               {entry.cells?.[col.id.toString()] && <a href={`mailto:${entry.cells[col.id.toString()]}`} className="cell-url-link" title="Send email" tabIndex={-1}><Mail size={11} /></a>}
             </div>
           ) : col.type === 'phone' ? (
             <div className="cell-url-wrap">
-              <SpreadsheetTextInput idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange} type="tel" placeholder="+91 98765 43210" />
+              <SpreadsheetTextInput idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange} type="tel" placeholder="+91 98765 43210" searchTerm={searchTerm} />
               {entry.cells?.[col.id.toString()] && <a href={`tel:${entry.cells[col.id.toString()]}`} className="cell-url-link" title="Call" tabIndex={-1}><Phone size={11} /></a>}
             </div>
           ) : col.type === 'url' ? (
             <div className="cell-url-wrap">
-              <SpreadsheetTextInput idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange} type="url" placeholder="https://..." />
+              <SpreadsheetTextInput idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange} type="url" placeholder="https://..." searchTerm={searchTerm} />
               {entry.cells?.[col.id.toString()] && <a href={entry.cells[col.id.toString()]} target="_blank" rel="noreferrer" className="cell-url-link" title="Open" tabIndex={-1}><Globe size={11} /></a>}
             </div>
           ) : col.type === 'auto_increment' ? (
@@ -504,7 +550,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
               }}
             >
               <ListOrdered size={12} style={{ opacity: 0.6 }} />
-              <span>{entry.cells?.[col.id.toString()] || '–'}</span>
+              <span><HighlightedText text={entry.cells?.[col.id.toString()] || '–'} searchTerm={searchTerm} /></span>
             </div>
           ) : col.type === 'currency' ? (
             <CurrencyCell idx={idx} col={col} entry={entry} colIdx={colIdx} handleCellChange={handleCellChange} visibleColumns={visibleColumns} totalRows={totalRows} />
@@ -517,6 +563,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
               colIdx={colIdx}
               totalRows={totalRows}
               handleCellChange={handleCellChange}
+              searchTerm={searchTerm}
             />
           )}
         </td>
