@@ -58,13 +58,20 @@ export function ExportModal({ onClose, onExport, columns, hiddenColumns, selecte
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px' }}>
-        <div className="modal-header">
-          <h2>Export Options</h2>
-          <button className="icon-btn" onClick={onClose}><X size={20} /></button>
+      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 20px 10px 20px', borderBottom: '1px solid var(--border)' }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0, color: '#111827' }}>Export Options</h2>
+          <button 
+            onClick={onClose} 
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            onMouseOver={e => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+            onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
+          >
+            <X size={20} color="#6b7280" />
+          </button>
         </div>
 
-        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px' }}>
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px', overflowY: 'auto', flex: 1 }}>
           
           {/* Format Selection */}
           <div className="form-group">
