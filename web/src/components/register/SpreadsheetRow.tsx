@@ -417,7 +417,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     onRowDetail?.(entry);
   }, [entry, onRowDetail]);
   return (
-    <tr style={rowHeight ? { height: rowHeight, maxHeight: rowHeight } : undefined}>
+    <tr id={`row-${entry.id}`} data-entry-id={entry.id} style={rowHeight ? { height: rowHeight, maxHeight: rowHeight } : undefined}>
       <td className="serial" style={{ cursor: 'pointer' }} onClick={handleSerialClick} title="Click to view details">{idx + 1}</td>
       {/* Left padding cell for column virtualization */}
       {paddingLeft > 0 && <td key="pad-left" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />}

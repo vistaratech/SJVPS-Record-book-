@@ -1,9 +1,9 @@
-import { useCallback, memo, useState, startTransition } from 'react';
+import { useCallback, memo, useState, startTransition, useDeferredValue } from 'react';
 import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2, History, PlusCircle, FolderPlus, User } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import type { RegisterSummary, Business } from '../../lib/api';
-import { getRegister, listFolders, createFolder, renameFolder, deleteFolder, moveRegisterToFolder, duplicateRegister } from '../../lib/api';
+import { getRegister, listFolders, createFolder, renameFolder, deleteFolder, moveRegisterToFolder, duplicateRegister, searchAllRegisters } from '../../lib/api';
 interface SidebarProps {
   businesses?: Business[];
   filtered?: RegisterSummary[];
@@ -50,17 +50,25 @@ export const Sidebar = memo(function Sidebar({
   const [newFolderName, setNewFolderName] = useState('');
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [folderMenuId, setFolderMenuId] = useState<number | null>(null);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
 
   const businessId = businesses?.[0]?.id;
+  const deferredSearch = useDeferredValue(search);
 
   const { data: folders = [] } = useQuery({
     queryKey: ['folders', businessId],
     queryFn: () => listFolders(businessId!),
     enabled: !!businessId,
   });
+
+  const { data: searchResults, isFetching: isSearching } = useQuery({
+    queryKey: ['globalSearch', businessId, deferredSearch],
+    queryFn: () => searchAllRegisters(businessId!, deferredSearch),
+    enabled: !!businessId && deferredSearch.trim().length >= 2,
+    staleTime: 60 * 1000,
+  });
+
 
   const createFolderMutation = useMutation({
     mutationFn: (name: string) => createFolder(businessId!, name),
@@ -279,6 +287,28 @@ export const Sidebar = memo(function Sidebar({
           )}
         </div>
 
+        {/* Global Search Bar */}
+        {!isCollapsed && (
+          <div style={{ padding: '0 12px 8px' }}>
+            <div className="gs-input-wrap">
+              <Search size={13} className="gs-input-icon" />
+              <input
+                placeholder="Search all registers…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="gs-input"
+                autoComplete="off"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="gs-input-clear" title="Clear">
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+
         {/* Folder creation input moved to a modal or handled via menu */}
         {isCreatingFolder && (
           <div className="sidebar-new-section" style={{ padding: '8px 20px' }}>
@@ -340,112 +370,144 @@ export const Sidebar = memo(function Sidebar({
         )}
 
         <div className="sidebar-list sidebar-list--local">
-          {folders.map(folder => {
-            const folderRegs = filtered?.filter(r => r.folderId === folder.id) || [];
-            const isExpanded = expandedFolders[folder.id];
+          {search.trim().length > 0 ? (
+            <>
+              {/* Status line */}
+              <div className="gs-status">
+                {search.trim().length < 2
+                  ? 'Type at least 2 characters…'
+                  : isSearching
+                    ? 'Searching…'
+                    : `${searchResults?.length || 0} results`}
+                {isSearching && <div className="gs-status-bar" />}
+              </div>
 
-            return (
-              <div key={folder.id} className="sidebar-folder-group">
-                <div 
-                  className="sidebar-folder-header"
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.currentTarget.style.backgroundColor = 'rgba(30,45,120,0.05)';
+              {/* Results */}
+              {searchResults?.map((res, i) => (
+                <div
+                  key={i}
+                  className="gs-card"
+                  onClick={() => {
+                    startTransition(() => {
+                      if (res.entryId !== -1) {
+                        navigate(`/register/${res.registerId}?row=${res.entryId}`);
+                      } else {
+                        navigate(`/register/${res.registerId}`);
+                      }
+                      closeSidebar();
+                    });
                   }}
-                  onDragLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                    const regIdStr = e.dataTransfer.getData('text/plain');
-                    if (regIdStr) {
-                      moveMutation.mutate({ regId: parseInt(regIdStr, 10), fId: folder.id });
-                    }
-                  }}
-                  onClick={() => setExpandedFolders(prev => ({...prev, [folder.id]: !prev[folder.id] ? true : false}))}
-                  style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', cursor: 'pointer', gap: '8px', color: 'var(--navy)', userSelect: 'none' }}
-                  data-tooltip={isCollapsed ? folder.name : undefined}
                 >
-                  {!isCollapsed && (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '16px' }}>
-                      {isExpanded ? (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                      ) : (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                      )}
+                  <div className="gs-card-name">
+                    {res.entryId === -1 ? <FileSpreadsheet size={13} /> : <FileText size={13} />}
+                    <span>{res.registerName}</span>
+                  </div>
+                  {res.entryId !== -1 && (
+                    <div className="gs-card-detail">
+                      <span className="gs-badge">Row {res.rowNumber}</span>
+                      <span className="gs-match">{res.matchedText.length > 60 ? res.matchedText.slice(0, 60) + '…' : res.matchedText}</span>
                     </div>
                   )}
-                  <Folder size={16} color="var(--primary)" fill="var(--primary)" fillOpacity={0.2} />
-                  <span style={{ fontSize: '13px', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folder.name}</span>
-                  <button
-                    className="register-item-menu"
-                    onClick={(e) => { e.stopPropagation(); setFolderMenuId(folderMenuId === folder.id ? null : folder.id); }}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--muted)' }}
-                  >
-                    <span style={{ fontSize: '15px', fontWeight: 800, letterSpacing: '-1px', lineHeight: 1 }}>⋮</span>
-                  </button>
                 </div>
-                
-                {isExpanded && (
-                  <div className="sidebar-folder-children" style={{ paddingBottom: '4px' }}>
-                    {folderRegs.length === 0 ? (
-                      <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '4px 12px 4px 44px', fontStyle: 'italic' }}>Empty folder</div>
-                    ) : (
-                      folderRegs.map(reg => renderRegister(reg, 24))
+              ))}
+
+              {/* Empty */}
+              {!isSearching && deferredSearch.trim().length >= 2 && (!searchResults || searchResults.length === 0) && (
+                <div className="gs-empty">No results for "{search}"</div>
+              )}
+            </>
+          ) : (
+            <>
+              {folders.map(folder => {
+                const folderRegs = filtered?.filter(r => r.folderId === folder.id) || [];
+                const isExpanded = expandedFolders[folder.id];
+
+                return (
+                  <div key={folder.id} className="sidebar-folder-group">
+                    <div 
+                      className="sidebar-folder-header"
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.style.backgroundColor = 'rgba(30,45,120,0.05)';
+                      }}
+                      onDragLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        const regIdStr = e.dataTransfer.getData('text/plain');
+                        if (regIdStr) {
+                          moveMutation.mutate({ regId: parseInt(regIdStr, 10), fId: folder.id });
+                        }
+                      }}
+                      onClick={() => setExpandedFolders(prev => ({...prev, [folder.id]: !prev[folder.id] ? true : false}))}
+                      style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', cursor: 'pointer', gap: '8px', color: 'var(--navy)', userSelect: 'none' }}
+                      data-tooltip={isCollapsed ? folder.name : undefined}
+                    >
+                      {!isCollapsed && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '16px' }}>
+                          {isExpanded ? (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                          ) : (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                          )}
+                        </div>
+                      )}
+                      <Folder size={16} color="var(--primary)" fill="var(--primary)" fillOpacity={0.2} />
+                      <span style={{ fontSize: '13px', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folder.name}</span>
+                      <button
+                        className="register-item-menu"
+                        onClick={(e) => { e.stopPropagation(); setFolderMenuId(folderMenuId === folder.id ? null : folder.id); }}
+                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--muted)' }}
+                      >
+                        <span style={{ fontSize: '15px', fontWeight: 800, letterSpacing: '-1px', lineHeight: 1 }}>⋮</span>
+                      </button>
+                    </div>
+                    
+                    {isExpanded && (
+                      <div className="sidebar-folder-children" style={{ paddingBottom: '4px' }}>
+                        {folderRegs.length === 0 ? (
+                          <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '4px 12px 4px 44px', fontStyle: 'italic' }}>Empty folder</div>
+                        ) : (
+                          folderRegs.map(reg => renderRegister(reg, 24))
+                        )}
+                      </div>
                     )}
                   </div>
-                )}
+                )
+              })}
+              
+              <div 
+                className="sidebar-unassigned-zone"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const regIdStr = e.dataTransfer.getData('text/plain');
+                  if (regIdStr) {
+                    moveMutation.mutate({ regId: parseInt(regIdStr, 10), fId: null });
+                  }
+                }}
+                style={{ paddingBottom: '20px', minHeight: '100px' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Unassigned</span>
+                  {clipboard && (
+                    <button 
+                      onClick={() => handlePaste(null)} 
+                      style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <ClipboardPaste size={12} /> Paste Here
+                    </button>
+                  )}
+                </div>
+                {filtered?.filter(r => !r.folderId).map(reg => renderRegister(reg, 0))}
               </div>
-            )
-          })}
-          
-          <div 
-            className="sidebar-unassigned-zone"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const regIdStr = e.dataTransfer.getData('text/plain');
-              if (regIdStr) {
-                 moveMutation.mutate({ regId: parseInt(regIdStr, 10), fId: null });
-              }
-            }}
-            style={{ paddingBottom: '20px', minHeight: '100px' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Unassigned</span>
-              {clipboard && (
-                <button 
-                  onClick={() => handlePaste(null)} 
-                  style={{ background: 'transparent', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
-                >
-                  <ClipboardPaste size={12} /> Paste Here
-                </button>
-              )}
-            </div>
-            {filtered?.filter(r => !r.folderId).map(reg => renderRegister(reg, 0))}
-          </div>
+            </>
+          )}
         </div>
 
-        {(isSearchOpen || search.length > 0) && !isCollapsed && (
-          <div className="sidebar-search" style={{ borderTop: '1px solid var(--border)', background: 'var(--surface)' }}>
-            <Search size={14} color="var(--muted)" />
-            <input 
-              autoFocus
-              placeholder="Search register" 
-              value={search} 
-              onChange={(e) => setSearch(e.target.value)} 
-            />
-            {search && (
-              <button 
-                onClick={() => { setSearch(''); setIsSearchOpen(false); }} 
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '0', display: 'flex', color: 'var(--muted)' }}
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-        )}
+        {/* The old bottom search bar has been removed and replaced by the top search bar. */}
 
         <div className="sidebar-footer" style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

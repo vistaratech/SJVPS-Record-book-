@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo, useDeferredValue } from 'react';
 import toast from 'react-hot-toast';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getRegister, addColumn, deleteColumn, renameColumn, updateColumnDropdownOptions,
@@ -80,6 +80,7 @@ function parseDateString(dStr: string) {
 export default function RegisterPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const registerId = Number(id);
   const queryClient = useQueryClient();
   const { data: register, isLoading, error } = useQuery({
@@ -134,6 +135,7 @@ export default function RegisterPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc' | null>(null);
   const [detailViewEntry, setDetailViewEntry] = useState<Entry | null>(null);
   const detailViewEntryIdRef = useRef<number | null>(null);
+  const scrollToRowIdRef = useRef<number | null>(null);
   useEffect(() => {
     detailViewEntryIdRef.current = detailViewEntry?.id || null;
   }, [detailViewEntry]);
@@ -2625,6 +2627,61 @@ export default function RegisterPage() {
     overscan: 10,
     enabled: useVirtual,
   });
+
+  // ── Scroll to row from ?row= URL parameter (global search navigation) ──
+  // Step 1: Parse the URL param and set up the scroll target
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const rowParam = params.get('row');
+    if (rowParam) {
+      const entryId = Number(rowParam);
+      scrollToRowIdRef.current = entryId;
+
+      // Clear any active search/filters so the target row is visible
+      setSearch('');
+      setActiveFilters([]);
+
+      // Find the correct page for this entry
+      const targetEntry = localEntries.find(e => e.id === entryId);
+      if (targetEntry) {
+        const targetPage = targetEntry.pageIndex ?? 0;
+        setCurrentPageIndex(targetPage);
+      }
+
+      // Clean up the URL param so refreshing doesn't re-scroll
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [location.search, localEntries]);
+
+  // Step 2: Once displayEntries + virtualizer are ready, scroll to the target row
+  useEffect(() => {
+    const targetEntryId = scrollToRowIdRef.current;
+    if (!targetEntryId || !displayEntries || displayEntries.length === 0) return;
+
+    const rowIndex = displayEntries.findIndex(e => e.id === targetEntryId);
+    if (rowIndex === -1) return;
+
+    // Clear ref so we don't re-scroll
+    scrollToRowIdRef.current = null;
+
+    // Use a short timeout to let the virtualizer measure and settle
+    const timerId = setTimeout(() => {
+      try {
+        rowVirtualizer.scrollToIndex(rowIndex, { align: 'center', behavior: 'smooth' });
+      } catch { /* virtualizer may not be ready yet */ }
+
+      // After scrolling, highlight the target row
+      setTimeout(() => {
+        const rowEl = document.getElementById(`row-${targetEntryId}`);
+        if (rowEl) {
+          rowEl.classList.add('search-target-row');
+          setTimeout(() => rowEl.classList.remove('search-target-row'), 2500);
+        }
+      }, 500);
+    }, 200);
+
+    return () => clearTimeout(timerId);
+  }, [displayEntries, rowVirtualizer]);
 
   // Column virtualizer (horizontal) ──
   // Uses the same scroll container (parentRef) but scrolls horizontally.

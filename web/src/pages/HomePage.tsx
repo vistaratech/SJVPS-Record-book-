@@ -40,6 +40,13 @@ export default function HomePage() {
   const [importSession, setImportSession] = useState<ImportSession | null>(null);
   const [clipboard, setClipboard] = useState<{ id: number, type: 'move' | 'copy' } | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === 'true');
+  const toggleCollapse = useCallback(() => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('sidebar-collapsed', String(next));
+      return next;
+    });
+  }, []);
 
   // ── Resizable sidebar ──
   const SIDEBAR_MIN = 200;
@@ -264,13 +271,7 @@ export default function HomePage() {
         setClipboard={setClipboard}
         sidebarWidth={sidebarWidth}
         isCollapsed={isSidebarCollapsed}
-        toggleCollapse={() => {
-          setIsSidebarCollapsed(prev => {
-            const next = !prev;
-            localStorage.setItem('sidebar-collapsed', String(next));
-            return next;
-          });
-        }}
+        toggleCollapse={toggleCollapse}
       />
 
       {/* ── Draggable resize handle ── */}

@@ -144,6 +144,65 @@ export interface HistoryEntry {
   registerId?: number;
 }
 
+export interface SearchResult {
+  registerId: number;
+  registerName: string;
+  folderId?: number;
+  entryId: number;
+  rowNumber: number;
+  matchedText: string;
+  matchedColumnId?: string;
+  pageIndex?: number;
+}
+
+export async function searchAllRegisters(businessId: number, searchTerm: string): Promise<SearchResult[]> {
+  const q = searchTerm.toLowerCase();
+  if (!q) return [];
+  
+  const summaries = await listRegisters(businessId);
+  const results: SearchResult[] = [];
+  
+  const allRegs = await Promise.all(summaries.map(s => getRegister(s.id).catch(() => null)));
+  
+  for (const reg of allRegs) {
+    if (!reg || reg.deletedAt) continue;
+    
+    // Check if register name matches
+    if (reg.name.toLowerCase().includes(q)) {
+      results.push({
+        registerId: reg.id,
+        registerName: reg.name,
+        folderId: reg.folderId,
+        entryId: -1,
+        rowNumber: -1,
+        matchedText: reg.name,
+      });
+    }
+    
+    // Check entries
+    for (const entry of reg.entries) {
+      for (const colId in entry.cells) {
+        const val = entry.cells[colId] || '';
+        if (val.toLowerCase().includes(q)) {
+          results.push({
+            registerId: reg.id,
+            registerName: reg.name,
+            folderId: reg.folderId,
+            entryId: entry.id,
+            rowNumber: entry.rowNumber,
+            matchedText: val,
+            matchedColumnId: colId,
+            pageIndex: entry.pageIndex,
+          });
+          break; // Stop checking this entry once we found a match
+        }
+      }
+    }
+  }
+  
+  return results;
+}
+
 // ── Firestore helpers ─────────────────────────────────────────────────────────
 const registersCol = () => collection(db, 'registers');
 const regDoc = (id: number) => doc(db, 'registers', id.toString());
