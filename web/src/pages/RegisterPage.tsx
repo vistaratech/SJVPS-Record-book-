@@ -27,6 +27,7 @@ import {
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { RegisterHeader } from '../components/register/RegisterHeader';
 import { SpreadsheetRow } from '../components/register/SpreadsheetRow';
+import { ExportModal, type ExportOptions } from '../components/register/modals/ExportModal';
 
 import { FilterModal } from '../components/register/modals/FilterModal';
 import { ShareModal } from '../components/register/modals/ShareModal';
@@ -197,7 +198,7 @@ export default function RegisterPage() {
   // Share
   const [sharePhone, setSharePhone] = useState('');
   const [sharePermission, setSharePermission] = useState<'view' | 'edit'>('view');
-
+  const [showExportModal, setShowExportModal] = useState(false);
   // Rename page
   const [renamePageId, setRenamePageId] = useState<number | null>(null);
   const [renamePageValue, setRenamePageValue] = useState('');
@@ -1835,17 +1836,45 @@ export default function RegisterPage() {
     setDropdownModal(true);
   }, []);
 
-  const handleExportExcel = () => {
+  const handleExportExcel = (options: ExportOptions) => {
     if (!register) return;
 
-    const visibleColumns = columns.filter((col) => !hiddenColumns.has(col.id) && col.type !== 'image');
+    const visibleColumns = columns.filter((col) => 
+      !hiddenColumns.has(col.id) && 
+      col.type !== 'image' &&
+      options.selectedColumnIds.has(col.id)
+    );
     const headerRow = ['S.No.', ...visibleColumns.map(c => c.name)];
 
-    if (headerRow.length === 0) return;
-    
-    const dataAOA: any[][] = [headerRow];
+    if (headerRow.length === 0) {
+      toast.error('No columns selected for export.');
+      return;
+    }
 
-    displayEntries.forEach((entry, idx) => {
+    const entriesToExport = options.exportRows === 'selected' 
+      ? displayEntries.filter(e => selectedRows.has(e.id))
+      : displayEntries;
+
+    if (entriesToExport.length === 0) {
+      toast.error('No rows to export.');
+      return;
+    }
+
+    const dataAOA: any[][] = [];
+    
+    if (options.includeHeading) {
+      dataAOA.push([register.name || 'Export']);
+    }
+    if (options.includeDateTime) {
+      dataAOA.push([`Exported on ${new Date().toLocaleString()}`]);
+    }
+    if (options.includeHeading || options.includeDateTime) {
+      dataAOA.push([]); // blank row
+    }
+
+    dataAOA.push(headerRow);
+
+    entriesToExport.forEach((entry, idx) => {
       const rowData: any[] = [(idx + 1).toString()];
       visibleColumns.forEach(c => {
         const val = c.type === 'formula'
@@ -1877,7 +1906,7 @@ export default function RegisterPage() {
       }
 
       hasAnyCalc = true;
-      const values = displayEntries.map(entry => {
+      const values = entriesToExport.map(entry => {
         if (c.type === 'formula') return evaluateFormula(c.formula || '', entry, columns);
         return entry.cells?.[c.id.toString()] || '';
       });
@@ -1953,14 +1982,17 @@ export default function RegisterPage() {
         }
 
         if (c.type === 'formula' && c.formula) {
-          displayEntries.forEach((_, rIdx) => {
+          entriesToExport.forEach((_, rIdx) => {
             let excelF = c.formula || '';
             visibleColumns.forEach((col, refIdx) => {
               const refLetter = getColLetter(refIdx + 1);
-              excelF = excelF.replace(new RegExp(`\\{${col.name}\\}`, 'g'), `${refLetter}${rIdx + 2}`);
+              // Shift row index down if we added heading/datetime rows
+              const headingOffset = (options.includeHeading ? 1 : 0) + (options.includeDateTime ? 1 : 0) + ((options.includeHeading || options.includeDateTime) ? 1 : 0);
+              excelF = excelF.replace(new RegExp(`\\{${col.name}\\}`, 'g'), `${refLetter}${rIdx + 2 + headingOffset}`);
             });
-            const cellRef = `${colLetter}${rIdx + 2}`;
-            const val = evaluateFormula(c.formula || '', displayEntries[rIdx], columns);
+            const headingOffset = (options.includeHeading ? 1 : 0) + (options.includeDateTime ? 1 : 0) + ((options.includeHeading || options.includeDateTime) ? 1 : 0);
+            const cellRef = `${colLetter}${rIdx + 2 + headingOffset}`;
+            const val = evaluateFormula(c.formula || '', entriesToExport[rIdx], columns);
             const n = parseFloat(val);
             ws[cellRef] = { t: isNaN(n) ? 's' : 'n', f: excelF, v: isNaN(n) ? val : n };
           });
@@ -1976,14 +2008,31 @@ export default function RegisterPage() {
     }
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = (options: ExportOptions) => {
     if (!register) return;
 
-    const visibleCols = columns.filter((col) => !hiddenColumns.has(col.id) && col.type !== 'image');
+    const visibleCols = columns.filter((col) => 
+      !hiddenColumns.has(col.id) && 
+      col.type !== 'image' &&
+      options.selectedColumnIds.has(col.id)
+    );
     const headerRow = ['S.No.', ...visibleCols.map(c => c.name)];
-    if (headerRow.length === 0) return;
+    
+    if (headerRow.length === 0) {
+      toast.error('No columns selected for export.');
+      return;
+    }
 
-    const bodyRows = displayEntries.map((entry, idx) => {
+    const entriesToExport = options.exportRows === 'selected' 
+      ? displayEntries.filter(e => selectedRows.has(e.id))
+      : displayEntries;
+
+    if (entriesToExport.length === 0) {
+      toast.error('No rows to export.');
+      return;
+    }
+
+    const bodyRows = entriesToExport.map((entry, idx) => {
       return [
         (idx + 1).toString(),
         ...visibleCols.map(c => {
@@ -2009,7 +2058,7 @@ export default function RegisterPage() {
       }
 
       hasAnyCalc = true;
-      const values = displayEntries.map(entry => {
+      const values = entriesToExport.map(entry => {
         if (c.type === 'formula') return evaluateFormula(c.formula || '', entry, columns);
         return entry.cells?.[c.id.toString()] || '';
       });
@@ -2053,23 +2102,37 @@ export default function RegisterPage() {
     try {
       const doc = new jsPDF({ orientation: headerRow.length > 6 ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
 
-      // Title
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
-      doc.text(register.name || 'Export', 14, 18);
+      let currentY = 18;
 
-      // Subtitle
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(120, 120, 120);
-      doc.text(`Exported on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} • ${displayEntries.length} rows`, 14, 24);
-      doc.setTextColor(0, 0, 0);
+      if (options.includeHeading) {
+        doc.setFontSize(16);
+        doc.setFont('helvetica', 'bold');
+        doc.text(register.name || 'Export', 14, currentY);
+        currentY += 6;
+      }
+
+      if (options.includeDateTime) {
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(120, 120, 120);
+        doc.text(`Exported on ${new Date().toLocaleString()} • ${entriesToExport.length} rows`, 14, currentY);
+        doc.setTextColor(0, 0, 0);
+        currentY += 6;
+      } else {
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(120, 120, 120);
+        doc.text(`${entriesToExport.length} rows`, 14, currentY);
+        doc.setTextColor(0, 0, 0);
+        currentY += 6;
+      }
 
       doc.setProperties({ title: register.name || 'Register Export' });
 
       autoTable(doc, {
-        startY: 30,
-        head: [['S.No.', ...headerRow]],
+        startY: currentY + 6,
+        showHead: options.includeHeading ? 'everyPage' : 'firstPage',
+        head: [headerRow],
         body: bodyRows,
         foot: hasAnyCalc ? [footerRow] : undefined,
         theme: 'grid',
@@ -2470,10 +2533,9 @@ export default function RegisterPage() {
     enabled: useVirtual,
   });
 
-  // ── Column virtualizer (horizontal) ──
+  // Column virtualizer (horizontal) ──
   // Uses the same scroll container (parentRef) but scrolls horizontally.
   // The serial S.No column (50px) + actions column (44px) are rendered outside the virtualizer.
-  const ACTIONS_COL_W = 44;
   const colVirtualizer = useVirtualizer({
     count: visibleColumns.length,
     getScrollElement: () => parentRef.current,
@@ -2535,8 +2597,7 @@ export default function RegisterPage() {
         <RegisterHeader 
           register={register} 
           setShareModal={setShareModal} 
-          handleExportExcel={handleExportExcel}
-          handleExportPDF={handleExportPDF}
+          handleOpenExport={() => setShowExportModal(true)}
         />
       </div>
 
@@ -2933,6 +2994,20 @@ export default function RegisterPage() {
         entries={localEntries}
       />
 
+      {showExportModal && (
+        <ExportModal
+          onClose={() => setShowExportModal(false)}
+          onExport={(options) => {
+            if (options.format === 'excel') handleExportExcel(options);
+            else handleExportPDF(options);
+            setShowExportModal(false);
+          }}
+          columns={columns}
+          hiddenColumns={hiddenColumns}
+          selectedRowCount={selectedRows.size}
+          totalRowCount={displayEntries.length}
+        />
+      )}
 
       <ShareModal 
         shareModal={shareModal} setShareModal={setShareModal}

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Share2, Download, FileSpreadsheet, FileText, ChevronDown, Bookmark, X } from 'lucide-react';
+import { Share2, Download, Bookmark, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface SavedTemplate {
@@ -11,30 +11,14 @@ interface SavedTemplate {
 
 interface RegisterHeaderProps {
   register: any;
-  setShareModal: (v: boolean) => void;
-  handleExportExcel: () => void;
-  handleExportPDF: () => void;
+  setShareModal: (open: boolean) => void;
+  handleOpenExport: () => void;
 }
 
-export function RegisterHeader({ register, setShareModal, handleExportExcel, handleExportPDF }: RegisterHeaderProps) {
-  const [exportOpen, setExportOpen] = useState(false);
+export function RegisterHeader({ register, setShareModal, handleOpenExport }: RegisterHeaderProps) {
   const [saveTemplateModal, setSaveTemplateModal] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const templateInputRef = useRef<HTMLInputElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setExportOpen(false);
-      }
-    };
-    if (exportOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [exportOpen]);
 
   // Focus template name input when modal opens
   useEffect(() => {
@@ -83,48 +67,14 @@ export function RegisterHeader({ register, setShareModal, handleExportExcel, han
       <button className="register-header-btn" onClick={() => setShareModal(true)}>
         <Share2 size={14} /> Share
       </button>
-      <div className="export-dropdown-wrap" ref={dropdownRef}>
-        <button className="register-header-btn" onClick={() => setExportOpen(!exportOpen)}>
-          <Download size={14} /> Download <ChevronDown size={12} style={{ marginLeft: 2, opacity: 0.7, transition: 'transform 0.2s', transform: exportOpen ? 'rotate(180deg)' : 'rotate(0)' }} />
+      <div className="export-dropdown-wrap">
+        <button className="register-header-btn" onClick={handleOpenExport}>
+          <Download size={14} /> Download Options
         </button>
-        {exportOpen && (
-          <div className="export-dropdown-menu">
-            <button
-              className="export-dropdown-item"
-              onClick={() => { handleExportExcel(); setExportOpen(false); }}
-            >
-              <FileSpreadsheet size={16} />
-              <div className="export-dropdown-item-info">
-                <span className="export-dropdown-item-label">Excel (.xlsx)</span>
-                <span className="export-dropdown-item-desc">Spreadsheet with formulas & dropdowns</span>
-              </div>
-            </button>
-            <button
-              className="export-dropdown-item"
-              onClick={() => { handleExportPDF(); setExportOpen(false); }}
-            >
-              <FileText size={16} />
-              <div className="export-dropdown-item-info">
-                <span className="export-dropdown-item-label">PDF (.pdf)</span>
-                <span className="export-dropdown-item-desc">Formatted table ready to print</span>
-              </div>
-            </button>
-
-            <div className="export-dropdown-divider" />
-
-            <button
-              className="export-dropdown-item"
-              onClick={() => { setExportOpen(false); setTemplateName(register?.name || ''); setSaveTemplateModal(true); }}
-            >
-              <Bookmark size={16} />
-              <div className="export-dropdown-item-info">
-                <span className="export-dropdown-item-label">Save as Template</span>
-                <span className="export-dropdown-item-desc">Save column layout for reuse</span>
-              </div>
-            </button>
-          </div>
-        )}
       </div>
+      <button className="register-header-btn outline" onClick={() => { setTemplateName(register?.name || ''); setSaveTemplateModal(true); }}>
+        <Bookmark size={14} /> Save Template
+      </button>
 
       {/* Save Template Modal */}
       {saveTemplateModal && (
