@@ -110,9 +110,16 @@ export interface Column {
   dropdownOptions?: string[]; formula?: string; width?: number;
 }
 
+export interface CellStyle {
+  textColor?: string;
+  bgColor?: string;
+  textAlign?: 'left' | 'center' | 'right';
+}
+
 export interface Entry {
   id: number; registerId: number; rowNumber: number;
   cells: Record<string, string>; createdAt: string; pageIndex?: number;
+  cellStyles?: Record<string, CellStyle>;
 }
 
 export interface Page { id: number; name: string; index: number; }
@@ -1256,6 +1263,18 @@ export async function updateEntry(registerId: number, entryId: number, cells: Re
     );
 
     entry.cells = { ...entry.cells, ...safeCells };
+    reg.updatedAt = new Date().toISOString();
+    await saveRegDocImmediate(reg);
+    return entry;
+  });
+}
+
+export async function updateEntryCellStyles(registerId: number, entryId: number, cellStyles: Record<string, CellStyle>): Promise<Entry> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const entry = reg.entries.find((e) => e.id === entryId);
+    if (!entry) throw new Error('Entry not found');
+    entry.cellStyles = { ...(entry.cellStyles || {}), ...cellStyles };
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
     return entry;

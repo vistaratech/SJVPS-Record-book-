@@ -5055,14 +5055,26 @@ body.modal-open {
   line-height: 0 !important;
 }
 /* Prevent text from expanding cells */
-.spreadsheet td .cell-input {
+.spreadsheet td .cell-input,
+.spreadsheet td .cell-formula,
+.spreadsheet td .cell-dropdown,
+.spreadsheet td .cell-checkbox-wrap,
+.spreadsheet td .cell-rating,
+.spreadsheet td .cell-image-wrap,
+.spreadsheet td .cell-auto-increment-readonly {
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
   padding: 0 8px !important;
   overflow: hidden !important;
   box-sizing: border-box !important;
+  color: inherit;
+  background-color: transparent !important;
+  text-align: inherit;
 }
 /* Prevent the cell-url-wrap children from growing */
 .spreadsheet td .cell-url-wrap .cell-input {
   min-width: 0 !important;
+  color: inherit;
+  background-color: transparent !important;
+  text-align: inherit;
 }

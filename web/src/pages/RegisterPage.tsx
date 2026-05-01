@@ -12,7 +12,8 @@ import {
   evaluateFormula,
   generateShareLink, addSharedUser, removeSharedUser,
   subscribeToMutationStatus, updateEntriesOrder,
-  type Entry,
+  updateEntryCellStyles,
+  type Entry, type CellStyle,
 } from '../lib/api';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -27,6 +28,7 @@ import {
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { RegisterHeader } from '../components/register/RegisterHeader';
 import { SpreadsheetRow } from '../components/register/SpreadsheetRow';
+import { CellFormatToolbar } from '../components/register/CellFormatToolbar';
 import { ExportModal, type ExportOptions } from '../components/register/modals/ExportModal';
 
 import { FilterModal } from '../components/register/modals/FilterModal';
@@ -144,6 +146,9 @@ export default function RegisterPage() {
   }, [detailErrors]);
   const detailInputRefs = useRef<Map<number, HTMLElement>>(new Map());
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // Cell formatting toolbar
+  const [formatCell, setFormatCell] = useState<{ entryId: number; colId: string; rect: DOMRect } | null>(null);
 
   // New column form (shared by Add Column and Insert Column)
   const [newColName, setNewColName] = useState('');
@@ -1748,6 +1753,81 @@ export default function RegisterPage() {
     }, 600);
   }, [registerId, queryClient, pushToUndoStack]);
 
+  // ── Cell Formatting ──
+  const onCellFormatClick = useCallback((entryId: number, colId: string, rect: DOMRect) => {
+    setFormatCell({ entryId, colId, rect });
+  }, []);
+
+  const handleCellStyleChange = useCallback((style: Partial<CellStyle>) => {
+    if (!formatCell) return;
+    const { entryId, colId } = formatCell;
+
+    let mergedStyle = style;
+
+    // 1. Optimistic local update
+    setLocalEntries((prev) => prev.map((e) => {
+      if (e.id === entryId) {
+        const existingStyles = e.cellStyles || {};
+        const existingCellStyle = existingStyles[colId] || {};
+        mergedStyle = { ...existingCellStyle, ...style };
+        return {
+          ...e,
+          cellStyles: {
+            ...existingStyles,
+            [colId]: mergedStyle,
+          },
+        };
+      }
+      return e;
+    }));
+
+    // 2. Persist to Firestore
+    updateEntryCellStyles(registerId, entryId, { [colId]: mergedStyle }).then(() => {
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          entries: old.entries.map((e: any) =>
+            e.id === entryId
+              ? { ...e, cellStyles: { ...(e.cellStyles || {}), [colId]: mergedStyle } }
+              : e
+          ),
+        };
+      });
+    });
+  }, [formatCell, registerId, queryClient]);
+
+  const handleClearCellStyle = useCallback(() => {
+    if (!formatCell) return;
+    const { entryId, colId } = formatCell;
+
+    setLocalEntries((prev) => prev.map((e) => {
+      if (e.id === entryId) {
+        const existingStyles = { ...(e.cellStyles || {}) };
+        delete existingStyles[colId];
+        return { ...e, cellStyles: existingStyles };
+      }
+      return e;
+    }));
+
+    updateEntryCellStyles(registerId, entryId, { [colId]: {} }).then(() => {
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          entries: old.entries.map((e: any) => {
+            if (e.id === entryId) {
+              const styles = { ...(e.cellStyles || {}) };
+              delete styles[colId];
+              return { ...e, cellStyles: styles };
+            }
+            return e;
+          }),
+        };
+      });
+    });
+  }, [formatCell, registerId, queryClient]);
+
   // Excel-like sort: permanently reorders localEntries and persists to Firestore
   const handleSort = useCallback((colId: number, direction: 'asc' | 'desc') => {
     setSortColId(colId);
@@ -2876,6 +2956,7 @@ export default function RegisterPage() {
                   defaultColWidth={defaultColWidth}
                   totalRows={displayEntries.length}
                   rowHeight={dynamicRowHeight}
+                  onCellFormatClick={onCellFormatClick}
                 />
               );
             })}
@@ -3484,6 +3565,19 @@ export default function RegisterPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Cell Format Toolbar ── */}
+      {formatCell && (
+        <CellFormatToolbar
+          position={{ top: formatCell.rect.top, left: formatCell.rect.left }}
+          currentStyle={
+            localEntries.find(e => e.id === formatCell.entryId)?.cellStyles?.[formatCell.colId] || {}
+          }
+          onStyleChange={handleCellStyleChange}
+          onClearStyle={handleClearCellStyle}
+          onClose={() => setFormatCell(null)}
+        />
       )}
     </div>
   );

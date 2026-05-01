@@ -280,6 +280,7 @@ interface SpreadsheetRowProps {
   frozenLeftOffsets?: Record<number, number>;
   colWidths?: Record<number, number>;
   defaultColWidth?: number;
+  onCellFormatClick?: (entryId: number, colId: string, rect: DOMRect) => void;
 }
 
 export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: SpreadsheetRowProps) {
@@ -303,6 +304,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     frozenLeftOffsets,
     colWidths,
     defaultColWidth = 150,
+    onCellFormatClick,
   } = props;
   // Columns to actually render — either the virtual slice or all visible columns
   const renderColumns = colSlice ?? visibleColumns;
@@ -376,15 +378,28 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
       {renderColumns.map((col, colIdx) => {
         const isFrozen = frozenColumns?.has(col.id);
         const w = colWidths?.[col.id] || defaultColWidth;
+        const cs = entry.cellStyles?.[col.id.toString()];
         let cellStyle: React.CSSProperties = { width: w, minWidth: w, maxWidth: w };
+        
+        // Apply user-defined cell formatting
+        if (cs?.bgColor) cellStyle.background = cs.bgColor;
+        if (cs?.textColor) cellStyle.color = cs.textColor;
+        if (cs?.textAlign) cellStyle.textAlign = cs.textAlign;
         
         if (isFrozen) {
           const left = frozenLeftOffsets?.[col.id] || 50;
-          cellStyle = { ...cellStyle, position: 'sticky', left, zIndex: 5, background: '#fafbff' };
+          cellStyle = { ...cellStyle, position: 'sticky', left, zIndex: 5, background: cs?.bgColor || '#fafbff' };
         }
         
+        const handleContextMenu = (e: React.MouseEvent) => {
+          e.preventDefault();
+          if (onCellFormatClick) {
+            onCellFormatClick(entry.id, col.id.toString(), (e.currentTarget as HTMLElement).getBoundingClientRect());
+          }
+        };
+        
         return (
-        <td key={col.id} className={isFrozen ? 'frozen-col' : ''} style={cellStyle}>
+        <td key={col.id} className={isFrozen ? 'frozen-col' : ''} style={cellStyle} onContextMenu={handleContextMenu}>
           {col.type === 'formula' ? (
             <FormulaCell idx={idx} col={col} entry={entry} registerColumns={registerColumns} onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} />
           ) : col.type === 'date' ? (
