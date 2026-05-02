@@ -107,7 +107,7 @@ export interface RegisterSummary {
 
 export interface Column {
   id: number; registerId: number; name: string; type: string; position: number;
-  dropdownOptions?: string[]; formula?: string; width?: number;
+  dropdownOptions?: string[]; formula?: string; width?: number; summary?: string;
 }
 
 export interface CellStyle {
@@ -127,10 +127,25 @@ export interface Page { id: number; name: string; index: number; }
 export interface RegisterDetail extends RegisterSummary {
   columns: Column[]; entries: Entry[]; pages: Page[];
   shareLink?: string; sharedWith?: SharedUser[];
+  deletedItems?: DeletedItem[];
 }
 
 export interface SharedUser {
   id: number; name: string; phone: string; permission: 'view' | 'edit'; addedAt: string;
+}
+
+export interface DeletedItem {
+  id: number;
+  type: 'row' | 'column';
+  deletedAt: string;
+  registerName: string;
+  registerId: number;
+  // For rows
+  entry?: Entry;
+  originalIndex?: number;
+  // For columns
+  column?: Column;
+  columnCellData?: Record<string, string>; // entryId -> cellValue
 }
 
 export interface HistoryEntry {
@@ -1044,14 +1059,35 @@ export async function deleteColumn(registerId: number, columnId: number): Promis
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
     const col = reg.columns.find(c => c.id.toString() === columnId.toString());
+    if (!col) return reg;
+    
+    // Collect cell data for this column before removing
+    const columnCellData: Record<string, string> = {};
+    reg.entries.forEach((e) => {
+      const val = e.cells?.[columnId.toString()];
+      if (val !== undefined && val !== '') {
+        columnCellData[e.id.toString()] = val;
+      }
+    });
+    
+    // Move to bin
+    if (!reg.deletedItems) reg.deletedItems = [];
+    reg.deletedItems.push({
+      id: generateId(),
+      type: 'column',
+      deletedAt: new Date().toISOString(),
+      registerName: reg.name,
+      registerId: reg.id,
+      column: { ...col },
+      columnCellData,
+    });
+    
     reg.columns = reg.columns.filter((c) => c.id.toString() !== columnId.toString());
     reg.columns.forEach((c, i) => c.position = i);
     // Cleanup entry data
     reg.entries.forEach((e) => { if (e.cells) delete e.cells[columnId.toString()]; });
     await saveRegDocImmediate(reg);
-    if (col) {
-      await logAction(reg.businessId, 'Delete Column', `Deleted column "${col.name}" from "${reg.name}"`, { registerId, registerName: reg.name });
-    }
+    await logAction(reg.businessId, 'Delete Column', `Moved column "${col.name}" to bin from "${reg.name}"`, { registerId, registerName: reg.name });
     return reg;
   });
 }
@@ -1159,6 +1195,18 @@ export async function updateColumnWidth(registerId: number, columnId: number, wi
     const col = reg.columns.find((c) => c.id.toString() === columnId.toString());
     if (col) {
       col.width = width;
+      await saveRegDocImmediate(reg);
+    }
+    return reg;
+  });
+}
+
+export async function updateColumnSummary(registerId: number, columnId: number, summary: string): Promise<RegisterDetail> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const col = reg.columns.find((c) => c.id.toString() === columnId.toString());
+    if (col) {
+      col.summary = summary;
       await saveRegDocImmediate(reg);
     }
     return reg;
@@ -1353,10 +1401,26 @@ export async function updateEntriesOrder(registerId: number, sortedEntries: Entr
 export async function deleteEntry(registerId: number, entryId: number): Promise<void> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
+    const entryIndex = reg.entries.findIndex((e) => e.id === entryId);
+    if (entryIndex === -1) return;
+    const entry = reg.entries[entryIndex];
+    
+    // Move to bin instead of permanent delete
+    if (!reg.deletedItems) reg.deletedItems = [];
+    reg.deletedItems.push({
+      id: generateId(),
+      type: 'row',
+      deletedAt: new Date().toISOString(),
+      registerName: reg.name,
+      registerId: reg.id,
+      entry: { ...entry },
+      originalIndex: entryIndex,
+    });
+    
     reg.entries = reg.entries.filter((e) => e.id !== entryId);
     reg.entryCount = reg.entries.length;
     await saveRegDocImmediate(reg);
-    await logAction(reg.businessId, 'Delete Row', `Deleted a row from "${reg.name}"`, { registerId, registerName: reg.name });
+    await logAction(reg.businessId, 'Delete Row', `Moved row to bin from "${reg.name}"`, { registerId, registerName: reg.name });
   });
 }
 
@@ -1421,9 +1485,28 @@ export async function duplicateEntry(registerId: number, entryId: number): Promi
 export async function bulkDeleteEntries(registerId: number, entryIds: number[]): Promise<void> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
-    reg.entries = reg.entries.filter((e) => !entryIds.includes(e.id));
+    if (!reg.deletedItems) reg.deletedItems = [];
+    
+    // Move each entry to bin
+    const idsSet = new Set(entryIds);
+    reg.entries.forEach((e, idx) => {
+      if (idsSet.has(e.id)) {
+        reg.deletedItems!.push({
+          id: generateId(),
+          type: 'row',
+          deletedAt: new Date().toISOString(),
+          registerName: reg.name,
+          registerId: reg.id,
+          entry: { ...e },
+          originalIndex: idx,
+        });
+      }
+    });
+    
+    reg.entries = reg.entries.filter((e) => !idsSet.has(e.id));
     reg.entryCount = reg.entries.length;
     await saveRegDocImmediate(reg);
+    await logAction(reg.businessId, 'Delete Rows', `Moved ${entryIds.length} rows to bin from "${reg.name}"`, { registerId, registerName: reg.name });
   });
 }
 
@@ -1562,4 +1645,107 @@ export async function listHistory(businessId: number): Promise<HistoryEntry[]> {
   return snap.docs
     .map(d => d.data() as HistoryEntry)
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+// ── Bin Management (Rows & Columns) ──────────────────────────────────────────
+
+/**
+ * Get all deleted items (rows + columns) across all registers for a business.
+ */
+export async function getAllDeletedItems(businessId: number): Promise<DeletedItem[]> {
+  const summaries = await listRegisters(businessId);
+  // Also include soft-deleted registers' items
+  const deletedRegs = await listDeletedRegisters(businessId);
+  const allRegIds = [...summaries, ...deletedRegs].map(s => s.id);
+  
+  const allItems: DeletedItem[] = [];
+  
+  for (const regId of allRegIds) {
+    try {
+      const reg = await getRegDoc(regId);
+      if (reg.deletedItems && reg.deletedItems.length > 0) {
+        allItems.push(...reg.deletedItems);
+      }
+    } catch {
+      // Skip registers that can't be loaded
+    }
+  }
+  
+  return allItems.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+}
+
+/**
+ * Get deleted items for a specific register.
+ */
+export async function getRegisterDeletedItems(registerId: number): Promise<DeletedItem[]> {
+  const reg = await getRegDoc(registerId);
+  return (reg.deletedItems || []).sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+}
+
+/**
+ * Restore a deleted item (row or column) from the bin back to its register.
+ */
+export async function restoreDeletedItem(registerId: number, deletedItemId: number): Promise<void> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    if (!reg.deletedItems) return;
+    
+    const itemIndex = reg.deletedItems.findIndex(i => i.id === deletedItemId);
+    if (itemIndex === -1) return;
+    
+    const item = reg.deletedItems[itemIndex];
+    
+    if (item.type === 'row' && item.entry) {
+      // Restore the row at its original index
+      const insertAt = Math.min(item.originalIndex ?? reg.entries.length, reg.entries.length);
+      reg.entries.splice(insertAt, 0, item.entry);
+      reg.entryCount = reg.entries.length;
+      await logAction(reg.businessId, 'Restore Row', `Restored row from bin in "${reg.name}"`, { registerId, registerName: reg.name });
+    } else if (item.type === 'column' && item.column) {
+      // Restore column at its original position
+      const insertAt = Math.min(item.column.position, reg.columns.length);
+      reg.columns.splice(insertAt, 0, item.column);
+      reg.columns.forEach((c, i) => c.position = i);
+      
+      // Restore cell data
+      if (item.columnCellData) {
+        const colIdStr = item.column.id.toString();
+        reg.entries.forEach(e => {
+          const val = item.columnCellData![e.id.toString()];
+          if (val !== undefined) {
+            if (!e.cells) e.cells = {};
+            e.cells[colIdStr] = val;
+          }
+        });
+      }
+      await logAction(reg.businessId, 'Restore Column', `Restored column "${item.column.name}" from bin in "${reg.name}"`, { registerId, registerName: reg.name });
+    }
+    
+    // Remove from bin
+    reg.deletedItems.splice(itemIndex, 1);
+    await saveRegDocImmediate(reg);
+  });
+}
+
+/**
+ * Permanently delete an item from the bin.
+ */
+export async function permanentlyDeleteItem(registerId: number, deletedItemId: number): Promise<void> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    if (!reg.deletedItems) return;
+    reg.deletedItems = reg.deletedItems.filter(i => i.id !== deletedItemId);
+    await saveRegDocImmediate(reg);
+  });
+}
+
+/**
+ * Clear all deleted items from a register's bin.
+ */
+export async function emptyRegisterBin(registerId: number): Promise<void> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    reg.deletedItems = [];
+    await saveRegDocImmediate(reg);
+  });
 }

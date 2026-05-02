@@ -1,5 +1,5 @@
-import { useCallback, memo, useState, startTransition, useDeferredValue } from 'react';
-import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2, History, PlusCircle, FolderPlus, User } from 'lucide-react';
+import { useCallback, memo, useState, startTransition, useDeferredValue, useMemo } from 'react';
+import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2, History, PlusCircle, FolderPlus, User, Bell } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import type { RegisterSummary, Business } from '../../lib/api';
@@ -17,11 +17,13 @@ interface SidebarProps {
   onInputExcel?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   importSession?: import('../../pages/HomePage').ImportSession | null;
   onClearImport?: () => void;
-  clipboard: { id: number, type: 'move' | 'copy' } | null;
-  setClipboard: (v: { id: number, type: 'move' | 'copy' } | null) => void;
+  clipboard: { id: number, type: 'copy' | 'move' } | null;
+  setClipboard: (v: { id: number, type: 'copy' | 'move' } | null) => void;
   sidebarWidth?: number;
   isCollapsed: boolean;
   toggleCollapse: () => void;
+  unreadCount: number;
+  onToggleNotifications: () => void;
 }
 
 export const Sidebar = memo(function Sidebar({
@@ -42,6 +44,8 @@ export const Sidebar = memo(function Sidebar({
   sidebarWidth,
   isCollapsed,
   toggleCollapse,
+  unreadCount,
+  onToggleNotifications
 }: SidebarProps) {
   const navigate = useNavigate();
   const { id: currentRegId } = useParams();
@@ -61,6 +65,67 @@ export const Sidebar = memo(function Sidebar({
     queryFn: () => listFolders(businessId!),
     enabled: !!businessId,
   });
+
+  const { data: register } = useQuery({
+    queryKey: ['register', Number(currentRegId)],
+    queryFn: () => getRegister(Number(currentRegId)),
+    enabled: !!currentRegId,
+  });
+
+  const [showNotifications, setShowNotifications] = useState(false);
+
+  const notifications = useMemo(() => {
+    if (!register?.entries || register.entries.length < 2) return [];
+    
+    const notifs: any[] = [];
+    const entries = register.entries;
+    const seen = new Map<string, number>(); 
+    
+    for (const entry of entries) {
+      if (!entry.cells || Object.keys(entry.cells).length === 0) continue; 
+      
+      const validCells: Record<string, any> = {};
+      Object.entries(entry.cells).forEach(([k, v]) => {
+         if (v && String(v).trim() !== '') validCells[k] = v;
+      });
+      
+      if (Object.keys(validCells).length === 0) continue;
+      
+      const signature = JSON.stringify(validCells, Object.keys(validCells).sort());
+      
+      if (seen.has(signature)) {
+        notifs.push({
+          id: `dup-${entry.id}`,
+          type: 'warning',
+          title: 'Double Entry Warning',
+          message: `Identical data detected in row.`,
+          entryId: entry.id,
+          timestamp: new Date()
+        });
+      } else {
+        seen.set(signature, entry.id);
+      }
+    }
+    
+    return notifs.reverse();
+  }, [register?.entries]);
+
+  const handleNotificationClick = (entryId: number) => {
+    setShowNotifications(false);
+    if (sidebarOpen) setSidebarOpen(false);
+    const rowEl = document.getElementById(`row-${entryId}`);
+    if (rowEl) {
+      rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      rowEl.style.transition = 'background-color 0.5s';
+      const originalBg = rowEl.style.backgroundColor;
+      rowEl.style.backgroundColor = '#fff3cd';
+      setTimeout(() => {
+        rowEl.style.backgroundColor = originalBg;
+      }, 2000);
+    } else {
+      alert('Row not found on current page. Please change page.');
+    }
+  };
 
   const { data: searchResults, isFetching: isSearching } = useQuery({
     queryKey: ['globalSearch', businessId, deferredSearch],
@@ -235,6 +300,19 @@ export const Sidebar = memo(function Sidebar({
             </div>
             <div className="sidebar-brand-sub">Trusted Partners</div>
           </div>
+          <button 
+              className="sidebar-collapse-btn" 
+              onClick={() => onToggleNotifications()}
+              title="Notifications"
+              style={{ position: 'relative' }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+              {unreadCount > 0 && (
+                <span style={{ position: 'absolute', top: -2, right: -2, background: 'var(--danger)', color: 'white', fontSize: 9, fontWeight: 'bold', padding: '1px 4px', borderRadius: 10, border: '1px solid white' }}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </button>
           <button 
             className="sidebar-collapse-btn" 
             onClick={toggleCollapse}
@@ -533,6 +611,39 @@ export const Sidebar = memo(function Sidebar({
               <Trash2 size={15} />
             </button>
             <button 
+              onClick={() => setShowNotifications(true)}
+              style={{
+                background: 'transparent',
+                color: 'var(--muted)',
+                border: 'none',
+                width: '28px', height: '28px',
+                borderRadius: '50%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+                position: 'relative'
+              }}
+              title="Notifications"
+            >
+              <Bell size={15} />
+              {notifications.length > 0 && (
+                <span style={{
+                  position: 'absolute',
+                  top: '-2px',
+                  right: '-2px',
+                  background: '#ef4444',
+                  color: 'white',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  borderRadius: '10px',
+                  padding: '2px 4px',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                }}>
+                  {notifications.length}
+                </span>
+              )}
+            </button>
+            <button 
               onClick={() => setIsActionsMenuOpen(true)}
               style={{
                 background: 'var(--bg-secondary)',
@@ -575,6 +686,100 @@ export const Sidebar = memo(function Sidebar({
             </div>
           </>
         )}
+      </div>
+      
+      {/* Sliding Notification Panel Overlay */}
+      {showNotifications && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.4)',
+            zIndex: 9998,
+            backdropFilter: 'blur(2px)',
+            transition: 'opacity 0.3s'
+          }}
+          onClick={() => setShowNotifications(false)}
+        />
+      )}
+      
+      {/* Sliding Notification Panel */}
+      <div 
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: showNotifications ? 0 : '-380px',
+          width: '380px',
+          height: '100vh',
+          backgroundColor: 'white',
+          boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
+          zIndex: 9999,
+          transition: 'right 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden'
+        }}
+      >
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Bell size={16} /> Alerts & Warnings
+          </h4>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {notifications.length > 0 && (
+              <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 600, background: '#fee2e2', padding: '2px 8px', borderRadius: '12px' }}>
+                {notifications.length} new
+              </span>
+            )}
+            <button 
+              onClick={() => setShowNotifications(false)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', color: '#64748b', borderRadius: '4px' }}
+              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e2e8f0'}
+              onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {notifications.length === 0 ? (
+            <div style={{ padding: '60px 24px', textAlign: 'center', color: '#94a3b8', fontSize: '14px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+              <div style={{ padding: '16px', background: '#f1f5f9', borderRadius: '50%' }}>
+                <Bell size={32} style={{ opacity: 0.4 }} />
+              </div>
+              <div>No new alerts<br/><span style={{ fontSize: '13px', fontWeight: 'normal', color: '#cbd5e1' }}>You're all caught up!</span></div>
+            </div>
+          ) : (
+            notifications.map(notif => (
+              <div 
+                key={notif.id}
+                onClick={() => handleNotificationClick(notif.entryId)}
+                style={{ 
+                  padding: '16px 20px', 
+                  borderBottom: '1px solid #f1f5f9', 
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  display: 'flex',
+                  gap: '12px',
+                  alignItems: 'flex-start'
+                }}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f8fafc'; e.currentTarget.style.paddingLeft = '24px'; }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'white'; e.currentTarget.style.paddingLeft = '20px'; }}
+              >
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b', marginTop: '6px', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a', marginBottom: '4px' }}>{notif.title}</div>
+                  <div style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>{notif.message}</div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    Click to view row
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </>
   );

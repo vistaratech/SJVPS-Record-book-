@@ -27,6 +27,7 @@ export function RegisterHeader({ register, setShareModal, handleOpenExport }: Re
     }
   }, [saveTemplateModal]);
 
+
   const handleSaveTemplate = () => {
     const name = templateName.trim();
     if (!name) {
@@ -64,6 +65,7 @@ export function RegisterHeader({ register, setShareModal, handleOpenExport }: Re
 
   return (
     <div className="register-header-actions">
+
       <button className="register-header-btn" onClick={() => setShareModal(true)}>
         <Share2 size={14} /> Share
       </button>
@@ -124,6 +126,8 @@ export function RegisterHeader({ register, setShareModal, handleOpenExport }: Re
           </div>
         </div>
       )}
+
+
     </div>
   );
 }

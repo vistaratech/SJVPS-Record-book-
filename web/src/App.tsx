@@ -8,6 +8,38 @@ import { saveToStorage } from './lib/api';
 import LoginPage from './pages/LoginPage';
 import HomePage from './pages/HomePage';
 import './index.css';
+import { NotificationProvider, useNotifications } from './lib/NotificationContext';
+
+function GlobalSystemErrorListener() {
+  const { addNotification } = useNotifications();
+
+  useEffect(() => {
+    const handleError = (e: ErrorEvent) => {
+      addNotification({
+        title: 'System Error',
+        message: e.message || 'An unexpected error occurred.',
+        type: 'error'
+      });
+    };
+
+    const handleRejection = (e: PromiseRejectionEvent) => {
+      addNotification({
+        title: 'Network or Action Failed',
+        message: e.reason?.message || 'An asynchronous action failed.',
+        type: 'error'
+      });
+    };
+
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleRejection);
+    };
+  }, [addNotification]);
+
+  return null;
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -74,13 +106,16 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <BrowserRouter>
-          <ErrorBoundary>
-            <AppRoutes />
-            <SaveToast visible={showSaveToast} />
-            <Toaster position="top-center" />
-          </ErrorBoundary>
-        </BrowserRouter>
+        <NotificationProvider>
+          <BrowserRouter>
+            <ErrorBoundary>
+              <GlobalSystemErrorListener />
+              <AppRoutes />
+              <SaveToast visible={showSaveToast} />
+              <Toaster position="top-center" />
+            </ErrorBoundary>
+          </BrowserRouter>
+        </NotificationProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

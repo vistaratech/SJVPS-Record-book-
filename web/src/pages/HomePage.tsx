@@ -12,6 +12,8 @@ import { importLocalFolderToCloud } from '../lib/localFs';
 import { Pencil, Copy, Trash2, Eye, Scissors } from 'lucide-react';
 import { DashboardContent } from '../components/home/DashboardContent';
 import { Sidebar } from '../components/home/Sidebar';
+import { NotificationPanel } from '../components/common/NotificationPanel';
+import { useNotifications } from '../lib/NotificationContext';
 import RegisterPage from './RegisterPage';
 import TemplatesPage from './TemplatesPage';
 import HistoryPage from './HistoryPage';
@@ -40,6 +42,8 @@ export default function HomePage() {
   const [importSession, setImportSession] = useState<ImportSession | null>(null);
   const [clipboard, setClipboard] = useState<{ id: number, type: 'move' | 'copy' } | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === 'true');
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const { unreadCount } = useNotifications();
   const toggleCollapse = useCallback(() => {
     setIsSidebarCollapsed(prev => {
       const next = !prev;
@@ -272,6 +276,13 @@ export default function HomePage() {
         sidebarWidth={sidebarWidth}
         isCollapsed={isSidebarCollapsed}
         toggleCollapse={toggleCollapse}
+        unreadCount={unreadCount}
+        onToggleNotifications={() => setIsNotificationsOpen(!isNotificationsOpen)}
+      />
+
+      <NotificationPanel 
+        isOpen={isNotificationsOpen} 
+        onClose={() => setIsNotificationsOpen(false)} 
       />
 
       {/* ── Draggable resize handle ── */}

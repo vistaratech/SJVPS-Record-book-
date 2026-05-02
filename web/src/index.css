@@ -28,6 +28,7 @@
 
   /* Backgrounds â€” clean blue-tinted white */
   --background:    #F8F9FF;
+  --table-bg:      #f5f6f8;
   --surface:       #FFFFFF;
   --border-light:  #EEF0F8;
   --border:        #E2E5F0;
@@ -944,6 +945,14 @@ a { text-decoration: none; color: inherit; }
   box-shadow: var(--shadow-elevated);
 }
 
+/* Manage Columns Panel Items */
+.manage-cols-item:hover {
+  background: var(--surface-hover) !important;
+}
+.manage-cols-item:hover .unhide-badge {
+  background: var(--navy) !important;
+  color: white !important;
+}
 
 /* ── Undo/Redo History Buttons — prominent, distinct ── */
 .pab-history-btn {
@@ -1452,13 +1461,13 @@ a { text-decoration: none; color: inherit; }
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    SPREADSHEET
 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
-.spreadsheet-wrapper { flex: 1; overflow: auto; position: relative; overflow-anchor: none; will-change: transform; }
+.spreadsheet-wrapper { flex: 1; overflow: auto; position: relative; overflow-anchor: none; will-change: transform; background: var(--table-bg); }
 .spreadsheet { table-layout: fixed; border-collapse: collapse; min-width: 100%; }
 .spreadsheet th {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: #f8faff;
+  background: var(--table-bg);
   border-bottom: 2px solid var(--border);
   border-right: 1px solid var(--border);
   padding: 0;
@@ -1475,7 +1484,7 @@ a { text-decoration: none; color: inherit; }
   user-select: none;
   transition: background 0.1s;
 }
-.spreadsheet th:hover { background: #f1f5ff; }
+.spreadsheet th:hover { background: #eff1f5; }
 .spreadsheet th.serial { 
   width: 50px; 
   min-width: 50px;
@@ -1484,7 +1493,7 @@ a { text-decoration: none; color: inherit; }
   position: sticky; 
   left: 0; 
   z-index: 12; 
-  background: var(--border-light);
+  background: var(--table-bg);
 }
 .spreadsheet th.serial-header-checkbox { 
   width: 40px; 
@@ -1492,7 +1501,7 @@ a { text-decoration: none; color: inherit; }
   position: sticky; 
   left: 0; 
   z-index: 12; 
-  background: var(--border-light);
+  background: var(--table-bg);
 }
 .spreadsheet th.actions { width: 44px; cursor: default; }
 .spreadsheet th .col-header-inner {
@@ -1555,7 +1564,7 @@ a { text-decoration: none; color: inherit; }
 /* Column being dragged â€” dim it */
 .spreadsheet th.dragging {
   opacity: 0.35;
-  background: var(--border-light);
+  background: var(--table-bg);
 }
 
 /* Floating ghost that follows the cursor */
@@ -1595,7 +1604,7 @@ a { text-decoration: none; color: inherit; }
   color: var(--muted);
   font-size: 12px;
   font-family: 'JetBrains Mono', monospace;
-  background: var(--border-light);
+  background: var(--table-bg);
   width: 50px;
   min-width: 50px;
   position: sticky;
@@ -1609,7 +1618,7 @@ a { text-decoration: none; color: inherit; }
   position: sticky;
   left: 0;
   z-index: 11;
-  background: var(--border-light);
+  background: var(--table-bg);
 }
 .spreadsheet td.actions { text-align: center; width: 44px; }
 .spreadsheet tr:hover td { background: rgba(20,83,45,0.04); }
@@ -1688,6 +1697,109 @@ a { text-decoration: none; color: inherit; }
 .cell-image-upload { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); cursor: pointer; padding: 4px 6px; border: 1px dashed var(--border); border-radius: 4px; transition: all 0.15s; white-space: nowrap; }
 .cell-image-upload:hover { border-color: var(--navy); color: var(--navy); background: rgba(20,83,45,0.04); }
 
+/* ── Calc Row (Inside Table) ── */
+.calc-row {
+  height: 4px;
+  max-height: 4px;
+  background: var(--table-bg);
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  box-shadow: 0 -1px 0 var(--border);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+.calc-row:hover,
+.calc-row.calc-row-has-values,
+.calc-row.calc-row-expanded {
+  height: 26px;
+  max-height: 26px;
+}
+
+/* ── Cell base: collapsed by default ── */
+.calc-cell-td {
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
+  font-weight: 600;
+  color: var(--navy);
+  border-right: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--table-bg);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.calc-row:hover .calc-cell-td,
+.calc-row.calc-row-has-values .calc-cell-td,
+.calc-row.calc-row-expanded .calc-cell-td {
+  padding: 0 8px;
+  font-size: 10px;
+  line-height: 26px;
+}
+.calc-cell-td:hover { background: rgba(30, 45, 120, 0.03); }
+
+/* ── Cells with chosen values: ALWAYS visible even without row hover ── */
+.calc-cell-has-value {
+  padding: 0 8px !important;
+  font-size: 10px !important;
+  line-height: 26px !important;
+}
+
+.calc-cell-content {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+}
+
+.calc-value {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+/* ── "+" button: hidden by default, shown on row hover ── */
+.calc-cell-inner {
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease 0.03s, transform 0.15s ease 0.03s;
+}
+.calc-row:hover .calc-cell-inner,
+.calc-row.calc-row-expanded .calc-cell-inner {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.calc-label { color: var(--muted); font-size: 10px; margin-right: 4px; }
+
+/* ── Calc "+" Add Button (per-column, shown when no calc chosen) ── */
+.calc-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--muted-light);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1;
+  padding: 0;
+}
+.calc-add-btn:hover {
+  border-color: var(--navy);
+  background: rgba(30, 45, 120, 0.06);
+  color: var(--navy);
+  transform: scale(1.15);
+  box-shadow: 0 2px 8px rgba(30, 45, 120, 0.12);
+}
+
 /* â”€â”€ URL / Email / Phone Cell â”€â”€ */
 .cell-url-wrap { display: flex; align-items: center; height: 100%; width: 100%; }
 .cell-url-wrap .cell-input { flex: 1; }
@@ -1705,7 +1817,7 @@ a { text-decoration: none; color: inherit; }
   color: var(--navy);
   font-weight: 700;
   font-family: 'JetBrains Mono', monospace;
-  background: rgba(26, 35, 126, 0.03);
+  background: var(--table-bg);
   cursor: default;
   user-select: text;
 }
@@ -1755,14 +1867,14 @@ a { text-decoration: none; color: inherit; }
   line-height: 1;
 }
 
-/* â”€â”€ Frozen Column Visual â”€â”€ */
+/* ── Frozen Column Visual ── */
 .spreadsheet th.frozen-col,
 .spreadsheet td.frozen-col {
   border-right: 2px solid var(--navy) !important;
-  background: var(--border-light) !important;
+  background: var(--table-bg) !important;
 }
 .spreadsheet td.frozen-col {
-  background: #fafbff !important;
+  background: var(--table-bg) !important;
 }
 
 .row-menu-btn {
@@ -1777,34 +1889,16 @@ a { text-decoration: none; color: inherit; }
   background: transparent;
   transition: all 0.15s;
   margin: 0 auto;
+  opacity: 0;
+}
+.spreadsheet tr:hover .row-menu-btn,
+.row-menu-btn:focus,
+.row-menu-btn:active,
+.row-menu-btn.menu-open {
+  opacity: 1;
 }
 .row-menu-btn:hover { background: var(--border-light); color: var(--navy); }
 
-/* â”€â”€ Calc Row (Inside Table) â”€â”€ */
-.calc-row {
-  height: 36px;
-  background: var(--border-light);
-  position: sticky;
-  bottom: 0;
-  z-index: 20;
-  box-shadow: 0 -1px 0 var(--border);
-}
-.calc-cell-td {
-  padding: 0 16px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--navy);
-  border-right: 1px solid var(--border);
-  border-top: 1px solid var(--border);
-  cursor: pointer;
-  transition: background 0.15s;
-  background: var(--border-light);
-  white-space: nowrap;
-}
-.calc-cell-td:hover { background: var(--border); }
-.calc-label { color: var(--muted); font-size: 10px; margin-right: 4px; }
-
-/* â•â•â•â•â•â•â•â•â•â•â• EMPTY STATE â•â•â•â•â•â•â•â•â•â•â• */
 .empty-state {
   flex: 1;
   display: flex;
@@ -1957,6 +2051,42 @@ a { text-decoration: none; color: inherit; }
   position: fixed;
   inset: 0;
   z-index: 1000;
+}
+
+/* ── Context Menu ── */
+.context-menu {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 8px;
+  min-width: 200px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+  animation: slideUp 0.15s ease;
+}
+
+.context-popover-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+/* Manage Columns Panel Items */
+.manage-cols-item:hover {
+  background: var(--surface-hover) !important;
+}
+.manage-cols-item:hover .unhide-badge {
+  background: var(--navy) !important;
+  color: white !important;
+}
+
+@keyframes dropdownIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .context-menu-column {
@@ -3958,17 +4088,17 @@ body.modal-open {
 .calc-cell-content {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   cursor: pointer;
-  padding: 4px 10px;
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: 4px;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  background: rgba(255, 255, 255, 0.4);
+  background: transparent;
   border: 1px solid transparent;
-  margin: 2px 0;
+  margin: 1px 0;
 }
 .calc-cell-content:hover {
-  background: white;
+  background: rgba(30, 45, 120, 0.04);
   border-color: var(--border);
   box-shadow: var(--shadow-sm);
   transform: translateY(-1px);

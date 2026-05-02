@@ -341,6 +341,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     handleCellChange,
     openDatePicker,
     openDropdown,
+    isMenuOpen,
     toggleMenu,
     registerColumns,
     onRowDetail,
@@ -434,7 +435,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
         
         if (isFrozen) {
           const left = frozenLeftOffsets?.[col.id] || 50;
-          cellStyle = { ...cellStyle, position: 'sticky', left, zIndex: 5, background: cs?.bgColor || '#fafbff' };
+          cellStyle = { ...cellStyle, position: 'sticky', left, zIndex: 5, background: cs?.bgColor || 'var(--table-bg)' };
         }
         
         const handleContextMenu = (e: React.MouseEvent) => {
@@ -543,7 +544,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
                 gap: '6px', 
                 padding: '0 8px', 
                 color: '#64748b', 
-                background: '#f8fafc',
+                background: 'var(--table-bg)',
                 height: '100%',
                 fontSize: '12px',
                 fontWeight: 500
@@ -571,9 +572,9 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
       })}
       {/* Right padding cell for column virtualization */}
       {paddingRight > 0 && <td key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />}
-      <td className="actions">
+      <td className="actions" style={{ width: '50px', minWidth: '50px', position: 'sticky', right: 0, zIndex: 1, background: 'var(--table-bg)', borderLeft: '1px solid var(--border)' }}>
         <button
-          className="row-menu-btn"
+          className={`row-menu-btn ${isMenuOpen ? 'menu-open' : ''}`}
           aria-label="Row Options"
           title="Row Options"
           onClick={() => toggleMenu(entry.id)}

@@ -1,4 +1,4 @@
-import { Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, SortAsc, SortDesc, Pencil, ArrowLeftRight, Copy, ArrowRight, ChevronsLeftRight, Pin, EyeOff, Eraser, Trash2, FileText, FileSpreadsheet, Share2, ArrowLeft } from 'lucide-react';
+import { Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, SortAsc, SortDesc, Pencil, ArrowLeftRight, Copy, ArrowRight, ChevronsLeftRight, Pin, Eye, EyeOff, Eraser, Trash2, FileText, FileSpreadsheet, Share2, ArrowLeft } from 'lucide-react';
 import { type Column } from '../../../lib/api';
 
 interface RegisterContextMenusProps {
@@ -43,6 +43,9 @@ interface RegisterContextMenusProps {
   // Calc
   calcTypes: Record<number, string>;
   updateCalcType: (colId: number, type: string) => void;
+  // Manage Columns Dropdown
+  manageColsMenu: { rect: DOMRect } | null;
+  setManageColsMenu: (v: { rect: DOMRect } | null) => void;
 }
 
 export function RegisterContextMenus(props: RegisterContextMenusProps) {
@@ -55,7 +58,8 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
     hiddenColumns, setHiddenColumns, hideColumn, clearColumnDataMutation, deleteColumnMutation,
     rowMenuId, setRowMenuId, duplicateEntryMutation, deleteEntryMutation,
     handleRowDownloadPDF, handleRowDownloadExcel, handleRowShareText,
-    calcTypes, updateCalcType
+    calcTypes, updateCalcType,
+    manageColsMenu, setManageColsMenu
   } = props;
 
   return (
@@ -264,6 +268,123 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
             <button className="context-item danger" onClick={() => { if (confirm('Delete row?')) deleteEntryMutation.mutate(rowMenuId); }}>
               <Trash2 size={16} /> Delete
             </button>
+          </div>
+        </div>
+      )}
+      {/* ── Manage Columns Dropdown ── */}
+      {manageColsMenu !== null && (
+        <div className="context-popover-layer" style={{ zIndex: 10000 }} onClick={() => setManageColsMenu(null)}>
+          <div
+            className="context-menu"
+            style={manageColsMenu ? { 
+              position: 'fixed',
+              top: manageColsMenu.rect.bottom + 6, 
+              left: Math.max(10, Math.min(manageColsMenu.rect.left - 180, window.innerWidth - 230)),
+              width: '220px',
+              maxHeight: '380px',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: 'var(--shadow-lg)',
+              border: '1px solid var(--border)',
+              padding: '0',
+              overflow: 'hidden',
+              animation: 'dropdownIn 0.15s ease-out'
+            } : undefined}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="context-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Manage Columns</span>
+              <span className="context-type-badge" style={{ background: 'var(--primary-light)', color: 'var(--primary)' }}>
+                {columns.length - hiddenColumns.size} / {columns.length}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', padding: '8px 12px', borderBottom: '1px solid var(--border-light)' }}>
+              <button 
+                className="context-item-mini"
+                style={{ flex: 1, padding: '4px', fontSize: '11px', borderRadius: '4px', border: '1px solid var(--border)', background: 'white', cursor: 'pointer' }}
+                onClick={() => {
+                  const newHidden = new Set<number>();
+                  setHiddenColumns(newHidden);
+                  columns.forEach(c => hideColumn(registerId, c.id, false));
+                }}
+              >
+                Show All
+              </button>
+              <button 
+                className="context-item-mini"
+                style={{ flex: 1, padding: '4px', fontSize: '11px', borderRadius: '4px', border: '1px solid var(--border)', background: 'white', cursor: 'pointer' }}
+                onClick={() => {
+                  const newHidden = new Set(columns.map(c => c.id));
+                  setHiddenColumns(newHidden);
+                  columns.forEach(c => hideColumn(registerId, c.id, true));
+                }}
+              >
+                Hide All
+              </button>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1, padding: '4px 0', minHeight: '100px' }}>
+              {(() => {
+                const hiddenList = columns.filter(col => hiddenColumns.has(col.id));
+                if (hiddenList.length === 0) {
+                  return (
+                    <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12px' }}>
+                      <EyeOff size={24} style={{ opacity: 0.2, marginBottom: '8px' }} />
+                      <div style={{ fontWeight: 500 }}>All columns are visible</div>
+                    </div>
+                  );
+                }
+                return (
+                  <>
+                    <div style={{ padding: '4px 8px 8px' }}>
+                      <button 
+                        style={{ width: '100%', padding: '6px', fontSize: '11px', fontWeight: 600, background: 'var(--navy)', color: 'white', borderRadius: '4px', border: 'none' }}
+                        onClick={() => {
+                          setHiddenColumns(new Set());
+                          // You might need a bulk unhide function here or loop
+                          hiddenList.forEach(col => hideColumn(registerId, col.id, false));
+                        }}
+                      >
+                        Show All Columns
+                      </button>
+                    </div>
+                    {hiddenList.map(col => (
+                      <div 
+                        key={col.id} 
+                        className="manage-cols-item"
+                        style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '10px', 
+                          padding: '10px 12px', 
+                          cursor: 'pointer',
+                          borderRadius: '6px',
+                          margin: '2px 4px',
+                          transition: 'background 0.15s'
+                        }}
+                        onClick={() => {
+                          const newHidden = new Set(hiddenColumns);
+                          newHidden.delete(col.id);
+                          setHiddenColumns(newHidden);
+                          hideColumn(registerId, col.id, false);
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--background)', color: 'var(--muted)' }}>
+                          <Eye size={12} />
+                        </div>
+                        <span style={{ fontSize: '13px', flex: 1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--foreground)' }}>
+                          {col.name}
+                        </span>
+                        <div className="unhide-badge" style={{ fontSize: '10px', color: 'var(--navy)', fontWeight: 700, padding: '2px 6px', background: 'rgba(30,45,120,0.06)', borderRadius: '4px' }}>
+                          Unhide
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                );
+              })()}
+            </div>
           </div>
         </div>
       )}

@@ -4,7 +4,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getRegister, addColumn, deleteColumn, renameColumn, updateColumnDropdownOptions,
-  duplicateColumn, moveColumn, reorderColumn, changeColumnType, clearColumnData, insertColumn, updateColumnWidth,
+  duplicateColumn, moveColumn, reorderColumn, changeColumnType, clearColumnData, insertColumn, updateColumnWidth, updateColumnSummary,
   freezeColumn, hideColumn,
   addEntry, updateEntry, deleteEntry, duplicateEntry, bulkDeleteEntries,
   restoreEntry, bulkRestoreEntries, restoreColumn,
@@ -35,8 +35,10 @@ import { FilterModal } from '../components/register/modals/FilterModal';
 import { ShareModal } from '../components/register/modals/ShareModal';
 import { ColumnModals } from '../components/register/modals/ColumnModals';
 import { OtherModals } from '../components/register/modals/OtherModals';
+import { RegisterToolbar } from '../components/register/RegisterToolbar';
 import { RegisterContextMenus } from '../components/register/menus/RegisterContextMenus';
 import { COL_TYPES } from '../lib/constants';
+import { useNotifications } from '../lib/NotificationContext';
 
 type CalcType = 'sum' | 'average' | 'count' | 'min' | 'max' | 'filled' | 'empty' | 'distinct' | 'none';
 
@@ -83,6 +85,7 @@ export default function RegisterPage() {
   const location = useLocation();
   const registerId = Number(id);
   const queryClient = useQueryClient();
+  const { addNotification } = useNotifications();
   const { data: register, isLoading, error } = useQuery({
     queryKey: ['register', registerId],
     queryFn: () => getRegister(Number(registerId)),
@@ -109,6 +112,7 @@ export default function RegisterPage() {
   const [newColumnModal, setNewColumnModal] = useState(false);
   const [colMenuId, setColMenuId] = useState<number | null>(null);
   const [colMenuRect, setColMenuRect] = useState<DOMRect | null>(null);
+  const [manageColsMenu, setManageColsMenu] = useState<{ rect: DOMRect } | null>(null);
   const [rowMenuId, setRowMenuId] = useState<number | null>(null);
   const [renameColModal, setRenameColModal] = useState(false);
   const [dropdownConfigModal, setDropdownConfigModal] = useState(false);
@@ -129,8 +133,41 @@ export default function RegisterPage() {
   const [shareModal, setShareModal] = useState(false);
   const [renamePageModal, setRenamePageModal] = useState(false);
   const [calcModal, setCalcModal] = useState(false);
-  const [hiddenColumns, setHiddenColumns] = useState<Set<number>>(new Set());
-  const [frozenColumns, setFrozenColumns] = useState<Set<number>>(new Set());
+  const isLocalStorageInitializedRef = useRef(false);
+
+  const [hiddenColumns, setHiddenColumns] = useState<Set<number>>(() => {
+    try {
+      const saved = localStorage.getItem(`rb_hidden_cols_${registerId}`);
+      if (saved) {
+        isLocalStorageInitializedRef.current = true;
+        return new Set(JSON.parse(saved));
+      }
+    } catch (e) {}
+    return new Set();
+  });
+  const [frozenColumns, setFrozenColumns] = useState<Set<number>>(() => {
+    try {
+      const saved = localStorage.getItem(`rb_frozen_cols_${registerId}`);
+      if (saved) {
+        // We only really need one ref, but we can set it here too just in case
+        isLocalStorageInitializedRef.current = true;
+        return new Set(JSON.parse(saved));
+      }
+    } catch (e) {}
+    return new Set();
+  });
+
+  useEffect(() => {
+    if (registerId) {
+      localStorage.setItem(`rb_hidden_cols_${registerId}`, JSON.stringify(Array.from(hiddenColumns)));
+    }
+  }, [hiddenColumns, registerId]);
+
+  useEffect(() => {
+    if (registerId) {
+      localStorage.setItem(`rb_frozen_cols_${registerId}`, JSON.stringify(Array.from(frozenColumns)));
+    }
+  }, [frozenColumns, registerId]);
   const [sortColId, setSortColId] = useState<number | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc' | null>(null);
   const [detailViewEntry, setDetailViewEntry] = useState<Entry | null>(null);
@@ -517,8 +554,14 @@ export default function RegisterPage() {
     if (error) {
       errorRef.current = error;
       toast.error('Failed to load register data');
+      addNotification({
+        title: 'Data Load Error',
+        message: 'Failed to load register data. Please try refreshing the page.',
+        type: 'error',
+        link: { registerId: registerId.toString() }
+      });
     }
-  }, [error]);
+  }, [error, addNotification, registerId]);
 
   // Note: cache busting removed — the in-memory cache is the source of truth.
   // Busting on every mount was causing data alteration on page refresh
@@ -549,18 +592,23 @@ export default function RegisterPage() {
   const pages = useMemo(() => register?.pages || [{ id: 1, name: 'Page 1', index: 0 }], [register?.pages]);
 
   useEffect(() => {
-    const nextHidden = new Set<number>();
-    const nextFrozen = new Set<number>();
-    columns.forEach((col: any) => {
-      if (col.hidden) nextHidden.add(col.id);
-      if (col.frozen) nextFrozen.add(col.id);
-    });
-    setHiddenColumns(nextHidden);
-    setFrozenColumns(nextFrozen);
+    if (!isLocalStorageInitializedRef.current && columns.length > 0) {
+      const nextHidden = new Set<number>();
+      const nextFrozen = new Set<number>();
+      columns.forEach((col: any) => {
+        if (col.hidden) nextHidden.add(col.id);
+        if (col.frozen) nextFrozen.add(col.id);
+      });
+      setHiddenColumns(nextHidden);
+      setFrozenColumns(nextFrozen);
+      isLocalStorageInitializedRef.current = true;
+      // Note: we don't return here because we still want to update the refs below
+    }
+
     // Keep refs in sync for handlers that need latest data in closures
     columnsRef.current = columns;
-    visibleColumnsRef.current = columns.filter(c => !nextHidden.has(c.id));
-  }, [columns]);
+    visibleColumnsRef.current = columns.filter(c => !hiddenColumns.has(c.id));
+  }, [columns, hiddenColumns, frozenColumns]);
 
   // Lock body scroll and handle back-button to close modal
   const modalOpenRef = useRef(false);
@@ -612,13 +660,16 @@ export default function RegisterPage() {
       lastRegisterData.current = register;
       setLocalEntries(register.entries);
       localEntriesRef.current = register.entries;
-      // Initialize column widths from saved data
+      // Initialize column settings (widths, summaries) from saved data
       if (register.columns) {
         const widths: Record<number, number> = {};
+        const calcs: Record<number, CalcType> = {};
         register.columns.forEach((col: any) => {
           if (col.width) widths[col.id] = col.width;
+          if (col.summary) calcs[col.id] = col.summary as CalcType;
         });
         setColWidths(widths);
+        setCalcTypes(calcs);
       }
     }
   }, [register]);
@@ -666,9 +717,14 @@ export default function RegisterPage() {
     }
   }, []);
 
-  const updateCalcType = (colId: number, type: string) => {
+  const updateCalcType = async (colId: number, type: string) => {
     setCalcTypes(prev => ({ ...prev, [colId.toString()]: type as CalcType }));
     setCalcMenu(null);
+    try {
+      await updateColumnSummary(registerId, colId, type);
+    } catch (err) {
+      toast.error('Failed to save summary setting');
+    }
   };
 
   useEffect(() => {
@@ -1496,6 +1552,41 @@ export default function RegisterPage() {
     onSettled: () => { setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula(''); },
   });
 
+  const quickAddColumnMutation = useMutation({
+    mutationFn: () => {
+      const colName = `Column ${columns.length + 1}`;
+      return insertColumn(registerId, { name: colName, type: 'text' }, columns.length);
+    },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const prev = queryClient.getQueryData(['register', registerId]) as any;
+      if (prev) {
+        const newCol = {
+          id: Date.now(),
+          registerId,
+          name: `Column ${columns.length + 1}`,
+          type: 'text',
+          position: prev.columns?.length || 0,
+        };
+        const newColumns = [...(prev.columns || []), newCol];
+        queryClient.setQueryData(['register', registerId], {
+          ...prev,
+          columns: newColumns
+        });
+      }
+      return { prev };
+    },
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+      setLocalEntries(updatedReg.entries || []);
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
+      toast.error('Failed to add column');
+    }
+  });
+
   const addEntryMutation = useMutation({
     mutationFn: () => addEntry(registerId, {}, currentPageIndex),
     onMutate: async () => {
@@ -1711,6 +1802,24 @@ export default function RegisterPage() {
       }
     }
 
+    // ── Double Entry Detection ──
+    if (value.trim() !== '') {
+      const isDuplicate = localEntriesRef.current.some(
+        e => e.id !== entryId && e.cells?.[columnId]?.trim().toLowerCase() === value.trim().toLowerCase()
+      );
+      if (isDuplicate) {
+        addNotification({
+          title: 'Double Entry Detected',
+          message: `The value "${value}" already exists in column "${col.name}".`,
+          type: 'warning',
+          link: {
+            registerId: registerId.toString(),
+            rowId: entryId,
+          }
+        });
+      }
+    }
+
     // 1. Update local state instantly (optimistic)
     setLocalEntries((prev) => prev.map((e) => {
       if (e.id === entryId) {
@@ -1766,7 +1875,7 @@ export default function RegisterPage() {
         });
       });
     }, 600);
-  }, [registerId, queryClient, pushToUndoStack]);
+  }, [registerId, queryClient, pushToUndoStack, addNotification]);
 
   // ── Cell Formatting ──
   const onCellFormatClick = useCallback((entryId: number, colId: string, rect: DOMRect) => {
@@ -2510,8 +2619,7 @@ export default function RegisterPage() {
       // Only calc if column is visible to save cycles
       if (!visibleColIds.has(col.id)) return;
 
-      const isNumeric = col.type === 'number' || col.type === 'formula' || col.type === 'currency';
-      const calcType = calcTypes[col.id] || (isNumeric ? 'sum' : 'count');
+      const calcType = calcTypes[col.id] || 'none';
       
       if (calcType === 'none') return;
 
@@ -2799,95 +2907,32 @@ export default function RegisterPage() {
         </div>
 
         {/* Right: stats + search + filter + contextual */}
-        <div className="pages-actions-right">
-          {/* Stats */}
-          <span className="pab-stat"><Hash size={11} />{displayEntries.length} rows</span>
-          <span className="pab-stat"><FileText size={11} />{columns.length} cols</span>
-
-          <div className="pab-divider" />
-
-          {/* Search */}
-          <div className={`pab-search${search ? ' active' : ''}`} id="pab-search-wrap">
-            <Search size={13} className="pab-search-icon" />
-            <input
-              id="pab-search-input"
-              className="pab-search-input"
-              placeholder="Find in register… (Ctrl+F)"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Escape') setSearch(''); }}
-            />
-            {search && (
-              <>
-                <span className="pab-search-count">{displayEntries.length} match{displayEntries.length !== 1 ? 'es' : ''}</span>
-                <button className="pab-search-clear" onClick={() => setSearch('')} title="Clear search">×</button>
-              </>
-            )}
-          </div>
-
-          {/* Filter — highlighted button + inline dropdown panel */}
-          <div className="pab-filter-wrapper" ref={filterWrapperRef}>
-            <button
-              className={`pab-filter-btn${activeFilters.length > 0 ? ' active' : ''}`}
-              title={`Filter${activeFilters.length > 0 ? ` (${activeFilters.length} active)` : ''}`}
-              onClick={() => {
-                if (!filterModal) setFilters(activeFilters.length ? [...activeFilters] : []);
-                setFilterModal(prev => !prev);
-              }}
-              aria-label="Filter"
-            >
-              <Filter size={14} />
-              {activeFilters.length > 0 && <span className="pab-filter-count">{activeFilters.length}</span>}
-            </button>
-            <FilterModal
-              filterModal={filterModal} setFilterModal={setFilterModal}
-              filters={filters} setFilters={setFilters} setActiveFilters={setActiveFilters}
-              columns={columns}
-            />
-          </div>
-
-          <div className="pab-divider" />
-
-          {/* Undo */}
-          <button
-            className={`pab-history-btn${undoStack.current.length > 0 ? '' : ' disabled'}`}
-            title={`Undo${undoStack.current.length > 0 ? ` (${undoStack.current.length})` : ''} — Ctrl+Z`}
-            onClick={undo}
-            aria-label="Undo"
-          >
-            <Undo2 size={14} />
-            {undoStack.current.length > 0 && <span className="pab-history-count">{undoStack.current.length}</span>}
-          </button>
-
-          {/* Redo */}
-          <button
-            className={`pab-history-btn${redoStack.current.length > 0 ? '' : ' disabled'}`}
-            title={`Redo${redoStack.current.length > 0 ? ` (${redoStack.current.length})` : ''} — Ctrl+Y`}
-            onClick={redo}
-            aria-label="Redo"
-          >
-            <Redo2 size={14} />
-            {redoStack.current.length > 0 && <span className="pab-history-count">{redoStack.current.length}</span>}
-          </button>
-
-          {/* Show hidden */}
-          {hiddenColumns.size > 0 && (
-            <button className="pab-icon-btn active" title={`Show ${hiddenColumns.size} hidden`}
-              onClick={() => { setHiddenColumns(new Set()); hiddenColumns.forEach(c => hideColumn(registerId, c, false)); }}>
-              <Eye size={13} />
-              <span className="pab-badge">{hiddenColumns.size}</span>
-            </button>
-          )}
-
-          {/* Bulk delete */}
-          {selectedRows.size > 0 && (
-            <button className="pab-icon-btn danger" title={`Delete ${selectedRows.size} rows`}
-              onClick={() => { if (confirm(`Delete ${selectedRows.size} rows?`)) bulkDeleteMutation.mutate(); }}>
-              <Trash2 size={13} />
-              <span className="pab-badge">{selectedRows.size}</span>
-            </button>
-          )}
-        </div>
+        <RegisterToolbar
+          search={search}
+          setSearch={setSearch}
+          activeFilters={activeFilters}
+          setFilters={setActiveFilters}
+          setFilterModal={setFilterModal}
+          addEntryMutation={addEntryMutation}
+          setNewColName={setNewColName}
+          setNewColType={setNewColType}
+          setNewColDropdownOpts={setNewColDropdownOpts}
+          setNewColFormula={setNewColFormula}
+          setNewColumnModal={setNewColumnModal}
+          hiddenColumns={hiddenColumns}
+          setHiddenColumns={setHiddenColumns}
+          registerId={registerId}
+          hideColumn={hideColumn}
+          selectedRows={selectedRows}
+          rowCount={displayEntries.length}
+          columns={columns}
+          bulkDeleteMutation={bulkDeleteMutation}
+          setManageColsMenu={setManageColsMenu}
+          undo={undo}
+          redo={redo}
+          undoStackCount={undoStack.current.length}
+          redoStackCount={redoStack.current.length}
+        />
       </div>
 
 
@@ -2990,7 +3035,22 @@ export default function RegisterPage() {
               {useColVirtual && paddingRight > 0 && (
                 <th key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />
               )}
-              <th className="actions" />
+              <th className="actions" style={{ width: '50px', minWidth: '50px', padding: 0, position: 'sticky', right: 0, zIndex: 14, background: 'var(--table-bg)', borderLeft: '1px solid var(--border)' }}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setNewColumnModal(true);
+                  }}
+                  title="Add Column"
+                  style={{
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    color: 'var(--muted)', width: '100%', height: '100%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}
+                >
+                  <Plus size={16} strokeWidth={2.5} />
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -3047,7 +3107,7 @@ export default function RegisterPage() {
               <tr>
                 <td colSpan={visibleColumns.length + 3} style={{
                   textAlign: 'center', padding: '48px 20px', color: '#94a3b8',
-                  fontSize: '14px', fontWeight: 500, background: '#fafbff',
+                  fontSize: '14px', fontWeight: 500, background: 'var(--table-bg)',
                 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
                     <Search size={32} style={{ opacity: 0.3 }} />
@@ -3071,24 +3131,27 @@ export default function RegisterPage() {
                 {visibleColumns.map((col) => (
                   <td key={col.id}><div className="mock-cell-content">&nbsp;</div></td>
                 ))}
-                <td className="actions" />
+                <td className="actions" style={{ width: '50px', minWidth: '50px', background: 'var(--table-bg)', borderLeft: '1px solid var(--border)' }} />
               </tr>
             ))}
           </tbody>
-            {displayEntries.length > 0 && (
+            {displayEntries.length > 0 && (() => {
+              const hasAnyCalcValue = visibleColumns.some(col => (calcTypes[col.id] || 'none') !== 'none');
+              return (
               <tfoot>
-                <tr className="calc-row">
-                  <td className="sticky-col sticky-col-1 calc-cell-td" style={{ background: 'var(--border-light)', textAlign: 'center' }}>
-                    <span className="calc-label" style={{ fontWeight: 800, fontSize: '14px', color: 'var(--navy)' }}>Σ</span>
+                <tr className={`calc-row${hasAnyCalcValue ? ' calc-row-has-values' : ''}${calcMenu ? ' calc-row-expanded' : ''}`}>
+                  <td className="sticky-col sticky-col-1 calc-cell-td" style={{ background: 'var(--table-bg)', textAlign: 'center' }}>
+                    <div className="calc-cell-inner">
+                      <span className="calc-label" style={{ fontWeight: 800, fontSize: '10px', color: 'var(--navy)' }}>Σ</span>
+                    </div>
                   </td>
                   {useColVirtual && paddingLeft > 0 && (
-                    <td key="pad-left" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none', background: 'var(--border-light)' }} />
+                    <td key="pad-left" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none', background: 'var(--table-bg)' }} />
                   )}
                   {(useColVirtual ? virtualCols : visibleColumns.map((_, i) => ({ index: i }))).map((vc) => {
                     const col = visibleColumns[vc.index];
                     if (!col) return null;
-                    const isNumeric = col.type === 'number' || col.type === 'formula' || col.type === 'currency';
-                    const calcType = calcTypes[col.id] || (isNumeric ? 'sum' : 'count');
+                    const calcType = calcTypes[col.id] || 'none';
                     const isFrozen = frozenColumns.has(col.id);
                     const leftOffset = isFrozen ? (frozenLeftOffsets[col.id] || 0) : 0;
                     
@@ -3098,36 +3161,46 @@ export default function RegisterPage() {
                       : calcValue;
 
                     const colW = colWidths[col.id] || defaultColWidth;
+                    const hasCalc = calcType !== 'none';
 
                     return (
                       <td
                         key={col.id}
-                        className={`calc-cell-td ${isFrozen ? 'frozen-col' : ''}`}
-                        style={isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 11, background: 'var(--border-light)', width: colW, minWidth: colW, maxWidth: colW } : { width: colW, minWidth: colW, maxWidth: colW }}
+                        className={`calc-cell-td${hasCalc ? ' calc-cell-has-value' : ''}${isFrozen ? ' frozen-col' : ''}`}
+                        style={isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 11, background: 'var(--table-bg)', width: colW, minWidth: colW, maxWidth: colW } : { width: colW, minWidth: colW, maxWidth: colW }}
                       >
-                        <div className="calc-cell-content" onClick={(e) => handleCalcCellClick(e, col.id)}>
-                          <span className="calc-dropdown-icon">
-                            <ChevronDown size={10} />
-                          </span>
-                          <span className="calc-label">
-                            {calcType === 'sum' && 'Σ '}
-                            {calcType === 'count' && 'N '}
-                            {calcType === 'distinct' && 'D '}
-                            {calcType === 'average' && 'μ '}
-                            {calcType === 'none' ? 'CALC' : calcType.toUpperCase()}:
-                          </span>
-                          <span className="calc-value">{displayValue}</span>
-                        </div>
+                        {hasCalc ? (
+                          <div className="calc-cell-content" onClick={(e) => handleCalcCellClick(e, col.id)}>
+                            <span className="calc-dropdown-icon">
+                              <ChevronDown size={10} />
+                            </span>
+                            <span className="calc-label">
+                              {calcType === 'sum' && 'Σ '}
+                              {calcType === 'count' && 'N '}
+                              {calcType === 'distinct' && 'D '}
+                              {calcType === 'average' && 'μ '}
+                              {calcType.toUpperCase()}:
+                            </span>
+                            <span className="calc-value">{displayValue}</span>
+                          </div>
+                        ) : (
+                          <div className="calc-cell-inner">
+                            <button className="calc-add-btn" onClick={(e) => handleCalcCellClick(e, col.id)} title="Add calculation">
+                              +
+                            </button>
+                          </div>
+                        )}
                       </td>
                     );
                   })}
                   {useColVirtual && paddingRight > 0 && (
-                    <td key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none', background: 'var(--border-light)' }} />
+                    <td key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none', background: 'var(--table-bg)' }} />
                   )}
-                  <td className="calc-cell-td actions" style={{ background: 'var(--border-light)' }} />
+                  <td className="calc-cell-td actions" style={{ width: '50px', minWidth: '50px', background: 'var(--table-bg)', position: 'sticky', right: 0, zIndex: 13, borderLeft: '1px solid var(--border)' }} />
                 </tr>
               </tfoot>
-            )}
+              );
+            })()}
           </table>
         </div>
 
@@ -3152,6 +3225,8 @@ export default function RegisterPage() {
         handleRowShareText={handleRowShareText}
         calcTypes={calcTypes}
         updateCalcType={updateCalcType}
+        manageColsMenu={manageColsMenu}
+        setManageColsMenu={setManageColsMenu}
       />
 
       {/* ── Modals ── */}
@@ -3608,11 +3683,7 @@ export default function RegisterPage() {
               { id: 'filled', label: 'Filled Cells', icon: '●' },
               { id: 'empty', label: 'Empty Cells', icon: '○' },
             ].map(opt => {
-              const currentType = calcTypes[calcMenu.colId] || (
-                (columns.find(c => c.id === calcMenu.colId)?.type === 'number' || 
-                 columns.find(c => c.id === calcMenu.colId)?.type === 'currency' || 
-                 columns.find(c => c.id === calcMenu.colId)?.type === 'formula') ? 'sum' : 'count'
-              );
+              const currentType = calcTypes[calcMenu.colId] || 'none';
               const isActive = currentType === opt.id;
               return (
                 <button 
