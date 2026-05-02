@@ -14,7 +14,6 @@ interface RegisterToolbarProps {
   setSearch: (s: string) => void;
   activeFilters: FilterState[];
   setFilters: (f: FilterState[]) => void;
-  setFilterModal: (v: boolean) => void;
   addEntryMutation: any;
   setNewColName: (v: string) => void;
   setNewColType: (v: string) => void;
@@ -22,9 +21,6 @@ interface RegisterToolbarProps {
   setNewColFormula: (v: string) => void;
   setNewColumnModal: (v: boolean) => void;
   hiddenColumns: Set<number>;
-  setHiddenColumns: (v: Set<number>) => void;
-  registerId: number;
-  hideColumn: (registerId: number, colId: number, hidden: boolean) => void;
   selectedRows: Set<number>;
   rowCount: number;
   columns: Column[];
@@ -38,8 +34,8 @@ interface RegisterToolbarProps {
 }
 
 export const RegisterToolbar = memo(function RegisterToolbar({
-  search, setSearch, activeFilters, setFilters, setFilterModal,
-  hiddenColumns, setHiddenColumns, registerId, hideColumn,
+  search, setSearch, activeFilters, setFilters,
+  hiddenColumns,
   selectedRows, rowCount, columns, bulkDeleteMutation,
   setManageColsMenu,
   undo, redo, undoStackCount, redoStackCount
@@ -73,7 +69,7 @@ export const RegisterToolbar = memo(function RegisterToolbar({
       <button
         className={`pab-icon-btn${activeFilters.length > 0 ? ' active' : ''}`}
         title={`Filter${activeFilters.length > 0 ? ` (${activeFilters.length} active)` : ''}`}
-        onClick={() => { setFilters(activeFilters.length ? [...activeFilters] : []); setFilterModal(true); }}
+        onClick={() => { setFilters(activeFilters.length ? [...activeFilters] : []); }}
         aria-label="Filter"
       >
         <Filter size={14} />

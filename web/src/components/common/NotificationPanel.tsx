@@ -1,11 +1,10 @@
-import React from 'react';
 import { useNotifications } from '../../lib/NotificationContext';
 import { X, Bell, AlertTriangle, AlertCircle, Info, CheckCircle2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import './NotificationPanel.css';
 
 export function NotificationPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
-  const { notifications, markAsRead, markAllAsRead, clearAll } = useNotifications();
+  const { notifications, markAsRead, clearAll } = useNotifications();
   const navigate = useNavigate();
 
   return (

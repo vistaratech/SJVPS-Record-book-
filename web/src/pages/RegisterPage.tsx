@@ -22,16 +22,14 @@ import {
   Plus, ChevronDown, Calendar,
   Hash, FlaskConical, Pin, IndianRupee,
   Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
-  Search, Filter, Eye, Trash2, FileText, Download, ListOrdered, Maximize2, AlertCircle,
-  Undo2, Redo2, X
+  Search, FileText, Download, ListOrdered, Maximize2, AlertCircle,
+  X
 } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { RegisterHeader } from '../components/register/RegisterHeader';
 import { SpreadsheetRow } from '../components/register/SpreadsheetRow';
 import { CellFormatToolbar } from '../components/register/CellFormatToolbar';
 import { ExportModal, type ExportOptions } from '../components/register/modals/ExportModal';
-
-import { FilterModal } from '../components/register/modals/FilterModal';
 import { ShareModal } from '../components/register/modals/ShareModal';
 import { ColumnModals } from '../components/register/modals/ColumnModals';
 import { OtherModals } from '../components/register/modals/OtherModals';
@@ -126,8 +124,7 @@ export default function RegisterPage() {
   const colHeaderRefs = useRef<Map<number, HTMLTableCellElement>>(new Map());
   const isDraggingCol = useRef(false);
   const [activeModalColId, setActiveModalColId] = useState<number | null>(null);
-  const [filterModal, setFilterModal] = useState(false);
-  const filterWrapperRef = useRef<HTMLDivElement>(null);
+
   const [dateModal, setDateModal] = useState(false);
   const [dropdownModal, setDropdownModal] = useState(false);
   const [shareModal, setShareModal] = useState(false);
@@ -205,7 +202,7 @@ export default function RegisterPage() {
   const [dropdownConfigOptions, setDropdownConfigOptions] = useState('');
 
   // Filter
-  const [filters, setFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>(() => {
+  const [filters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>(() => {
     const saved = localStorage.getItem(`rb_filters_${registerId}`);
     return saved ? JSON.parse(saved) : [];
   });
@@ -1552,40 +1549,7 @@ export default function RegisterPage() {
     onSettled: () => { setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula(''); },
   });
 
-  const quickAddColumnMutation = useMutation({
-    mutationFn: () => {
-      const colName = `Column ${columns.length + 1}`;
-      return insertColumn(registerId, { name: colName, type: 'text' }, columns.length);
-    },
-    onMutate: async () => {
-      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
-      const prev = queryClient.getQueryData(['register', registerId]) as any;
-      if (prev) {
-        const newCol = {
-          id: Date.now(),
-          registerId,
-          name: `Column ${columns.length + 1}`,
-          type: 'text',
-          position: prev.columns?.length || 0,
-        };
-        const newColumns = [...(prev.columns || []), newCol];
-        queryClient.setQueryData(['register', registerId], {
-          ...prev,
-          columns: newColumns
-        });
-      }
-      return { prev };
-    },
-    onSuccess: (updatedReg) => {
-      queryClient.setQueryData(['register', registerId], updatedReg);
-      setLocalEntries(updatedReg.entries || []);
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
-      toast.error('Failed to add column');
-    }
-  });
+
 
   const addEntryMutation = useMutation({
     mutationFn: () => addEntry(registerId, {}, currentPageIndex),
@@ -2912,7 +2876,6 @@ export default function RegisterPage() {
           setSearch={setSearch}
           activeFilters={activeFilters}
           setFilters={setActiveFilters}
-          setFilterModal={setFilterModal}
           addEntryMutation={addEntryMutation}
           setNewColName={setNewColName}
           setNewColType={setNewColType}
@@ -2920,9 +2883,6 @@ export default function RegisterPage() {
           setNewColFormula={setNewColFormula}
           setNewColumnModal={setNewColumnModal}
           hiddenColumns={hiddenColumns}
-          setHiddenColumns={setHiddenColumns}
-          registerId={registerId}
-          hideColumn={hideColumn}
           selectedRows={selectedRows}
           rowCount={displayEntries.length}
           columns={columns}
