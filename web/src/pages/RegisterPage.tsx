@@ -35,6 +35,7 @@ import { ColumnModals } from '../components/register/modals/ColumnModals';
 import { OtherModals } from '../components/register/modals/OtherModals';
 import { RegisterToolbar } from '../components/register/RegisterToolbar';
 import { RegisterContextMenus } from '../components/register/menus/RegisterContextMenus';
+import { AddRecordModal } from '../components/register/modals/AddRecordModal';
 import { COL_TYPES } from '../lib/constants';
 import { useNotifications } from '../lib/NotificationContext';
 
@@ -105,6 +106,9 @@ export default function RegisterPage() {
   const [calcTypes, setCalcTypes] = useState<Record<number, CalcType>>({});
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
+
+  // Add Record modal
+  const [showAddRecordModal, setShowAddRecordModal] = useState(false);
 
   // Modals
   const [newColumnModal, setNewColumnModal] = useState(false);
@@ -1552,15 +1556,15 @@ export default function RegisterPage() {
 
 
   const addEntryMutation = useMutation({
-    mutationFn: () => addEntry(registerId, {}, currentPageIndex),
-    onMutate: async () => {
+    mutationFn: (initialCells: Record<string, string> = {}) => addEntry(registerId, initialCells, currentPageIndex),
+    onMutate: async (initialCells: Record<string, string> = {}) => {
       // Optimistic: add a temporary row instantly
       const currentPageRows = localEntries.filter((e) => (e.pageIndex || 0) === currentPageIndex).length;
       const tempEntry: Entry = {
         id: Date.now(),
         registerId,
         rowNumber: currentPageRows + 1,
-        cells: {},
+        cells: initialCells,
         createdAt: new Date().toISOString(),
         pageIndex: currentPageIndex,
       };
@@ -1582,6 +1586,8 @@ export default function RegisterPage() {
           : [...old.entries, newEntry];
         return { ...old, entries: updatedEntries, entryCount: updatedEntries.length };
       });
+      // Close the Add Record modal on success
+      setShowAddRecordModal(false);
     },
     onError: (_err, _vars, context) => {
       // Roll back temp entry
@@ -2559,8 +2565,36 @@ export default function RegisterPage() {
   }, [wrapperSize.h]);
 
   const colWidthsCss = useMemo(() => {
-    // Inject consistent row height for all rows (non-spacer)
-    const rowCss = `.spreadsheet td:not(.spacer){height:${dynamicRowHeight}px!important;max-height:${dynamicRowHeight}px!important;line-height:${dynamicRowHeight}px!important}.spreadsheet td:not(.spacer) .cell-input,.spreadsheet td:not(.spacer) .cell-url-wrap,.spreadsheet td:not(.spacer) .cell-date,.spreadsheet td:not(.spacer) .cell-dropdown,.spreadsheet td:not(.spacer) .cell-formula,.spreadsheet td:not(.spacer) .cell-currency,.spreadsheet td:not(.spacer) .cell-checkbox-wrap,.spreadsheet td:not(.spacer) .cell-rating,.spreadsheet td:not(.spacer) .cell-image-wrap,.spreadsheet td:not(.spacer) .cell-auto-increment-readonly{height:${dynamicRowHeight}px!important;max-height:${dynamicRowHeight}px!important;line-height:${dynamicRowHeight}px!important}`;
+    const h = dynamicRowHeight;
+    const cellSelectors = [
+      '.cell-input',
+      '.cell-url-wrap',
+      '.cell-date',
+      '.cell-dropdown',
+      '.cell-formula',
+      '.cell-currency',
+      '.cell-checkbox-wrap',
+      '.cell-rating',
+      '.cell-image-wrap',
+      '.cell-auto-increment',
+      '.cell-auto-increment-readonly',
+    ].map(s => `.spreadsheet td:not(.spacer) ${s}`).join(',');
+
+    const rowCss =
+      // Lock the <td> — overflow:hidden stops any child from pushing the row taller
+      `.spreadsheet td:not(.spacer){` +
+        `height:${h}px!important;` +
+        `max-height:${h}px!important;` +
+        `overflow:hidden!important;` +
+        `vertical-align:middle!important;` +
+      `}` +
+      // Lock every cell wrapper height — no wrapping/truncation enforced
+      `${cellSelectors}{` +
+        `height:${h}px!important;` +
+        `max-height:${h}px!important;` +
+        `line-height:${h}px!important;` +
+        `overflow:hidden!important;` +
+      `}`;
     return rowCss;
   }, [dynamicRowHeight]);
 
@@ -2864,9 +2898,9 @@ export default function RegisterPage() {
             <Plus size={12} /><span>Add Column</span>
           </button>
 
-          {/* Add Row — next to tabs, primary */}
-          <button className="pab-tab-action-btn primary" onClick={() => addEntryMutation.mutate()}>
-            <Plus size={12} /> Add Row
+          {/* Add Record — opens form modal */}
+          <button className="pab-tab-action-btn primary" onClick={() => setShowAddRecordModal(true)}>
+            <Plus size={12} /> Add Record
           </button>
         </div>
 
@@ -3086,7 +3120,7 @@ export default function RegisterPage() {
               </tr>
             )}
             {displayEntries.length === 0 && !deferredSearch && deferredActiveFilters.length === 0 && columns.length > 0 && [1, 2, 3].map((n) => (
-              <tr key={`mock-${n}`} className="mock" onClick={() => addEntryMutation.mutate()}>
+              <tr key={`mock-${n}`} className="mock" onClick={() => setShowAddRecordModal(true)}>
                 <td className="serial">{n}</td>
                 {visibleColumns.map((col) => (
                   <td key={col.id}><div className="mock-cell-content">&nbsp;</div></td>
@@ -3246,6 +3280,16 @@ export default function RegisterPage() {
         localEntries={localEntries} handleCellChange={handleCellChange}
         columns={columns}
         onAddDropdownOption={onAddDropdownOption}
+      />
+
+      {/* ── Add Record Modal ── */}
+      <AddRecordModal
+        open={showAddRecordModal}
+        onClose={() => setShowAddRecordModal(false)}
+        columns={columns}
+        isSubmitting={addEntryMutation.isPending}
+        onSubmit={(cells) => addEntryMutation.mutate(cells)}
+        existingEntries={localEntries}
       />
 
       {/* Row Detail View Modal (Direct Edit Mode) */}

@@ -5386,3 +5386,214 @@ body.modal-open {
   font-style: italic;
 }
 
+
+/* ══════════════════════════════════════
+   ADD RECORD MODAL
+══════════════════════════════════════ */
+.add-record-overlay { z-index: 11500 !important; }
+
+.add-record-modal {
+  width: 100%;
+  max-width: 560px;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.add-record-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+.add-record-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--navy);
+}
+
+.add-record-title h3 {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--foreground);
+  margin: 0;
+}
+
+.add-record-close-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.add-record-close-btn:hover { background: var(--border-light); color: var(--foreground); }
+
+.add-record-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.add-record-fields {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.add-record-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.add-record-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.add-record-type-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: capitalize;
+  letter-spacing: 0;
+  background: rgba(20,83,45,0.08);
+  color: var(--navy);
+  padding: 1px 7px;
+  border-radius: 20px;
+}
+
+.add-record-input {
+  height: 38px;
+  padding: 0 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  color: var(--foreground);
+  background: var(--background);
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.add-record-input:focus {
+  outline: none;
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(20,83,45,0.08);
+}
+.add-record-select { cursor: pointer; padding-right: 8px; }
+
+.add-record-checkbox-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+.add-record-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--navy);
+  cursor: pointer;
+}
+.add-record-checkbox-label {
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.add-record-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--border-light);
+  flex-shrink: 0;
+  background: var(--surface);
+}
+
+/* ── Duplicate Detection ── */
+
+/* Field wrapper highlight */
+.add-record-field--dup {
+  background: rgba(239, 68, 68, 0.03);
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  margin: -6px -8px;
+}
+
+/* Input border turns red-orange on duplicate */
+.add-record-input--dup {
+  border-color: #f59e0b !important;
+  background: #fffbeb !important;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15) !important;
+  color: #92400e;
+}
+.add-record-input--dup:focus {
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18) !important;
+}
+
+/* Small inline "Duplicate" badge next to label */
+.add-record-dup-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  padding: 1px 7px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  animation: dupPulse 0.3s ease;
+}
+@keyframes dupPulse {
+  from { transform: scale(0.85); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+/* Warning banner inside modal */
+.add-record-dup-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 24px;
+  background: #fffbeb;
+  border-bottom: 1px solid #fcd34d;
+  color: #92400e;
+  font-size: 12.5px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Submit button turns amber when there are duplicates */
+.add-record-submit--warn {
+  background: linear-gradient(135deg, #d97706, #f59e0b) !important;
+  box-shadow: 0 2px 8px rgba(217, 119, 6, 0.35) !important;
+}
+.add-record-submit--warn:hover {
+  background: linear-gradient(135deg, #b45309, #d97706) !important;
+}
