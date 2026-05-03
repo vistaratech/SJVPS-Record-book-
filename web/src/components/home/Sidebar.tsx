@@ -291,41 +291,47 @@ export const Sidebar = memo(function Sidebar({
         className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''}`}
         style={sidebarWidth && !isCollapsed ? { width: sidebarWidth, minWidth: sidebarWidth } : undefined}
       >
-        {/* AG Trust Blue Header */}
         <div className="sidebar-brand">
-          <div className="sidebar-brand-group" style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-            <div className="sidebar-brand-name" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-brand-logo" />
-              <span>AG Trust</span>
+          <div className="sidebar-brand-group" onClick={() => navigate('/')}>
+            <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-brand-logo" />
+            <div className="sidebar-brand-text">
+              <div className="sidebar-brand-name">AG <span>Trust</span></div>
+              <div className="sidebar-brand-sub">Record Book</div>
             </div>
-            <div className="sidebar-brand-sub">Trusted Partners</div>
           </div>
-          <button 
+          
+          <div className="sidebar-brand-actions">
+            <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)}>
+              <X size={18} />
+            </button>
+            
+            <button 
               className="sidebar-collapse-btn" 
               onClick={() => onToggleNotifications()}
               title="Notifications"
               style={{ position: 'relative' }}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+              <Bell size={16} />
               {unreadCount > 0 && (
-                <span style={{ position: 'absolute', top: -2, right: -2, background: 'var(--danger)', color: 'white', fontSize: 9, fontWeight: 'bold', padding: '1px 4px', borderRadius: 10, border: '1px solid white' }}>
+                <span className="notif-badge">
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
             </button>
-          <button 
-            className="sidebar-collapse-btn" 
-            onClick={toggleCollapse}
-            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {isCollapsed ? (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><polyline points="13 8 17 12 13 16"></polyline></svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="15" y1="3" x2="15" y2="21"></line><polyline points="11 8 7 12 11 16"></polyline></svg>
-            )}
-          </button>
-        </div>
 
+            <button 
+              className="sidebar-collapse-btn" 
+              onClick={toggleCollapse}
+              title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {isCollapsed ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><polyline points="13 8 17 12 13 16"></polyline></svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="15" y1="3" x2="15" y2="21"></line><polyline points="11 8 7 12 11 16"></polyline></svg>
+              )}
+            </button>
+          </div>
+        </div>
         {/* Sidebar Add Button */}
         <div className="sidebar-add-section" style={{ padding: '12px 12px 8px' }}>
           <button 
@@ -367,7 +373,7 @@ export const Sidebar = memo(function Sidebar({
 
         {/* Global Search Bar */}
         {!isCollapsed && (
-          <div style={{ padding: '0 12px 8px' }}>
+          <div style={{ padding: '4px 16px 12px' }}>
             <div className="gs-input-wrap">
               <Search size={13} className="gs-input-icon" />
               <input
@@ -520,7 +526,20 @@ export const Sidebar = memo(function Sidebar({
                         }
                       }}
                       onClick={() => setExpandedFolders(prev => ({...prev, [folder.id]: !prev[folder.id] ? true : false}))}
-                      style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', cursor: 'pointer', gap: '8px', color: 'var(--navy)', userSelect: 'none' }}
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        padding: '8px 12px', 
+                        margin: '2px 8px',
+                        borderRadius: '8px',
+                        cursor: 'pointer', 
+                        gap: '10px', 
+                        color: 'var(--navy)', 
+                        userSelect: 'none',
+                        transition: 'background 0.2s'
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.03)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
                       data-tooltip={isCollapsed ? folder.name : undefined}
                     >
                       {!isCollapsed && (

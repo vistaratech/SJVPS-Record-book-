@@ -35,32 +35,13 @@ import { ColumnModals } from '../components/register/modals/ColumnModals';
 import { OtherModals } from '../components/register/modals/OtherModals';
 import { RegisterToolbar } from '../components/register/RegisterToolbar';
 import { RegisterContextMenus } from '../components/register/menus/RegisterContextMenus';
+import { RegisterSummaryRow } from '../components/register/RegisterSummaryRow';
 import { AddRecordModal } from '../components/register/modals/AddRecordModal';
 import { COL_TYPES } from '../lib/constants';
 import { useNotifications } from '../lib/NotificationContext';
 
 type CalcType = 'sum' | 'average' | 'count' | 'min' | 'max' | 'filled' | 'empty' | 'distinct' | 'none';
 
-// Format number with Indian currency style: ₹1,23,456.00
-function formatCurrency(val: string): string {
-  const n = parseFloat(val);
-  if (isNaN(n)) return val || '';
-  const [intPart, decPart] = Math.abs(n).toFixed(2).split('.');
-  // Indian grouping: last 3 digits, then every 2 digits
-  let formatted = '';
-  if (intPart.length <= 3) {
-    formatted = intPart;
-  } else {
-    formatted = intPart.slice(-3);
-    let remaining = intPart.slice(0, -3);
-    while (remaining.length > 2) {
-      formatted = remaining.slice(-2) + ',' + formatted;
-      remaining = remaining.slice(0, -2);
-    }
-    if (remaining) formatted = remaining + ',' + formatted;
-  }
-  return `${n < 0 ? '-' : ''}₹${formatted}.${decPart}`;
-}
 
 // Helper to normalize DD/MM/YYYY to YYYY-MM-DD for comparison
 function parseDateString(dStr: string) {
@@ -133,7 +114,7 @@ export default function RegisterPage() {
   const [dropdownModal, setDropdownModal] = useState(false);
   const [shareModal, setShareModal] = useState(false);
   const [renamePageModal, setRenamePageModal] = useState(false);
-  const [calcModal, setCalcModal] = useState(false);
+
   const isLocalStorageInitializedRef = useRef(false);
 
   const [hiddenColumns, setHiddenColumns] = useState<Set<number>>(() => {
@@ -248,8 +229,6 @@ export default function RegisterPage() {
   const [renamePageId, setRenamePageId] = useState<number | null>(null);
   const [renamePageValue, setRenamePageValue] = useState('');
 
-  // Calc modal
-  const [calcColId] = useState<number | null>(null);
   const [calcMenu, setCalcMenu] = useState<{ colId: number; rect: DOMRect } | null>(null);
 
   const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -1976,7 +1955,7 @@ export default function RegisterPage() {
     setDateModal(true);
   }, []);
 
-  const handleDateSelect = (d?: string, m?: string, y?: string) => {
+  const handleDateSelect = useCallback((d?: string, m?: string, y?: string) => {
     // Basic day-month-year validation already happened in OtherModals or is passed in
     const finalD = d || dateDay;
     const finalM = m || dateMonth;
@@ -2000,7 +1979,7 @@ export default function RegisterPage() {
       handleCellChange(dateEntryId, dateColumnId.toString(), dateStr);
     }
     setDateModal(false);
-  };
+  }, [dateDay, dateMonth, dateYear, dateEntryId, dateColumnId, columns, handleCellChange, validateCellValue]);
 
   const openDropdown = useCallback((entryId: number, colId: number, options: string[], rect?: DOMRect) => {
     dropdownEntryIdRef.current = entryId;
@@ -2070,9 +2049,7 @@ export default function RegisterPage() {
     const footerRow: any[] = ['TOTALS'];
     let hasAnyCalc = false;
     visibleColumns.forEach(c => {
-      const calcType = calcTypes[c.id] || (
-        (c.type === 'number' || c.type === 'currency' || c.type === 'formula') ? 'sum' : 'count'
-      );
+      const calcType = calcTypes[c.id] || 'none';
       
       if (calcType === 'none') {
         footerRow.push('');
@@ -2222,9 +2199,7 @@ export default function RegisterPage() {
     const footerRow: string[] = ['TOTALS'];
     let hasAnyCalc = false;
     visibleCols.forEach(c => {
-      const calcType = calcTypes[c.id] || (
-        (c.type === 'number' || c.type === 'currency' || c.type === 'formula') ? 'sum' : 'count'
-      );
+      const calcType = calcTypes[c.id] || 'none';
       
       if (calcType === 'none') {
         footerRow.push('');
@@ -2582,14 +2557,15 @@ export default function RegisterPage() {
 
     const rowCss =
       // Lock the <td> — overflow:hidden stops any child from pushing the row taller
-      `.spreadsheet td:not(.spacer){` +
+      `.spreadsheet td:not(.spacer), .calc-cell-td{` +
         `height:${h}px!important;` +
         `max-height:${h}px!important;` +
         `overflow:hidden!important;` +
         `vertical-align:middle!important;` +
+        `line-height:${h}px!important;` +
       `}` +
       // Lock every cell wrapper height — no wrapping/truncation enforced
-      `${cellSelectors}{` +
+      `${cellSelectors}, .calc-cell-content, .calc-cell-inner{` +
         `height:${h}px!important;` +
         `max-height:${h}px!important;` +
         `line-height:${h}px!important;` +
@@ -2599,13 +2575,15 @@ export default function RegisterPage() {
   }, [dynamicRowHeight]);
 
   // Defer formula/stats recalculation so it doesn't block keystrokes (Fix #3)
+  const deferredDisplayEntriesForStats = useDeferredValue(displayEntries);
+
   // Optimized single-pass statistics calculation (Fix performance #4)
   const columnStats = useMemo(() => {
     if (!register || columns.length === 0) return {};
     
     const entriesToCalc = selectedRows.size > 0 
-      ? displayEntries.filter(e => selectedRows.has(e.id)) 
-      : displayEntries;
+      ? deferredDisplayEntriesForStats.filter(e => selectedRows.has(e.id)) 
+      : deferredDisplayEntriesForStats;
 
     if (entriesToCalc.length === 0) return {};
 
@@ -2710,7 +2688,7 @@ export default function RegisterPage() {
     });
 
     return finalStats;
-  }, [register, columns, visibleColumns, displayEntries, selectedRows, calcTypes]);
+  }, [register, columns, visibleColumns, deferredDisplayEntriesForStats, selectedRows, calcTypes]);
 
   // ── Virtualization ──
   // Always-on virtualization for both rows AND columns.
@@ -2806,6 +2784,7 @@ export default function RegisterPage() {
 
   const virtualRows = useVirtual ? rowVirtualizer.getVirtualItems() : displayEntries.map((_, i) => ({ index: i, start: i * dynamicRowHeight, end: (i + 1) * dynamicRowHeight, size: dynamicRowHeight, key: i, lane: 0 }));
   const virtualCols = useColVirtual ? colVirtualizer.getVirtualItems() : visibleColumns.map((_, i) => ({ index: i, start: 0, end: 0, size: colWidths[visibleColumns[i]?.id] || defaultColWidth, key: i, lane: 0 }));
+
   const totalVirtualHeight = useVirtual ? rowVirtualizer.getTotalSize() : displayEntries.length * dynamicRowHeight;
   const totalVirtualWidth = useColVirtual ? colVirtualizer.getTotalSize() : visibleColumns.reduce((sum, col) => sum + (colWidths[col.id] || defaultColWidth), 0);
   
@@ -2846,10 +2825,12 @@ export default function RegisterPage() {
     <div className="content-area">
       {/* ── Header ── */}
       <div className="register-header">
-        <button className="register-header-btn" onClick={() => navigate('/')}>
-          <ArrowLeft size={14} />
-        </button>
-        <h1 className="register-header-title">{register.name}</h1>
+        <div className="register-header-left">
+          <button className="register-header-back-btn" onClick={() => navigate('/')}>
+            <ArrowLeft size={18} />
+          </button>
+          <h1 className="register-header-title">{register.name}</h1>
+        </div>
         <RegisterHeader 
           register={register} 
           setShareModal={setShareModal} 
@@ -2892,11 +2873,6 @@ export default function RegisterPage() {
 
           <div className="pab-divider" />
 
-          {/* Add Column — next to tabs */}
-          <button className="pab-tab-action-btn" title="Add Column"
-            onClick={() => { setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula(''); setNewColumnModal(true); }}>
-            <Plus size={12} /><span>Add Column</span>
-          </button>
 
           {/* Add Record — opens form modal */}
           <button className="pab-tab-action-btn primary" onClick={() => setShowAddRecordModal(true)}>
@@ -3029,7 +3005,7 @@ export default function RegisterPage() {
               {useColVirtual && paddingRight > 0 && (
                 <th key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />
               )}
-              <th className="actions" style={{ width: '50px', minWidth: '50px', padding: 0, position: 'sticky', right: 0, zIndex: 14, background: 'var(--table-bg)', borderLeft: '1px solid var(--border)' }}>
+              <th className="actions" style={{ width: '50px', minWidth: '50px', padding: 0, position: 'sticky', right: 0, zIndex: 14, background: 'var(--table-bg)', borderLeft: '1px solid var(--border-v)' }}>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -3051,23 +3027,20 @@ export default function RegisterPage() {
             {/* Top row spacer for virtualized rows */}
             {paddingTop > 0 && (
               <tr>
-                <td className="spacer" style={{ height: `${paddingTop}px`, padding: 0, border: 'none', lineHeight: 0 }} colSpan={virtualCols.length + 4} />
+                <td className="spacer" style={{ height: `${paddingTop}px`, padding: 0, border: 'none', lineHeight: 0 }} colSpan={visibleColumns.length + 4} />
               </tr>
             )}
             {virtualRows.map((virtualRow) => {
               const entry = displayEntries[virtualRow.index];
               if (!entry) return null;
-              // Pass only the virtually-visible column slice to avoid rendering all 200+ columns
-              const colSlice = useColVirtual
-                ? virtualCols.map(vc => visibleColumns[vc.index]).filter(Boolean)
-                : visibleColumns;
+              
               return (
                 <SpreadsheetRow
                   key={entry.id}
                   entry={entry}
                   idx={virtualRow.index}
                   visibleColumns={visibleColumns}
-                  colSlice={colSlice}
+                  virtualCols={useColVirtual ? virtualCols : undefined}
                   paddingLeft={useColVirtual ? paddingLeft : 0}
                   paddingRight={useColVirtual ? paddingRight : 0}
                   isSelected={selectedRows.has(entry.id)}
@@ -3093,7 +3066,7 @@ export default function RegisterPage() {
             })}
             {paddingBottom > 0 && (
               <tr>
-                <td className="spacer" style={{ height: `${paddingBottom}px`, padding: 0, border: 'none', lineHeight: 0 }} colSpan={virtualCols.length + 4} />
+                <td className="spacer" style={{ height: `${paddingBottom}px`, padding: 0, border: 'none', lineHeight: 0 }} colSpan={visibleColumns.length + 4} />
               </tr>
             )}
             {/* Empty state when search/filter yields no results */}
@@ -3130,69 +3103,23 @@ export default function RegisterPage() {
             ))}
           </tbody>
             {displayEntries.length > 0 && (() => {
-              const hasAnyCalcValue = visibleColumns.some(col => (calcTypes[col.id] || 'none') !== 'none');
               return (
-              <tfoot>
-                <tr className={`calc-row${hasAnyCalcValue ? ' calc-row-has-values' : ''}${calcMenu ? ' calc-row-expanded' : ''}`}>
-                  <td className="sticky-col sticky-col-1 calc-cell-td" style={{ background: 'var(--table-bg)', textAlign: 'center' }}>
-                    <div className="calc-cell-inner">
-                      <span className="calc-label" style={{ fontWeight: 800, fontSize: '10px', color: 'var(--navy)' }}>Σ</span>
-                    </div>
-                  </td>
-                  {useColVirtual && paddingLeft > 0 && (
-                    <td key="pad-left" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none', background: 'var(--table-bg)' }} />
-                  )}
-                  {(useColVirtual ? virtualCols : visibleColumns.map((_, i) => ({ index: i }))).map((vc) => {
-                    const col = visibleColumns[vc.index];
-                    if (!col) return null;
-                    const calcType = calcTypes[col.id] || 'none';
-                    const isFrozen = frozenColumns.has(col.id);
-                    const leftOffset = isFrozen ? (frozenLeftOffsets[col.id] || 0) : 0;
-                    
-                    const calcValue = columnStats[col.id] ?? '-';
-                    const displayValue = (col.type === 'currency' && typeof calcValue === 'number') 
-                      ? formatCurrency(calcValue.toString()) 
-                      : calcValue;
-
-                    const colW = colWidths[col.id] || defaultColWidth;
-                    const hasCalc = calcType !== 'none';
-
-                    return (
-                      <td
-                        key={col.id}
-                        className={`calc-cell-td${hasCalc ? ' calc-cell-has-value' : ''}${isFrozen ? ' frozen-col' : ''}`}
-                        style={isFrozen ? { position: 'sticky', left: leftOffset, zIndex: 11, background: 'var(--table-bg)', width: colW, minWidth: colW, maxWidth: colW } : { width: colW, minWidth: colW, maxWidth: colW }}
-                      >
-                        {hasCalc ? (
-                          <div className="calc-cell-content" onClick={(e) => handleCalcCellClick(e, col.id)}>
-                            <span className="calc-dropdown-icon">
-                              <ChevronDown size={10} />
-                            </span>
-                            <span className="calc-label">
-                              {calcType === 'sum' && 'Σ '}
-                              {calcType === 'count' && 'N '}
-                              {calcType === 'distinct' && 'D '}
-                              {calcType === 'average' && 'μ '}
-                              {calcType.toUpperCase()}:
-                            </span>
-                            <span className="calc-value">{displayValue}</span>
-                          </div>
-                        ) : (
-                          <div className="calc-cell-inner">
-                            <button className="calc-add-btn" onClick={(e) => handleCalcCellClick(e, col.id)} title="Add calculation">
-                              +
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    );
-                  })}
-                  {useColVirtual && paddingRight > 0 && (
-                    <td key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none', background: 'var(--table-bg)' }} />
-                  )}
-                  <td className="calc-cell-td actions" style={{ width: '50px', minWidth: '50px', background: 'var(--table-bg)', position: 'sticky', right: 0, zIndex: 13, borderLeft: '1px solid var(--border)' }} />
-                </tr>
-              </tfoot>
+              <RegisterSummaryRow
+                visibleColumns={visibleColumns}
+                calcTypes={calcTypes}
+                calcMenu={calcMenu}
+                onCalcClick={handleCalcCellClick}
+                onAddRecord={() => addEntryMutation.mutate({})}
+                useColVirtual={useColVirtual}
+                virtualCols={virtualCols}
+                paddingLeft={paddingLeft}
+                paddingRight={paddingRight}
+                columnStats={columnStats}
+                frozenColumns={frozenColumns}
+                frozenLeftOffsets={frozenLeftOffsets}
+                colWidths={colWidths}
+                defaultColWidth={defaultColWidth}
+              />
               );
             })()}
           </table>
@@ -3270,7 +3197,6 @@ export default function RegisterPage() {
         renamePageModal={renamePageModal} setRenamePageModal={setRenamePageModal}
         renamePageValue={renamePageValue} setRenamePageValue={setRenamePageValue} renamePageId={renamePageId}
         pages={pages} deletePageMutation={deletePageMutation} renamePageMutation={renamePageMutation}
-        calcModal={calcModal} setCalcModal={setCalcModal} calcTypes={calcTypes} setCalcTypes={setCalcTypes as any} calcColId={calcColId}
         dateModal={dateModal} setDateModal={setDateModal}
         dateDay={dateDay} setDateDay={setDateDay} dateMonth={dateMonth} setDateMonth={setDateMonth} dateYear={dateYear} setDateYear={setDateYear}
         handleDateSelect={handleDateSelect} dateRect={dateRect}
@@ -3518,7 +3444,8 @@ export default function RegisterPage() {
                             onClick={() => {
                               setActiveModalColId(col.id);
                               setNewColFormula(col.formula || '');
-                              setCalcModal(true);
+                              setChangeTypeValue(col.type);
+                              setChangeTypeModal(true);
                             }}
                             title="Click to edit formula"
                           >
@@ -3687,7 +3614,7 @@ export default function RegisterPage() {
               { id: 'filled', label: 'Filled Cells', icon: '●' },
               { id: 'empty', label: 'Empty Cells', icon: '○' },
             ].map(opt => {
-              const currentType = calcTypes[calcMenu.colId] || 'none';
+              const currentType = calcTypes[calcMenu.colId];
               const isActive = currentType === opt.id;
               return (
                 <button 

@@ -301,8 +301,8 @@ interface SpreadsheetRowProps {
   entry: Entry;
   idx: number;
   visibleColumns: Column[];
-  /** Only the columns visible in the current horizontal viewport window */
-  colSlice?: Column[];
+  /** The virtual columns from TanStack Virtual */
+  virtualCols?: any[];
   /** Horizontal left padding (px) to represent off-screen columns left of viewport */
   paddingLeft?: number;
   /** Horizontal right padding (px) to represent off-screen columns right of viewport */
@@ -333,7 +333,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     entry,
     idx,
     visibleColumns,
-    colSlice,
+    virtualCols,
     paddingLeft = 0,
     paddingRight = 0,
     rowHeight,
@@ -353,8 +353,8 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     onCellFormatClick,
     searchTerm,
   } = props;
-  // Columns to actually render — either the virtual slice or all visible columns
-  const renderColumns = colSlice ?? visibleColumns;
+  // Columns to actually render — either the virtual items or all visible columns
+  const colItems = virtualCols ?? visibleColumns.map((_, i) => ({ index: i }));
 
 
   const handleCellKeyDown = useCallback((e: React.KeyboardEvent, colId: number | string, colIdx: number) => {
@@ -422,7 +422,11 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
       <td className="serial" style={{ cursor: 'pointer' }} onClick={handleSerialClick} title="Click to view details">{idx + 1}</td>
       {/* Left padding cell for column virtualization */}
       {paddingLeft > 0 && <td key="pad-left" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />}
-      {renderColumns.map((col, colIdx) => {
+      {colItems.map((vc) => {
+        const col = visibleColumns[vc.index];
+        if (!col) return null;
+        
+        const colIdx = vc.index; // Absolute index for navigation
         const isFrozen = frozenColumns?.has(col.id);
         const w = colWidths?.[col.id] || defaultColWidth;
         const cs = entry.cellStyles?.[col.id.toString()];
@@ -572,7 +576,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
       })}
       {/* Right padding cell for column virtualization */}
       {paddingRight > 0 && <td key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />}
-      <td className="actions" style={{ width: '50px', minWidth: '50px', position: 'sticky', right: 0, zIndex: 1, background: 'var(--table-bg)', borderLeft: '1px solid var(--border)' }}>
+      <td className="actions" style={{ width: '50px', minWidth: '50px', position: 'sticky', right: 0, zIndex: 1, background: 'var(--table-bg)', borderLeft: '1px solid var(--border-v)' }}>
         <button
           className={`row-menu-btn ${isMenuOpen ? 'menu-open' : ''}`}
           aria-label="Row Options"

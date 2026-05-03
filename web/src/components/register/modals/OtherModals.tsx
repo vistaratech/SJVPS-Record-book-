@@ -13,14 +13,8 @@ interface OtherModalsProps {
   pages: any[];
   deletePageMutation: any;
   renamePageMutation: any;
+  columns: any[];
 
-  // Calc
-  calcModal: boolean;
-  setCalcModal: (v: boolean) => void;
-  calcTypes: Record<number, string>;
-  setCalcTypes: (v: Record<number, string>) => void;
-  calcColId: number | null;
-  columns?: any[]; // Pass columns down to check column type
 
   // Date Picker
   dateModal: boolean;
@@ -49,7 +43,7 @@ interface OtherModalsProps {
 export function OtherModals(props: OtherModalsProps) {
   const {
     renamePageModal, setRenamePageModal, renamePageValue, setRenamePageValue, renamePageId, pages, deletePageMutation, renamePageMutation,
-    calcModal, setCalcModal, calcTypes, setCalcTypes, calcColId, columns,
+    columns,
     dateModal, setDateModal, dateDay, dateMonth, dateYear, handleDateSelect,
     dropdownModal, setDropdownModal, dropdownOptions, dropdownEntryId, dropdownColumnId, localEntries, handleCellChange, onAddDropdownOption
   } = props;
@@ -110,20 +104,6 @@ export function OtherModals(props: OtherModalsProps) {
 
   const exactMatch = liveDropdownOptions.some((opt: string) => opt.toLowerCase() === dropdownSearch.toLowerCase());
 
-  const getCalcOptions = () => {
-    if (!calcColId || !columns) return [];
-    const col = columns.find(c => c.id === calcColId);
-    const isNumeric = col?.type === 'number' || col?.type === 'formula' || col?.type === 'currency';
-    return isNumeric 
-      ? ['sum', 'average', 'count', 'min', 'max'] 
-      : ['count', 'filled', 'empty'];
-  };
-
-  const getCalcDefault = () => {
-    if (!calcColId || !columns) return 'count';
-    const col = columns.find(c => c.id === calcColId);
-    return (col?.type === 'number' || col?.type === 'formula' || col?.type === 'currency') ? 'sum' : 'count';
-  };
 
   return createPortal(
     <>
@@ -155,30 +135,6 @@ export function OtherModals(props: OtherModalsProps) {
         </div>
       )}
 
-      {/* ── Calc ── */}
-      {calcModal && (
-        <div className="modal-overlay" onClick={() => setCalcModal(false)}>
-          <div className="context-menu" onClick={(e) => e.stopPropagation()}>
-            <div className="context-title">Calculation Type</div>
-            {getCalcOptions().map((type) => {
-              const isActive = calcTypes[calcColId!] === type || (!calcTypes[calcColId!] && type === getCalcDefault());
-              return (
-                <button
-                  key={type}
-                  className={`context-item ${isActive ? 'active-calc' : ''}`}
-                  onClick={() => {
-                    if (calcColId !== null) setCalcTypes({ ...calcTypes, [calcColId]: type });
-                    setCalcModal(false);
-                  }}
-                >
-                  {type.charAt(0).toUpperCase() + type.slice(1)}
-                  {isActive && <Check size={14} />}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* ── Date Picker ── */}
       {dateModal && (

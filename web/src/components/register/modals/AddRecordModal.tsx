@@ -41,7 +41,7 @@ export function AddRecordModal({
     if (open) {
       const init: Record<string, string> = {};
       columns.forEach(col => {
-        if (col.type !== 'formula' && col.type !== 'auto_increment') {
+        if (col.type !== 'formula') {
           init[col.id.toString()] = '';
         }
       });
@@ -121,6 +121,8 @@ export function AddRecordModal({
     e.preventDefault();
     const cells: Record<string, string> = {};
     Object.entries(values).forEach(([k, v]) => {
+      const col = columns.find(c => c.id.toString() === k);
+      if (col?.type === 'formula') return;
       if (v.trim() !== '') cells[k] = v.trim();
     });
     onSubmit(cells);
@@ -132,10 +134,8 @@ export function AddRecordModal({
 
   if (!open) return null;
 
-  const editableCols = columns.filter(
-    col => col.type !== 'formula' && col.type !== 'auto_increment'
-  );
   const hasDuplicates = duplicates.size > 0;
+  const allCols = columns;
 
   return createPortal(
     <div className="modal-overlay add-record-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
@@ -168,33 +168,61 @@ export function AddRecordModal({
         {/* Form */}
         <form className="add-record-form" onSubmit={handleSubmit}>
           <div className="add-record-fields">
-            {editableCols.length === 0 ? (
+            {allCols.length === 0 ? (
               <p style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: '16px 0' }}>
-                No editable columns found. Add columns first.
+                No columns found. Add columns first.
               </p>
             ) : (
-              editableCols.map((col, idx) => {
+              allCols.map((col, idx) => {
                 const colIdStr = col.id.toString();
                 const val = values[colIdStr] ?? '';
                 const isFirst = idx === 0;
                 const isDup = duplicates.has(colIdStr);
-                const inputCls = `add-record-input${isDup ? ' add-record-input--dup' : ''}`;
+                const isFormula = col.type === 'formula';
+                const isAutoIncr = col.type === 'auto_increment';
+                const inputCls = `add-record-input${isDup ? ' add-record-input--dup' : ''}${isFormula ? ' add-record-input--readonly' : ''}`;
+                
                 const onChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
                   handleChange(colIdStr, e.target.value, col.type, col.name);
 
                 return (
-                  <div key={col.id} className={`add-record-field${isDup ? ' add-record-field--dup' : ''}`}>
+                  <div key={col.id} className={`add-record-field${isDup ? ' add-record-field--dup' : ''}${isFormula ? ' add-record-field--formula' : ''}`}>
                     <label className="add-record-label" htmlFor={`ar-col-${col.id}`}>
                       {col.name}
-                      <span className="add-record-type-badge">{col.type}</span>
+                      <span className={`add-record-type-badge type-${col.type}`}>
+                        {col.type}
+                      </span>
                       {isDup && (
                         <span className="add-record-dup-badge">
                           <AlertTriangle size={10} /> Duplicate
                         </span>
                       )}
+                      {isFormula && (
+                        <span className="add-record-formula-badge">
+                          Calculated
+                        </span>
+                      )}
                     </label>
 
-                    {col.type === 'dropdown' && col.dropdownOptions && col.dropdownOptions.length > 0 ? (
+                    {isFormula ? (
+                      <div className="add-record-readonly-box">
+                        <span className="formula-icon">ƒₓ</span>
+                        <span className="formula-placeholder">Computed automatically</span>
+                      </div>
+                    ) : isAutoIncr ? (
+                      <div className="add-record-autoincrement-wrap">
+                        <input
+                          type="number"
+                          id={`ar-col-${col.id}`}
+                          className={inputCls}
+                          value={val}
+                          onChange={onChange}
+                          placeholder="Auto-generated if blank"
+                          ref={isFirst ? (el) => { firstInputRef.current = el; } : undefined}
+                        />
+                        <div className="autoincrement-hint">Override or leave blank for next sequence</div>
+                      </div>
+                    ) : col.type === 'dropdown' && col.dropdownOptions && col.dropdownOptions.length > 0 ? (
                       <select
                         id={`ar-col-${col.id}`}
                         className={`${inputCls} add-record-select`}
@@ -269,7 +297,7 @@ export function AddRecordModal({
             <button
               type="submit"
               className={`modal-confirm-btn${hasDuplicates ? ' add-record-submit--warn' : ''}`}
-              disabled={isSubmitting || editableCols.length === 0}
+              disabled={isSubmitting || allCols.length === 0}
             >
               {isSubmitting ? 'Saving…' : hasDuplicates ? 'Save Anyway' : 'Save Record'}
             </button>

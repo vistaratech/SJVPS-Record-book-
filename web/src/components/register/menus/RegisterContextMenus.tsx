@@ -185,11 +185,9 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
             <div className="context-section-label">Footer Calculation</div>
             <div className="context-item-row" style={{ padding: '6px 12px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               {['sum', 'count', 'distinct', 'average', 'none'].map((type) => {
-                const isActive = (calcTypes[colMenuId!] || (
-                  (columns.find(c => c.id === colMenuId)?.type === 'number' || 
-                   columns.find(c => c.id === colMenuId)?.type === 'currency' || 
-                   columns.find(c => c.id === colMenuId)?.type === 'formula') ? 'sum' : 'count'
-                )) === type;
+                const isActive = type === 'none' 
+                  ? (!calcTypes[colMenuId!] || calcTypes[colMenuId!] === 'none')
+                  : calcTypes[colMenuId!] === type;
                 return (
                   <button 
                     key={type}
