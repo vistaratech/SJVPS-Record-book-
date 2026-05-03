@@ -1,6 +1,7 @@
+import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { listBusinesses, listHistory, type HistoryEntry } from '../lib/api';
-import { History, Calendar, User, FileText, ArrowLeft } from 'lucide-react';
+import { Activity, Calendar, User, FileText, ArrowLeft, Plus, Trash2, Pencil, Link as LinkIcon, Settings, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function HistoryPage() {
@@ -8,10 +9,13 @@ export default function HistoryPage() {
   const { data: businesses } = useQuery({ queryKey: ['businesses'], queryFn: listBusinesses });
   const businessId = businesses?.[0]?.id;
 
-  const { data: history, isLoading } = useQuery({
+  const { data: history, isLoading, isError, error } = useQuery({
     queryKey: ['history', businessId],
     queryFn: () => listHistory(businessId!),
     enabled: !!businessId,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+    retry: 1,
   });
 
   return (
@@ -21,62 +25,79 @@ export default function HistoryPage() {
           <ArrowLeft size={20} />
         </button>
         <div className="header-title-group">
-          <h1 className="header-title">History Log</h1>
-          <p className="header-subtitle">Track all changes and modifications</p>
+          <h1 className="header-title">Activity Report</h1>
+          <p className="header-subtitle">All changes and actions made across your registers</p>
         </div>
       </div>
 
       <div className="history-content">
         {isLoading ? (
-          <div className="loading-state">Loading history...</div>
+          <div className="loading-state">
+            <Activity size={32} style={{ opacity: 0.3, marginBottom: 12 }} />
+            <p>Loading activity...</p>
+          </div>
+        ) : isError ? (
+          <div className="empty-state" style={{ color: '#ef4444' }}>
+            <Activity size={48} className="empty-icon" />
+            <p style={{ fontWeight: 600 }}>Failed to load activity</p>
+            <p style={{ fontSize: 13, marginTop: 4, color: '#64748b' }}>
+              {(error as any)?.message || 'An unknown error occurred. Check your internet connection.'}
+            </p>
+          </div>
         ) : !history || history.length === 0 ? (
           <div className="empty-state">
-            <History size={48} className="empty-icon" />
-            <p>No history entries found yet.</p>
+            <Activity size={48} className="empty-icon" />
+            <p>No activity recorded yet.</p>
+            <p style={{ fontSize: 13, marginTop: 4 }}>Actions like adding rows, creating registers, and editing data will appear here.</p>
           </div>
         ) : (
           <div className="history-timeline">
-            {history.map((entry: HistoryEntry) => (
-              <div key={entry.id} className="history-card">
-                <div className="history-card-icon">
-                  <div className="icon-circle">
-                    {getActionIcon(entry.action)}
+            {history.map((entry: HistoryEntry) => {
+              const { icon, color, bg } = getActionStyle(entry.action);
+              return (
+                <div key={entry.id} className="history-card">
+                  <div className="history-card-icon">
+                    <div className="icon-circle" style={{ borderColor: color, background: bg }}>
+                      <span style={{ color }}>{icon}</span>
+                    </div>
+                    <div className="timeline-connector" />
                   </div>
-                  <div className="timeline-connector"></div>
-                </div>
-                <div className="history-card-main">
-                  <div className="history-card-header">
-                    <span className="action-badge">{entry.action}</span>
-                    <span className="timestamp">
-                      <Calendar size={12} />
-                      {new Intl.DateTimeFormat('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit',
-                        hour12: true
-                      }).format(new Date(entry.timestamp))}
-                    </span>
-                  </div>
-                  <p className="history-details">{entry.details}</p>
-                  <div className="history-meta">
-                    {entry.userName && (
-                      <span className="meta-item">
-                        <User size={12} />
-                        {entry.userName}
+                  <div className="history-card-main">
+                    <div className="history-card-header">
+                      <span className="action-badge" style={{ background: bg, color }}>
+                        {entry.action}
                       </span>
-                    )}
-                    {entry.registerName && (
-                      <span className="meta-item">
-                        <FileText size={12} />
-                        {entry.registerName}
+                      <span className="timestamp">
+                        <Calendar size={12} />
+                        {new Intl.DateTimeFormat('en-IN', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                          hour12: true
+                        }).format(new Date(entry.timestamp))}
                       </span>
-                    )}
+                    </div>
+                    <p className="history-details">{entry.details}</p>
+                    <div className="history-meta">
+                      {entry.userName && (
+                        <span className="meta-item">
+                          <User size={12} />
+                          {entry.userName}
+                        </span>
+                      )}
+                      {entry.registerName && (
+                        <span className="meta-item">
+                          <FileText size={12} />
+                          {entry.registerName}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -158,6 +179,7 @@ export default function HistoryPage() {
           display: flex;
           flex-direction: column;
           align-items: center;
+          flex-shrink: 0;
         }
 
         .icon-circle {
@@ -169,8 +191,8 @@ export default function HistoryPage() {
           display: flex;
           align-items: center;
           justify-content: center;
-          color: #64748b;
           z-index: 1;
+          flex-shrink: 0;
         }
 
         .timeline-connector {
@@ -178,6 +200,7 @@ export default function HistoryPage() {
           width: 2px;
           background: #e2e8f0;
           margin: 4px 0;
+          min-height: 20px;
         }
 
         .history-card:last-child .timeline-connector {
@@ -205,11 +228,11 @@ export default function HistoryPage() {
           justify-content: space-between;
           align-items: center;
           margin-bottom: 12px;
+          flex-wrap: wrap;
+          gap: 8px;
         }
 
         .action-badge {
-          background: #f1f5f9;
-          color: #475569;
           padding: 4px 10px;
           border-radius: 6px;
           font-size: 12px;
@@ -236,6 +259,7 @@ export default function HistoryPage() {
         .history-meta {
           display: flex;
           gap: 16px;
+          flex-wrap: wrap;
           border-top: 1px solid #f1f5f9;
           padding-top: 12px;
         }
@@ -263,15 +287,13 @@ export default function HistoryPage() {
   );
 }
 
-function getActionIcon(action: string) {
-  const iconSize = 18;
+function getActionStyle(action: string): { icon: React.ReactNode; color: string; bg: string } {
   const a = action.toLowerCase();
-  if (a.includes('create')) return <div style={{ color: '#10b981' }}><FileText size={iconSize} /></div>;
-  if (a.includes('delete')) return <div style={{ color: '#ef4444' }}><Trash2 size={iconSize} /></div>;
-  if (a.includes('rename')) return <div style={{ color: '#3b82f6' }}><Pencil size={iconSize} /></div>;
-  if (a.includes('row')) return <div style={{ color: '#f59e0b' }}><FileText size={iconSize} /></div>;
-  if (a.includes('column')) return <div style={{ color: '#8b5cf6' }}><FileText size={iconSize} /></div>;
-  return <History size={iconSize} />;
+  if (a.includes('add row') || a.includes('create')) return { icon: <Plus size={16} />, color: '#10b981', bg: '#ecfdf5' };
+  if (a.includes('delete')) return { icon: <Trash2 size={16} />, color: '#ef4444', bg: '#fef2f2' };
+  if (a.includes('rename') || a.includes('edit')) return { icon: <Pencil size={16} />, color: '#3b82f6', bg: '#eff6ff' };
+  if (a.includes('link')) return { icon: <LinkIcon size={16} />, color: '#8b5cf6', bg: '#f5f3ff' };
+  if (a.includes('restore')) return { icon: <RotateCcw size={16} />, color: '#f59e0b', bg: '#fffbeb' };
+  if (a.includes('column') || a.includes('type')) return { icon: <Settings size={16} />, color: '#8b5cf6', bg: '#f5f3ff' };
+  return { icon: <Activity size={16} />, color: '#64748b', bg: '#f1f5f9' };
 }
-
-import { Trash2, Pencil } from 'lucide-react';

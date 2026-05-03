@@ -1,5 +1,5 @@
 import { useCallback, memo, useState, startTransition, useDeferredValue, useMemo } from 'react';
-import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2, History, PlusCircle, FolderPlus, User, Bell } from 'lucide-react';
+import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2, History, PlusCircle, FolderPlus, Bell } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import type { RegisterSummary, Business } from '../../lib/api';
@@ -54,7 +54,7 @@ export const Sidebar = memo(function Sidebar({
   const [newFolderName, setNewFolderName] = useState('');
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [folderMenuId, setFolderMenuId] = useState<number | null>(null);
-  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
+
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
 
   const businessId = businesses?.[0]?.id;
@@ -663,50 +663,27 @@ export const Sidebar = memo(function Sidebar({
               )}
             </button>
             <button 
-              onClick={() => setIsActionsMenuOpen(true)}
+              onClick={() => navigate('/history')}
               style={{
-                background: 'var(--bg-secondary)',
+                background: 'transparent',
                 color: 'var(--muted)',
-                border: '1px solid var(--border)',
+                border: 'none',
                 width: '28px', height: '28px',
                 borderRadius: '50%',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 cursor: 'pointer',
                 transition: 'all 0.15s'
               }}
-              aria-label="Actions menu"
+              title="Activity Report"
+              aria-label="Activity Report"
             >
-              <Menu size={14} />
+              <History size={15} />
             </button>
           </div>
         </div>
-
-        {/* ── Actions Menu ── */}
-        {isActionsMenuOpen && (
-          <>
-            <div className="modal-overlay" style={{ background: 'transparent' }} onClick={() => setIsActionsMenuOpen(false)} />
-            <div 
-              className="context-menu" 
-              onClick={(e) => e.stopPropagation()} 
-              style={{ 
-                position: 'absolute',
-                bottom: '50px', 
-                right: '12px', 
-                zIndex: 1001,
-                minWidth: '150px' 
-              }}
-            >
-              <button className="context-item" onClick={() => { setIsActionsMenuOpen(false); navigate('/history'); }}>
-                <History size={16} color="var(--navy)" />History
-              </button>
-              <button className="context-item" onClick={() => { setIsActionsMenuOpen(false); alert('Profile logic here'); }}>
-                <User size={16} color="var(--navy)" />Profile
-              </button>
-            </div>
-          </>
-        )}
       </div>
       
+
       {/* Sliding Notification Panel Overlay */}
       {showNotifications && (
         <div 

@@ -1,7 +1,7 @@
 // Firestore-backed API client for RecordBook Web
 import { db } from './firebase';
 import {
-  collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, where,
+  collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, where, orderBy,
 } from 'firebase/firestore';
 import { TEMPLATES, type Template, type TemplateColumn } from './templates';
 // Local filesystem completely unmounted from regular API.
@@ -108,6 +108,7 @@ export interface RegisterSummary {
 export interface Column {
   id: number; registerId: number; name: string; type: string; position: number;
   dropdownOptions?: string[]; formula?: string; width?: number; summary?: string;
+  linkedTo?: { registerId: number; columnId: number };
 }
 
 export interface CellStyle {
@@ -1239,9 +1240,10 @@ export async function changeColumnType(
   registerId: number, 
   columnId: number, 
   newType: string, 
-  options?: { formula?: string; dropdownOptions?: string[] }
+  options?: { formula?: string; dropdownOptions?: string[] },
+  preventSync?: boolean
 ): Promise<RegisterDetail> {
-  return runQueuedMutation(registerId, async () => {
+  const result = await runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
     const col = reg.columns.find((c) => c.id.toString() === columnId.toString());
     if (!col) throw new Error('Column not found');
@@ -1267,8 +1269,17 @@ export async function changeColumnType(
     }
 
     await saveRegDocImmediate(reg);
-    return reg;
+    return { reg, col };
   });
+
+  const { reg, col } = result;
+
+  if (!preventSync && col.linkedTo) {
+    await changeColumnType(col.linkedTo.registerId, col.linkedTo.columnId, newType, options, true)
+      .catch(e => console.error("Failed to sync column type change:", e));
+  }
+
+  return reg;
 }
 
 export async function clearColumnData(registerId: number, columnId: number): Promise<RegisterDetail> {
@@ -1326,7 +1337,7 @@ export async function hideColumn(registerId: number, columnId: number, hidden: b
 // ─── Entry Operations ────────────────────────────────────────────────────────
 
 export async function addEntry(registerId: number, cells: Record<string, string> = {}, pageIndex: number = 0): Promise<Entry> {
-  return runQueuedMutation(registerId, async () => {
+  const result = await runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
     const pageEntries = reg.entries.filter((e) => (e.pageIndex || 0) === pageIndex);
 
@@ -1353,12 +1364,25 @@ export async function addEntry(registerId: number, cells: Record<string, string>
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
     await logAction(reg.businessId, 'Add Row', `Added a new row to "${reg.name}"`, { registerId, registerName: reg.name });
-    return entry;
+    return { entry, reg };
   });
+
+  const { entry, reg } = result;
+
+  // Sync linked columns
+  for (const [colIdStr, value] of Object.entries(cells)) {
+    if (value === undefined || value === null) continue;
+    const col = reg.columns.find(c => c.id.toString() === colIdStr);
+    if (col?.linkedTo) {
+      await _syncLinkedColumn(col.linkedTo.registerId, col.linkedTo.columnId, entry.rowNumber, value);
+    }
+  }
+
+  return entry;
 }
 
 export async function updateEntry(registerId: number, entryId: number, cells: Record<string, string>): Promise<Entry> {
-  return runQueuedMutation(registerId, async () => {
+  const result = await runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
     const entry = reg.entries.find((e) => e.id === entryId);
     if (!entry) throw new Error('Entry not found');
@@ -1372,9 +1396,69 @@ export async function updateEntry(registerId: number, entryId: number, cells: Re
     entry.cells = { ...entry.cells, ...safeCells };
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
-    return entry;
+    return { entry, reg };
+  });
+
+  const { entry, reg } = result;
+
+  // Sync linked columns outside main mutation block
+  for (const [colIdStr, value] of Object.entries(cells)) {
+    const col = reg.columns.find(c => c.id.toString() === colIdStr);
+    if (col?.linkedTo) {
+      await _syncLinkedColumn(col.linkedTo.registerId, col.linkedTo.columnId, entry.rowNumber, value);
+    }
+  }
+
+  return entry;
+}
+
+// Internal helper to sync
+async function _syncLinkedColumn(targetRegisterId: number, targetColumnId: number, rowNumber: number, value: string) {
+  return runQueuedMutation(targetRegisterId, async () => {
+    const targetReg = await getRegDoc(targetRegisterId);
+    let targetEntry = targetReg.entries.find(e => e.rowNumber === rowNumber);
+    if (!targetEntry) {
+      // Create a new entry to sync the row
+      targetEntry = {
+        id: generateId(),
+        registerId: targetRegisterId,
+        rowNumber,
+        cells: {},
+        createdAt: new Date().toISOString(),
+        pageIndex: 0
+      };
+      targetReg.entries.push(targetEntry);
+      targetReg.entryCount = targetReg.entries.length;
+    }
+    targetEntry.cells[targetColumnId.toString()] = value;
+    targetReg.updatedAt = new Date().toISOString();
+    await saveRegDocImmediate(targetReg);
+  }).catch(e => console.error('Failed to sync linked column:', e));
+}
+
+export async function linkColumn(
+  registerId: number, 
+  columnId: number, 
+  targetRegisterId: number, 
+  targetColumnId: number
+): Promise<void> {
+  // Update register 1
+  await runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const col = reg.columns.find(c => c.id === columnId);
+    if (col) col.linkedTo = { registerId: targetRegisterId, columnId: targetColumnId };
+    await saveRegDocImmediate(reg);
+  });
+
+  // Update register 2
+  await runQueuedMutation(targetRegisterId, async () => {
+    const reg = await getRegDoc(targetRegisterId);
+    const col = reg.columns.find(c => c.id === targetColumnId);
+    if (col) col.linkedTo = { registerId, columnId };
+    await saveRegDocImmediate(reg);
   });
 }
+
 
 export async function updateEntryCellStyles(registerId: number, entryId: number, cellStyles: Record<string, CellStyle>): Promise<Entry> {
   return runQueuedMutation(registerId, async () => {
@@ -1640,11 +1724,23 @@ export async function logAction(
 }
 
 export async function listHistory(businessId: number): Promise<HistoryEntry[]> {
-  const q = query(collection(db, 'history'), where('businessId', '==', businessId));
-  const snap = await getDocs(q);
-  return snap.docs
-    .map(d => d.data() as HistoryEntry)
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  try {
+    const q = query(
+      collection(db, 'history'),
+      where('businessId', '==', businessId),
+      orderBy('timestamp', 'desc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data() as HistoryEntry);
+  } catch (err: any) {
+    // Fallback if index not built yet — fetch without orderBy and sort client-side
+    console.warn('listHistory orderBy failed, falling back:', err?.message);
+    const q = query(collection(db, 'history'), where('businessId', '==', businessId));
+    const snap = await getDocs(q);
+    return snap.docs
+      .map(d => d.data() as HistoryEntry)
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  }
 }
 
 // ── Bin Management (Rows & Columns) ──────────────────────────────────────────

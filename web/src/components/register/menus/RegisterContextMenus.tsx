@@ -1,4 +1,4 @@
-import { Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, SortAsc, SortDesc, Pencil, ArrowLeftRight, Copy, ArrowRight, ChevronsLeftRight, Pin, Eye, EyeOff, Eraser, Trash2, FileText, FileSpreadsheet, Share2, ArrowLeft } from 'lucide-react';
+import { Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, SortAsc, SortDesc, Pencil, ArrowLeftRight, Copy, ArrowRight, ChevronsLeftRight, Pin, Eye, EyeOff, Eraser, Trash2, FileText, FileSpreadsheet, Share2, ArrowLeft, Link as LinkIcon } from 'lucide-react';
 import { type Column } from '../../../lib/api';
 
 interface RegisterContextMenusProps {
@@ -15,6 +15,7 @@ interface RegisterContextMenusProps {
   setChangeTypeModal: (v: boolean) => void;
   setDropdownConfigOptions: (v: string) => void;
   setDropdownConfigModal: (v: boolean) => void;
+  setLinkColumnModal: (v: boolean) => void;
   duplicateColumnMutation: any;
   setNewColName: (v: string) => void;
   setNewColType: (v: string) => void;
@@ -52,7 +53,7 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
   const {
     colMenuId, colMenuRect, setColMenuId, setActiveModalColId, columns, handleSort,
     setRenameColValue, setRenameColModal, setChangeTypeValue, setChangeTypeModal,
-    setDropdownConfigOptions, setDropdownConfigModal, duplicateColumnMutation,
+    setDropdownConfigOptions, setDropdownConfigModal, setLinkColumnModal, duplicateColumnMutation,
     setNewColName, setNewColType, setNewColDropdownOpts, setNewColFormula, setInsertColModal,
     moveColumnMutation, frozenColumns, setFrozenColumns, freezeColumn, registerId,
     hiddenColumns, setHiddenColumns, hideColumn, clearColumnDataMutation, deleteColumnMutation,
@@ -115,6 +116,13 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
               setChangeTypeModal(true); setColMenuId(null);
             }}>
               <ArrowLeftRight size={16} /> Change Column Type
+            </button>
+            <button className="context-item" onClick={() => {
+              setActiveModalColId(colMenuId);
+              setLinkColumnModal(true);
+              setColMenuId(null);
+            }}>
+              <LinkIcon size={16} /> Link
             </button>
             {columns.find((c) => c.id === colMenuId)?.type === 'dropdown' && (
               <button className="context-item" onClick={() => {

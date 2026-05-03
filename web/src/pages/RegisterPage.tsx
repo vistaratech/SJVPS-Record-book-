@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  getRegister, addColumn, deleteColumn, renameColumn, updateColumnDropdownOptions,
+  getRegister, listRegisters, addColumn, deleteColumn, renameColumn, updateColumnDropdownOptions,
   duplicateColumn, moveColumn, reorderColumn, changeColumnType, clearColumnData, insertColumn, updateColumnWidth, updateColumnSummary,
   freezeColumn, hideColumn,
   addEntry, updateEntry, deleteEntry, duplicateEntry, bulkDeleteEntries,
@@ -23,7 +23,7 @@ import {
   Hash, FlaskConical, Pin, IndianRupee,
   Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
   Search, FileText, Download, ListOrdered, Maximize2, AlertCircle,
-  X
+  X, Link as LinkIcon
 } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { RegisterHeader } from '../components/register/RegisterHeader';
@@ -76,6 +76,14 @@ export default function RegisterPage() {
 
   const cachedRegister = queryClient.getQueryData(['register', registerId]) as any;
 
+  // Fetch all registers for the Link Column feature
+  const { data: allRegisters = [] } = useQuery({
+    queryKey: ['registers', register?.businessId],
+    queryFn: () => listRegisters(register!.businessId),
+    enabled: !!register?.businessId,
+    staleTime: 5 * 60 * 1000,
+  });
+
   // ── State ──
   const [search, setSearch] = useState(() => localStorage.getItem(`rb_search_${registerId}`) || '');
   const [currentPageIndex, setCurrentPageIndex] = useState(() => {
@@ -100,6 +108,7 @@ export default function RegisterPage() {
   const [renameColModal, setRenameColModal] = useState(false);
   const [dropdownConfigModal, setDropdownConfigModal] = useState(false);
   const [changeTypeModal, setChangeTypeModal] = useState(false);
+  const [linkColumnModal, setLinkColumnModal] = useState(false);
   const [insertColModal, setInsertColModal] = useState<'left' | 'right' | null>(null);
   
   // Smooth column drag-and-drop reordering
@@ -1451,6 +1460,11 @@ export default function RegisterPage() {
       setLocalEntries(updatedReg.entries || []);
       // Invalidate to ensure any formula or sequential changes are fully propagated
       queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+
+      const col = columnsRef.current.find(c => c.id === activeModalColId);
+      if (col?.linkedTo) {
+        queryClient.invalidateQueries({ queryKey: ['register', col.linkedTo.registerId] });
+      }
       
       setChangeTypeModal(false); 
       setActiveModalColId(null);
@@ -1553,6 +1567,16 @@ export default function RegisterPage() {
     onSuccess: (newEntry, _vars, context) => {
       // Push to undo stack
       pushToUndoStack({ type: 'ADD_ENTRY', entryId: newEntry.id, pageIndex: currentPageIndex });
+
+      // Invalidate queries for linked columns
+      if (_vars) {
+        Object.keys(_vars).forEach(colId => {
+          const col = columnsRef.current.find(c => c.id.toString() === colId);
+          if (col?.linkedTo) {
+            queryClient.invalidateQueries({ queryKey: ['register', col.linkedTo.registerId] });
+          }
+        });
+      }
 
       // Replace temp entry with real entry from server
       setLocalEntries((prev) => prev.map((e) => e.id === context?.tempId ? newEntry : e));
@@ -1812,6 +1836,11 @@ export default function RegisterPage() {
       delete debounceTimers.current[key];
 
       updateEntry(registerId, entryId, { [columnId]: value }).then(() => {
+        const col = columnsRef.current.find(c => c.id.toString() === columnId);
+        if (col?.linkedTo) {
+          queryClient.invalidateQueries({ queryKey: ['register', col.linkedTo.registerId] });
+        }
+
         // Only patch the cache entry, never re-fetch the whole register
         queryClient.setQueryData(['register', registerId], (old: any) => {
           if (!old) return old;
@@ -2987,6 +3016,11 @@ export default function RegisterPage() {
                     >
                       {col.name}
                       {col.type === 'formula' && <span className="col-formula-badge" title={col.formula}>Fx</span>}
+                      {col.linkedTo && (
+                        <span title={`Linked to ${col.linkedTo.registerId}`} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                          <LinkIcon size={12} color="var(--primary)" style={{ marginLeft: 4 }} />
+                        </span>
+                      )}
                     </span>
                     {sortColId === col.id && sortDir && (
                       <span className="sort-indicator" title={sortDir === 'asc' ? 'Sorted A→Z' : 'Sorted Z→A'}>
@@ -3132,7 +3166,7 @@ export default function RegisterPage() {
         handleSort={handleSort}
         setRenameColValue={setRenameColValue} setRenameColModal={setRenameColModal}
         setChangeTypeValue={setChangeTypeValue} setChangeTypeModal={setChangeTypeModal}
-        setDropdownConfigOptions={setDropdownConfigOptions} setDropdownConfigModal={setDropdownConfigModal}
+        setDropdownConfigOptions={setDropdownConfigOptions} setDropdownConfigModal={setDropdownConfigModal} setLinkColumnModal={setLinkColumnModal}
         duplicateColumnMutation={duplicateColumnMutation}
         setNewColName={setNewColName} setNewColType={setNewColType} setNewColDropdownOpts={setNewColDropdownOpts} setNewColFormula={setNewColFormula}
         setInsertColModal={setInsertColModal} moveColumnMutation={moveColumnMutation}
@@ -3165,10 +3199,13 @@ export default function RegisterPage() {
         dropdownConfigOptions={dropdownConfigOptions} setDropdownConfigOptions={setDropdownConfigOptions} updateDropdownMutation={updateDropdownMutation}
         changeTypeModal={changeTypeModal} setChangeTypeModal={setChangeTypeModal}
         changeTypeValue={changeTypeValue} setChangeTypeValue={setChangeTypeValue} changeColumnTypeMutation={changeColumnTypeMutation}
+        linkColumnModal={linkColumnModal} setLinkColumnModal={setLinkColumnModal}
         activeModalColId={activeModalColId}
         COL_TYPES={COL_TYPES}
         columns={columns}
         entries={localEntries}
+        allRegisters={allRegisters}
+        currentRegisterId={registerId}
       />
 
       {showExportModal && (
@@ -3556,6 +3593,13 @@ export default function RegisterPage() {
                     // 3. Persist batch to Firestore (non-blocking for UI)
                     setIsSaving(true);
                     updateEntry(registerId, detailViewEntry.id, changedCells).then(() => {
+                      Object.keys(changedCells).forEach(colId => {
+                        const col = columnsRef.current.find(c => c.id.toString() === colId);
+                        if (col?.linkedTo) {
+                          queryClient.invalidateQueries({ queryKey: ['register', col.linkedTo.registerId] });
+                        }
+                      });
+                      
                       // 4. Patch queryClient cache
                       queryClient.setQueryData(['register', registerId], (old: any) => {
                         if (!old) return old;

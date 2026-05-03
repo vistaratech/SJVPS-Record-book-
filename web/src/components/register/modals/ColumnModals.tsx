@@ -4,7 +4,9 @@ import {
   Calculator, PlusCircle, MinusCircle, XCircle, DivideCircle, 
   Percent, Settings2, Trash2 
 } from 'lucide-react';
-import { evaluateFormula } from '../../../lib/api';
+import { evaluateFormula, getRegister, linkColumn } from '../../../lib/api';
+import type { RegisterSummary, Column as ApiColumn } from '../../../lib/api';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 function FormulaBuilder({ formula, onChange, columns, entries, outputName, excludeId }: { formula: string, onChange: (v: string) => void, columns: any[], entries?: any[], outputName?: string, excludeId?: number | null }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -588,7 +590,14 @@ interface ColumnModalsProps {
   changeTypeValue: string;
   setChangeTypeValue: (v: string) => void;
   changeColumnTypeMutation: any;
+  
+  linkColumnModal: boolean;
+  setLinkColumnModal: (v: boolean) => void;
+  
   activeModalColId: number | null;
+
+  allRegisters?: RegisterSummary[];
+  currentRegisterId?: number;
 
   COL_TYPES: any[];
   columns: any[];
@@ -604,8 +613,10 @@ export function ColumnModals(props: ColumnModalsProps) {
     renameColModal, setRenameColModal, renameColValue, setRenameColValue, renameColumnMutation,
     dropdownConfigModal, setDropdownConfigModal, dropdownConfigOptions, setDropdownConfigOptions, updateDropdownMutation,
     changeTypeModal, setChangeTypeModal, changeTypeValue, setChangeTypeValue, changeColumnTypeMutation,
+    linkColumnModal, setLinkColumnModal,
     activeModalColId,
-    COL_TYPES, columns, entries
+    COL_TYPES, columns, entries,
+    allRegisters, currentRegisterId
   } = props;
 
   return (
@@ -754,6 +765,134 @@ export function ColumnModals(props: ColumnModalsProps) {
           </div>
         </div>
       )}
+
+      {/* ── Link Column ── */}
+      {linkColumnModal && (
+        <LinkColumnModal
+          onClose={() => setLinkColumnModal(false)}
+          allRegisters={allRegisters || []}
+          currentRegisterId={currentRegisterId}
+          sourceColumn={columns.find(c => c.id === activeModalColId)}
+        />
+      )}
     </>
+  );
+}
+
+/** Self-contained Link Column modal — fetches target register columns on selection */
+function LinkColumnModal({ onClose, allRegisters, currentRegisterId, sourceColumn }: {
+  onClose: () => void;
+  allRegisters: RegisterSummary[];
+  currentRegisterId?: number;
+  sourceColumn?: any;
+}) {
+  const [selectedRegisterId, setSelectedRegisterId] = useState<string>('');
+  const [selectedColumnId, setSelectedColumnId] = useState<string>('');
+  const [targetColumns, setTargetColumns] = useState<ApiColumn[]>([]);
+  const [loadingColumns, setLoadingColumns] = useState(false);
+  const queryClient = useQueryClient();
+
+  // Filter out the current register so you can't link to yourself
+  const availableRegisters = allRegisters.filter(r => r.id !== currentRegisterId);
+
+  const linkMutation = useMutation({
+    mutationFn: () => linkColumn(
+      currentRegisterId!,
+      sourceColumn.id,
+      Number(selectedRegisterId),
+      Number(selectedColumnId)
+    ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['register', currentRegisterId] });
+      queryClient.invalidateQueries({ queryKey: ['register', Number(selectedRegisterId)] });
+      onClose();
+    }
+  });
+
+  // When register selection changes, fetch that register's columns
+  const handleRegisterChange = async (regIdStr: string) => {
+    setSelectedRegisterId(regIdStr);
+    setSelectedColumnId('');
+    setTargetColumns([]);
+
+    if (!regIdStr) return;
+
+    setLoadingColumns(true);
+    try {
+      const reg = await getRegister(Number(regIdStr));
+      setTargetColumns(reg.columns || []);
+    } catch (err) {
+      console.error('Failed to load register columns:', err);
+      setTargetColumns([]);
+    } finally {
+      setLoadingColumns(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <h3 className="modal-title">Link Column</h3>
+        <p className="modal-p-text">
+          Link <strong>{sourceColumn?.name || 'this column'}</strong> to a column in another register. Changes here will reflect there, and new entries will be synced.
+        </p>
+
+        <label className="modal-label">Select Register</label>
+        <select
+          className="modal-input"
+          value={selectedRegisterId}
+          onChange={(e) => handleRegisterChange(e.target.value)}
+          style={{ marginBottom: '16px' }}
+        >
+          <option value="" disabled>Select a register...</option>
+          {availableRegisters.map(reg => (
+            <option key={reg.id} value={reg.id.toString()}>
+              {reg.name} ({reg.entryCount} entries)
+            </option>
+          ))}
+        </select>
+
+        {selectedRegisterId && (
+          <>
+            <label className="modal-label">Select Column</label>
+            {loadingColumns ? (
+              <div style={{ padding: '12px', fontSize: '13px', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }}></span>
+                Loading columns...
+              </div>
+            ) : targetColumns.length > 0 ? (
+              <select
+                className="modal-input"
+                value={selectedColumnId}
+                onChange={(e) => setSelectedColumnId(e.target.value)}
+                style={{ marginBottom: '8px' }}
+              >
+                <option value="" disabled>Select a column...</option>
+                {targetColumns.map(col => (
+                  <option key={col.id} value={col.id.toString()}>
+                    {col.name} ({col.type})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div style={{ padding: '12px', fontSize: '13px', color: 'var(--muted)', background: 'var(--bg-light)', borderRadius: '8px', textAlign: 'center' }}>
+                No columns found in this register.
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="modal-actions" style={{ marginTop: '24px' }}>
+          <button className="modal-cancel-btn" onClick={onClose}>Cancel</button>
+          <button
+            className="modal-confirm-btn"
+            disabled={!selectedRegisterId || !selectedColumnId || linkMutation.isPending}
+            onClick={() => linkMutation.mutate()}
+          >
+            {linkMutation.isPending ? 'Linking...' : 'Link Column'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
