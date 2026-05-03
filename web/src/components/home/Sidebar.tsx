@@ -1,7 +1,8 @@
 import { useCallback, memo, useState, startTransition, useDeferredValue, useMemo } from 'react';
-import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2, History, PlusCircle, FolderPlus, Bell } from 'lucide-react';
+import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2, PlusCircle, FolderPlus, Bell, User, Activity, LayoutTemplate, LogOut, CloudUpload } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
+import { useAuth } from '../../lib/auth';
 import type { RegisterSummary, Business } from '../../lib/api';
 import { getRegister, listFolders, createFolder, renameFolder, deleteFolder, moveRegisterToFolder, duplicateRegister, searchAllRegisters } from '../../lib/api';
 interface SidebarProps {
@@ -56,9 +57,11 @@ export const Sidebar = memo(function Sidebar({
   const [folderMenuId, setFolderMenuId] = useState<number | null>(null);
 
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const [isFooterMenuOpen, setIsFooterMenuOpen] = useState(false);
 
   const businessId = businesses?.[0]?.id;
   const deferredSearch = useDeferredValue(search);
+  const { logout } = useAuth();
 
   const { data: folders = [] } = useQuery({
     queryKey: ['folders', businessId],
@@ -333,7 +336,7 @@ export const Sidebar = memo(function Sidebar({
           </div>
         </div>
         {/* Sidebar Add Button */}
-        <div className="sidebar-add-section" style={{ padding: '12px 12px 8px' }}>
+        <div className="sidebar-add-section" style={{ padding: '12px 12px 8px', position: 'relative' }}>
           <button 
             className="sidebar-add-btn"
             onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
@@ -343,31 +346,46 @@ export const Sidebar = memo(function Sidebar({
           </button>
 
           {isAddMenuOpen && (
-            <div 
-              className="sidebar-add-dropdown"
-              style={{
-                marginTop: '8px',
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border)',
-                borderRadius: '8px',
-                overflow: 'hidden',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
-              }}
-            >
-              <button className="context-item" style={{ padding: '10px 16px' }} onClick={() => { navigate('/templates'); setIsAddMenuOpen(false); }}>
-                <PlusCircle size={16} color="var(--navy)" />New Register
-              </button>
-              <button className="context-item" style={{ padding: '10px 16px' }} onClick={() => { setIsCreatingFolder(true); setIsAddMenuOpen(false); }}>
-                <FolderPlus size={16} color="var(--navy)" />New File
-              </button>
-              <label className="context-item" style={{ padding: '10px 16px', cursor: 'pointer' }}>
-                <FileSpreadsheet size={16} color="#107c41" />Input Excel
-                <input type="file" accept=".xlsx, .xls, .csv" className="hidden-file-input" onChange={(e) => { onInputExcel?.(e); setIsAddMenuOpen(false); }} />
-              </label>
-              <button className="context-item" style={{ padding: '10px 16px' }} onClick={() => { onInputFolder?.(); setIsAddMenuOpen(false); }}>
-                <Folder size={16} fill="#fbbf24" color="#f59e0b" />Input File
-              </button>
-            </div>
+            <>
+              {/* Backdrop to close menu */}
+              <div
+                style={{ position: 'fixed', inset: 0, zIndex: 999 }}
+                onClick={() => setIsAddMenuOpen(false)}
+              />
+              <div 
+                className="sidebar-add-dropdown"
+                style={{
+                  position: 'absolute',
+                  top: '0',
+                  ...(isCollapsed
+                    ? { left: 'calc(100% + 8px)' }   // pop to the RIGHT in collapsed mode
+                    : { top: '56px', left: '12px', right: '12px' }  // drop down normally
+                  ),
+                  background: 'white',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                  zIndex: 1000,
+                  minWidth: '180px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <button className="context-item" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }} onClick={() => { navigate('/templates'); setIsAddMenuOpen(false); }}>
+                  <PlusCircle size={16} color="var(--navy)" /><span>New Register</span>
+                </button>
+                <button className="context-item" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }} onClick={() => { setIsCreatingFolder(true); setIsAddMenuOpen(false); }}>
+                  <FolderPlus size={16} color="var(--navy)" /><span>New File</span>
+                </button>
+                <label className="context-item" style={{ padding: '10px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <FileSpreadsheet size={16} color="#107c41" /><span>Input Excel</span>
+                  <input type="file" accept=".xlsx, .xls, .csv" className="hidden-file-input" onChange={(e) => { onInputExcel?.(e); setIsAddMenuOpen(false); }} />
+                </label>
+                <button className="context-item" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }} onClick={() => { onInputFolder?.(); setIsAddMenuOpen(false); }}>
+                  <Folder size={16} fill="#fbbf24" color="#f59e0b" /><span>Input File</span>
+                </button>
+              </div>
+            </>
           )}
         </div>
 
@@ -551,7 +569,7 @@ export const Sidebar = memo(function Sidebar({
                           )}
                         </div>
                       )}
-                      <Folder size={16} color="var(--primary)" fill="var(--primary)" fillOpacity={0.2} />
+                      <Folder size={16} fill="#fbbf24" color="#f59e0b" />
                       <span style={{ fontSize: '13px', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{folder.name}</span>
                       <button
                         className="register-item-menu"
@@ -606,81 +624,62 @@ export const Sidebar = memo(function Sidebar({
 
         {/* The old bottom search bar has been removed and replaced by the top search bar. */}
 
-        <div className="sidebar-footer" style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div 
+          className="sidebar-footer" 
+          style={{ padding: '12px', display: 'flex', alignItems: 'center', cursor: 'pointer', position: 'relative', background: isFooterMenuOpen ? '#f1f5f9' : 'transparent', borderTop: '1px solid #e2e8f0', margin: '0 8px', borderRadius: '8px 8px 0 0' }}
+          onClick={() => setIsFooterMenuOpen(v => !v)}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-footer-logo" style={{ margin: 0 }} />
-            <span className="sidebar-footer-text">AG Trust · Record Book</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button 
-              onClick={() => navigate('/recycle-bin')}
-              style={{
-                background: 'transparent',
-                color: 'var(--muted)',
-                border: 'none',
-                width: '28px', height: '28px',
-                borderRadius: '50%',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer',
-                transition: 'all 0.15s'
-              }}
-              title="Recycle Bin"
-              aria-label="Recycle Bin"
-            >
-              <Trash2 size={15} />
-            </button>
-            <button 
-              onClick={() => setShowNotifications(true)}
-              style={{
-                background: 'transparent',
-                color: 'var(--muted)',
-                border: 'none',
-                width: '28px', height: '28px',
-                borderRadius: '50%',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer',
-                transition: 'all 0.15s',
-                position: 'relative'
-              }}
-              title="Notifications"
-            >
-              <Bell size={15} />
-              {notifications.length > 0 && (
-                <span style={{
-                  position: 'absolute',
-                  top: '-2px',
-                  right: '-2px',
-                  background: '#ef4444',
-                  color: 'white',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  borderRadius: '10px',
-                  padding: '2px 4px',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                }}>
-                  {notifications.length}
-                </span>
-              )}
-            </button>
-            <button 
-              onClick={() => navigate('/history')}
-              style={{
-                background: 'transparent',
-                color: 'var(--muted)',
-                border: 'none',
-                width: '28px', height: '28px',
-                borderRadius: '50%',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer',
-                transition: 'all 0.15s'
-              }}
-              title="Activity Report"
-              aria-label="Activity Report"
-            >
-              <History size={15} />
-            </button>
+            <img src="/logo-transparent.png" alt="AG Trust" className="sidebar-footer-logo" style={{ margin: 0, width: '28px', height: '28px', objectFit: 'contain' }} />
+            <span className="sidebar-footer-text" style={{ fontWeight: 600, color: '#1e293b', whiteSpace: 'nowrap' }}>AG Trust · Record Book</span>
           </div>
         </div>
+
+        {/* Footer Popup Menu — rendered OUTSIDE footer div to avoid click bubbling */}
+        {isFooterMenuOpen && (
+          <>
+            <div
+              style={{ position: 'fixed', inset: 0, zIndex: 1000 }}
+              onClick={() => setIsFooterMenuOpen(false)}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '60px',
+                left: '8px',
+                width: '240px',
+                background: 'white',
+                borderRadius: '8px',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                display: 'flex',
+                flexDirection: 'column',
+                padding: '8px',
+                zIndex: 1001,
+                border: '1px solid #e2e8f0',
+              }}
+            >
+              <button className="footer-menu-item" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', borderRadius: '6px', color: 'inherit', background: 'transparent', border: 'none', width: '100%', cursor: 'pointer', textAlign: 'left', font: 'inherit' }} onClick={() => { setIsFooterMenuOpen(false); navigate('/profile'); }}>
+                <User size={16} /> <span style={{ fontSize: '14px', fontWeight: 500 }}>Profile</span>
+              </button>
+              <button className="footer-menu-item" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', borderRadius: '6px', color: 'inherit', background: 'transparent', border: 'none', width: '100%', cursor: 'pointer', textAlign: 'left', font: 'inherit' }} onClick={() => { setIsFooterMenuOpen(false); navigate('/history'); }}>
+                <Activity size={16} /> <span style={{ fontSize: '14px', fontWeight: 500 }}>Activity Report</span>
+              </button>
+              <button className="footer-menu-item" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', borderRadius: '6px', color: 'inherit', background: 'transparent', border: 'none', width: '100%', cursor: 'pointer', textAlign: 'left', font: 'inherit' }} onClick={() => { setIsFooterMenuOpen(false); navigate('/recycle-bin'); }}>
+                <Trash2 size={16} /> <span style={{ fontSize: '14px', fontWeight: 500 }}>Recycle Bin</span>
+              </button>
+              <button className="footer-menu-item" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', borderRadius: '6px', color: 'inherit', background: 'transparent', border: 'none', width: '100%', cursor: 'pointer', textAlign: 'left', font: 'inherit' }} onClick={() => { setIsFooterMenuOpen(false); navigate('/templates'); }}>
+                <LayoutTemplate size={16} /> <span style={{ fontSize: '14px', fontWeight: 500 }}>Templates</span>
+              </button>
+              <button className="footer-menu-item" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', borderRadius: '6px', color: '#128C7E', background: 'transparent', border: 'none', width: '100%', cursor: 'pointer', textAlign: 'left', font: 'inherit' }} onClick={() => { setIsFooterMenuOpen(false); navigate('/backup'); }}>
+                <CloudUpload size={16} /> <span style={{ fontSize: '14px', fontWeight: 500 }}>Backup & Restore</span>
+              </button>
+              <div style={{ height: '1px', background: '#e2e8f0', margin: '4px 0' }} />
+              <button className="footer-menu-item" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', borderRadius: '6px', color: '#ef4444', background: 'transparent', border: 'none', width: '100%', cursor: 'pointer', textAlign: 'left', font: 'inherit' }} onClick={() => { setIsFooterMenuOpen(false); logout(); navigate('/login'); }}>
+                <LogOut size={16} /> <span style={{ fontSize: '14px', fontWeight: 500 }}>Logout</span>
+              </button>
+            </div>
+          </>
+        )}
       </div>
       
 

@@ -2517,6 +2517,63 @@ export default function RegisterPage() {
     setRowMenuId(prev => (prev === id ? null : id));
   }, []);
 
+  const handleTableMouseDown = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.classList.contains('fill-handle')) {
+      e.preventDefault();
+      const rowIdx = parseInt(target.getAttribute('data-row-idx') || '-1');
+      const colId = target.getAttribute('data-col-id');
+      if (rowIdx < 0 || !colId) return;
+
+      const startVal = localEntries[rowIdx]?.cells?.[colId] || '';
+      let currentEndIdx = rowIdx;
+      
+      const onMouseMove = (ev: MouseEvent) => {
+        const hoverTarget = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement;
+        if (!hoverTarget) return;
+        const cellWrapper = hoverTarget.closest('.cell-inner-wrapper');
+        if (!cellWrapper) return;
+        const handle = cellWrapper.querySelector('.fill-handle') as HTMLElement;
+        if (!handle) return;
+        
+        const hColId = handle.getAttribute('data-col-id');
+        const hRowIdx = parseInt(handle.getAttribute('data-row-idx') || '-1');
+        
+        if (hColId === colId && hRowIdx >= 0 && hRowIdx !== currentEndIdx) {
+          currentEndIdx = hRowIdx;
+          document.querySelectorAll('.drag-fill-target').forEach(el => el.classList.remove('drag-fill-target'));
+          const min = Math.min(rowIdx, currentEndIdx);
+          const max = Math.max(rowIdx, currentEndIdx);
+          for (let i = min; i <= max; i++) {
+            const el = document.querySelector(`.fill-handle[data-row-idx="${i}"][data-col-id="${colId}"]`)?.parentElement;
+            if (el) el.classList.add('drag-fill-target');
+          }
+        }
+      };
+      
+      const onMouseUp = () => {
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        document.querySelectorAll('.drag-fill-target').forEach(el => el.classList.remove('drag-fill-target'));
+        
+        if (currentEndIdx !== rowIdx) {
+          const min = Math.min(rowIdx, currentEndIdx);
+          const max = Math.max(rowIdx, currentEndIdx);
+          for (let i = min; i <= max; i++) {
+            if (i === rowIdx) continue;
+            const entry = localEntries[i];
+            if (entry && entry.cells?.[colId] !== startVal) {
+              handleCellChange(entry.id, colId, startVal);
+            }
+          }
+        }
+      };
+      
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    }
+  }, [localEntries, handleCellChange]);
+
   const visibleColumns = useMemo(() => {
     const visible = columns.filter((col) => !hiddenColumns.has(col.id));
     const frozen = visible.filter((col) => frozenColumns.has(col.id));
@@ -2945,6 +3002,7 @@ export default function RegisterPage() {
         ref={parentRef}
         className="spreadsheet-wrapper" 
         key={`grid-${columns.length}-${columns.map(c => c.id).join('-')}`}
+        onMouseDown={handleTableMouseDown}
       >
         <table className="spreadsheet">
           <thead>

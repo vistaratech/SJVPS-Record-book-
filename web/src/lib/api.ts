@@ -1845,3 +1845,149 @@ export async function emptyRegisterBin(registerId: number): Promise<void> {
     await saveRegDocImmediate(reg);
   });
 }
+
+// ==================== BACKUPS ====================
+
+export interface BackupMeta {
+  id: string;
+  businessId: number;
+  createdAt: string;
+  label: string;
+  registerCount: number;
+  folderCount: number;
+  totalEntries: number;
+  sizeKb: number;
+}
+
+export interface BackupSnapshot {
+  meta: BackupMeta;
+  registers: RegisterDetail[];
+  folders: Folder[];
+}
+
+const backupsCol = () => collection(db, 'backups');
+const backupDoc = (id: string) => doc(db, 'backups', id);
+
+/**
+ * Create a full backup of all registers and folders for a business.
+ * Stores the snapshot in Firestore /backups/{id}.
+ */
+export async function createBackup(businessId: number, label?: string): Promise<BackupMeta> {
+  const [summaries, folders] = await Promise.all([
+    listRegisters(businessId),
+    listFolders(businessId),
+  ]);
+
+  // Load full register details (including entries)
+  const registers = await Promise.all(
+    summaries.map(s => getRegister(s.id).catch(() => null))
+  );
+  const validRegisters = registers.filter(Boolean) as RegisterDetail[];
+
+  const totalEntries = validRegisters.reduce((sum, r) => sum + (r.entries?.length ?? 0), 0);
+  const id = `backup_${Date.now()}`;
+  const now = new Date().toISOString();
+
+  const snapshot: BackupSnapshot = {
+    meta: {
+      id,
+      businessId,
+      createdAt: now,
+      label: label || `Backup ${new Date(now).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
+      registerCount: validRegisters.length,
+      folderCount: folders.length,
+      totalEntries,
+      sizeKb: 0,
+    },
+    registers: validRegisters,
+    folders,
+  };
+
+  const jsonSize = Math.round(JSON.stringify(snapshot).length / 1024);
+  snapshot.meta.sizeKb = jsonSize;
+
+  // Firestore has a 1MiB doc limit — split large backups into chunks
+  const mainDoc = { meta: snapshot.meta, folders: snapshot.folders };
+  await setDoc(backupDoc(id), mainDoc);
+
+  // Store registers in chunks of 5 to avoid size limits
+  const CHUNK_SIZE = 5;
+  for (let i = 0; i < validRegisters.length; i += CHUNK_SIZE) {
+    const chunk = validRegisters.slice(i, i + CHUNK_SIZE);
+    await setDoc(doc(db, 'backups', id, 'registerChunks', `chunk_${Math.floor(i / CHUNK_SIZE)}`), { registers: JSON.parse(JSON.stringify(chunk)) });
+  }
+
+  await logAction(businessId, 'Backup Created', `Created backup: ${snapshot.meta.label} (${validRegisters.length} registers, ${totalEntries} entries)`);
+  return snapshot.meta;
+}
+
+/**
+ * List all available backups for a business, newest first.
+ */
+export async function listBackups(businessId: number): Promise<BackupMeta[]> {
+  const q = query(backupsCol(), where('meta.businessId', '==', businessId));
+  const snap = await getDocs(q);
+  const metas = snap.docs.map(d => (d.data() as { meta: BackupMeta }).meta).filter(Boolean);
+  return metas.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+/**
+ * Restore a backup — overwrites all current registers and folders with the backup snapshot.
+ * WARNING: This is destructive. Current data will be replaced.
+ */
+export async function restoreBackup(backupId: string): Promise<void> {
+  const snap = await getDoc(backupDoc(backupId));
+  if (!snap.exists()) throw new Error('Backup not found');
+  const { meta, folders } = snap.data() as { meta: BackupMeta; folders: Folder[] };
+
+  // Load register chunks
+  const chunkSnap = await getDocs(collection(db, 'backups', backupId, 'registerChunks'));
+  const allRegisters: RegisterDetail[] = [];
+  chunkSnap.docs.forEach(d => {
+    const { registers } = d.data() as { registers: RegisterDetail[] };
+    allRegisters.push(...registers);
+  });
+
+  // Delete existing registers for this business
+  const existingRegs = await getDocs(query(registersCol(), where('businessId', '==', meta.businessId)));
+  await Promise.all(existingRegs.docs.map(d => deleteDoc(d.ref)));
+
+  // Delete existing folders
+  const existingFolders = await getDocs(query(foldersCol(), where('businessId', '==', meta.businessId)));
+  await Promise.all(existingFolders.docs.map(d => deleteDoc(d.ref)));
+
+  // Clear cache
+  firestoreRegisterCache.clear();
+
+  // Restore folders
+  await Promise.all(folders.map(f => setDoc(folderDoc(f.id), f)));
+
+  // Restore registers (with chunked entries)
+  for (const reg of allRegisters) {
+    await saveRegDocImmediate(reg);
+  }
+
+  await logAction(meta.businessId, 'Backup Restored', `Restored backup: ${meta.label}`);
+}
+
+/**
+ * Delete a backup permanently.
+ */
+export async function deleteBackup(backupId: string): Promise<void> {
+  // Delete register chunks subcollection
+  const chunkSnap = await getDocs(collection(db, 'backups', backupId, 'registerChunks'));
+  await Promise.all(chunkSnap.docs.map(d => deleteDoc(d.ref)));
+  await deleteDoc(backupDoc(backupId));
+}
+
+/**
+ * Check if a new backup is due (every 3 days).
+ * Returns true if no backup exists or last backup is older than 3 days.
+ */
+export async function isBackupDue(businessId: number): Promise<boolean> {
+  const backups = await listBackups(businessId);
+  if (backups.length === 0) return true;
+  const lastBackup = new Date(backups[0].createdAt);
+  const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  return lastBackup < threeDaysAgo;
+}

@@ -451,6 +451,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
         
         return (
         <td key={col.id} className={isFrozen ? 'frozen-col' : ''} style={cellStyle} onContextMenu={handleContextMenu}>
+          <div className="cell-inner-wrapper" style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flex: 1 }}>
           {col.type === 'formula' ? (
             <FormulaCell idx={idx} col={col} entry={entry} registerColumns={registerColumns} onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} />
           ) : col.type === 'date' ? (
@@ -571,6 +572,15 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
               searchTerm={searchTerm}
             />
           )}
+          {col.type !== 'formula' && col.type !== 'auto_increment' && (
+            <div 
+              className="fill-handle" 
+              data-row-idx={idx} 
+              data-col-id={col.id} 
+              data-entry-id={entry.id} 
+            />
+          )}
+          </div>
         </td>
         );
       })}

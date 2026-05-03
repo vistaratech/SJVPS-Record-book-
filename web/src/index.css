@@ -7678,3 +7678,12 @@ body.modal-open {
 .add-record-field--formula {
   opacity: 0.85;
 }
+
+.footer-menu-item { font-size: 13px; color: #475569; padding: 6px 8px; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin: 0 -8px; }
+.footer-menu-item:hover { background: #f1f5f9; color: #0f172a; }
+
+.fill-handle { display: none; position: absolute; bottom: 0; right: 0; width: 6px; height: 6px; background: #3b82f6; cursor: crosshair; z-index: 10; border: 1px solid white; }
+.cell-inner-wrapper:focus-within .fill-handle, .fill-handle.active { display: block; }
+.drag-fill-overlay { position: absolute; border: 2px dashed #3b82f6; background: rgba(59, 130, 246, 0.1); pointer-events: none; z-index: 9; transition: all 0.1s; }
+
+.drag-fill-target { outline: 2px dashed #3b82f6 !important; background: rgba(59, 130, 246, 0.1) !important; }
