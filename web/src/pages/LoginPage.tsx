@@ -61,7 +61,7 @@ export default function LoginPage() {
           <span className="login-logo-badge">Trusted Partner</span>
         </div>
 
-        <h1 className="login-title">AG Trust</h1>
+        <h1 className="login-title">AG <span>Trust</span></h1>
         <p className="login-sub">
           {step === 'phone'
             ? 'Enter your phone number to get started'

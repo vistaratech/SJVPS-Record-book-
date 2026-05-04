@@ -23,7 +23,7 @@ import {
   Hash, FlaskConical, Pin, IndianRupee,
   Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
   Search, FileText, Download, ListOrdered, Maximize2, AlertCircle,
-  X, Link as LinkIcon
+  X, Link as LinkIcon, Info, AlertTriangle
 } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { RegisterHeader } from '../components/register/RegisterHeader';
@@ -258,7 +258,7 @@ export default function RegisterPage() {
   const undo = useCallback(async () => {
     const action = undoStack.current.pop();
     if (!action) {
-      toast('Nothing to undo', { icon: 'ℹ️' });
+      toast('Nothing to undo', { icon: <Info size={16} color="var(--navy)" /> });
       return;
     }
 
@@ -396,7 +396,7 @@ export default function RegisterPage() {
   const redo = useCallback(async () => {
     const action = redoStack.current.pop();
     if (!action) {
-      toast('Nothing to redo', { icon: 'ℹ️' });
+      toast('Nothing to redo', { icon: <Info size={16} color="var(--navy)" /> });
       return;
     }
 
@@ -1768,9 +1768,9 @@ export default function RegisterPage() {
       if (value.trim() !== '') {
         // For grid editing, we show a warning but allow the change (save as is)
         if (col.type === 'date' && value.length >= 10) {
-          toast(validation.error, { icon: '⚠️' });
+        toast(validation.error, { icon: <AlertTriangle size={16} color="var(--warning)" /> });
         } else if (col.type === 'dropdown' || col.type === 'email' || col.type === 'phone' || col.type === 'number' || col.type === 'currency') {
-          toast(validation.error, { icon: '⚠️' });
+        toast(validation.error, { icon: <AlertTriangle size={16} color="var(--warning)" /> });
         }
       }
     }
@@ -2002,7 +2002,7 @@ export default function RegisterPage() {
       const validation = validateCellValue(col, dateStr);
       
       if (!validation.isValid) {
-        toast(validation.error, { icon: '⚠️' });
+        toast(validation.error, { icon: <AlertTriangle size={16} color="var(--warning)" /> });
       }
       
       handleCellChange(dateEntryId, dateColumnId.toString(), dateStr);
@@ -2488,7 +2488,7 @@ export default function RegisterPage() {
       return `${c.name}: ${val}`;
     });
 
-    const text = `📋 ${register.name}\n${'─'.repeat(30)}\n${lines.join('\n')}`;
+    const text = `${register.name}\n${'─'.repeat(30)}\n${lines.join('\n')}`;
 
     navigator.clipboard.writeText(text).then(() => {
       alert('Row copied to clipboard!');

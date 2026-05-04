@@ -9,7 +9,7 @@ import {
 } from '../lib/api';
 // XLSX parsing is now done in a Web Worker (public/xlsxWorker.js) to prevent UI freezes
 import { importLocalFolderToCloud } from '../lib/localFs';
-import { Pencil, Copy, Trash2, Eye, Scissors } from 'lucide-react';
+import { Pencil, Copy, Trash2, Eye, Scissors, Save, BarChart3, CheckCircle2 } from 'lucide-react';
 import { DashboardContent } from '../components/home/DashboardContent';
 import { Sidebar } from '../components/home/Sidebar';
 import { NotificationPanel } from '../components/common/NotificationPanel';
@@ -155,7 +155,12 @@ export default function HomePage() {
     if (!file) return;
     e.target.value = '';
 
-    const toastId = toast.loading(`📊 Parsing "${file.name.replace(/\.[^/.]+$/, '')}"…`);
+    const toastId = toast.loading(
+      <div className="toast-flex">
+        <BarChart3 size={16} />
+        <span>Parsing "{file.name.replace(/\.[^/.]+$/, '')}"…</span>
+      </div>
+    );
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -170,15 +175,33 @@ export default function HomePage() {
         worker.onmessage = (ev) => {
           const { type, payload } = ev.data;
           if (type === 'PROGRESS') {
-            toast.loading(`📊 ${payload.message}`, { id: toastId });
+            toast.loading(
+              <div className="toast-flex">
+                <BarChart3 size={16} />
+                <span>{payload.message}</span>
+              </div>,
+              { id: toastId }
+            );
           } else if (type === 'RESULT') {
             worker.terminate();
             const { rows } = payload as { headers: string[]; rows: Record<string, string>[]; fileName: string };
             const name = file.name.replace(/\.[^/.]+$/, '');
-            toast.loading(`💾 Saving ${rows.length} rows…`, { id: toastId });
+            toast.loading(
+              <div className="toast-flex">
+                <Save size={16} />
+                <span>Saving {rows.length} rows…</span>
+              </div>,
+              { id: toastId }
+            );
             excelMutation.mutate({ name, data: rows }, {
               onSuccess: (newReg) => {
-                toast.success(`✅ Imported ${rows.length} rows`, { id: toastId });
+                toast.success(
+                  <div className="toast-flex">
+                    <CheckCircle2 size={16} />
+                    <span>Imported {rows.length} rows</span>
+                  </div>,
+                  { id: toastId }
+                );
                 navigate(`/register/${newReg.id}`);
               },
               onError: (err: Error) => {

@@ -1,5 +1,5 @@
 import { useCallback, memo, useState, startTransition, useDeferredValue, useMemo } from 'react';
-import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2, PlusCircle, FolderPlus, Bell, User, Activity, LayoutTemplate, LogOut, CloudUpload } from 'lucide-react';
+import { Menu, Search, Plus, FileText, X, Folder, FileSpreadsheet, ClipboardPaste, Pencil, Trash2, PlusCircle, FolderPlus, Bell, User, Activity, LayoutTemplate, LogOut, CloudUpload, Clock, CheckCircle2, XCircle } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '../../lib/auth';
@@ -459,10 +459,10 @@ export const Sidebar = memo(function Sidebar({
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: f.status === 'error' ? 'var(--danger)' : 'var(--muted)' }}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
                     <span>
-                      {f.status === 'waiting' && '⏳'}
+                      {f.status === 'waiting' && <Clock size={12} style={{ opacity: 0.6 }} />}
                       {f.status === 'uploading' && <span className="spinner" style={{width: 10, height: 10, borderWidth: 2}}></span>}
-                      {f.status === 'success' && '✅'}
-                      {f.status === 'error' && '❌'}
+                      {f.status === 'success' && <CheckCircle2 size={12} color="var(--secondary)" />}
+                      {f.status === 'error' && <XCircle size={12} color="var(--primary)" />}
                     </span>
                   </div>
                 ))}

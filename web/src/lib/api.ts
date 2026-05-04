@@ -1879,10 +1879,15 @@ export async function createBackup(businessId: number, label?: string): Promise<
   ]);
 
   // Load full register details (including entries)
-  const registers = await Promise.all(
-    summaries.map(s => getRegister(s.id).catch(() => null))
-  );
-  const validRegisters = registers.filter(Boolean) as RegisterDetail[];
+  const validRegisters: RegisterDetail[] = [];
+  for (const s of summaries) {
+    try {
+      const reg = await getRegister(s.id);
+      if (reg) validRegisters.push(reg);
+    } catch (err) {
+      console.error(`Failed to load register ${s.id} for backup:`, err);
+    }
+  }
 
   const totalEntries = validRegisters.reduce((sum, r) => sum + (r.entries?.length ?? 0), 0);
   const id = `backup_${Date.now()}`;
@@ -1948,26 +1953,53 @@ export async function restoreBackup(backupId: string): Promise<void> {
     allRegisters.push(...registers);
   });
 
+  if (allRegisters.length === 0 && meta.registerCount > 0) {
+    throw new Error(`Failed to load registers from backup chunks. Found 0 but expected ${meta.registerCount}.`);
+  }
+
   // Delete existing registers for this business
   const existingRegs = await getDocs(query(registersCol(), where('businessId', '==', meta.businessId)));
-  await Promise.all(existingRegs.docs.map(d => deleteDoc(d.ref)));
+  // Delete main docs and their chunks subcollections
+  for (const d of existingRegs.docs) {
+    const regId = Number(d.id);
+    const chunkSnap = await getDocs(chunksCol(regId));
+    await Promise.all([
+      deleteDoc(d.ref),
+      ...chunkSnap.docs.map(cd => deleteDoc(cd.ref))
+    ]);
+  }
 
   // Delete existing folders
   const existingFolders = await getDocs(query(foldersCol(), where('businessId', '==', meta.businessId)));
   await Promise.all(existingFolders.docs.map(d => deleteDoc(d.ref)));
 
-  // Clear cache
+  // Clear cache completely before restoration
   firestoreRegisterCache.clear();
 
   // Restore folders
   await Promise.all(folders.map(f => setDoc(folderDoc(f.id), f)));
 
   // Restore registers (with chunked entries)
+  let restoredCount = 0;
   for (const reg of allRegisters) {
-    await saveRegDocImmediate(reg);
+    try {
+      // Ensure the register belongs to the correct business before saving
+      reg.businessId = meta.businessId;
+      await saveRegDocImmediate(reg);
+      restoredCount++;
+    } catch (err) {
+      console.error(`Failed to restore register ${reg.id}:`, err);
+    }
   }
 
-  await logAction(meta.businessId, 'Backup Restored', `Restored backup: ${meta.label}`);
+  // Final cache clear to ensure fresh state
+  firestoreRegisterCache.clear();
+
+  await logAction(meta.businessId, 'Backup Restored', `Restored backup: ${meta.label} (${restoredCount}/${allRegisters.length} registers)`);
+  
+  if (restoredCount < allRegisters.length) {
+    throw new Error(`Restoration partial: only ${restoredCount} of ${allRegisters.length} registers were restored. Check console for details.`);
+  }
 }
 
 /**

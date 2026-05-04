@@ -7,14 +7,16 @@ import {
 } from '../lib/api';
 import {
   ArrowLeft, CloudUpload, RotateCcw, Trash2, CheckCircle, AlertCircle,
-  Database, FolderOpen, FileText, Clock,
+  Database, FolderOpen, FileText, Clock, Lock, RefreshCw, Calendar, Check,
 } from 'lucide-react';
 
 type Tab = 'backup' | 'restore';
 
-const NAV = '#2D3648';
-const NAV_DARK = '#1C2333';
-const ACCENT = '#E8604C';
+const NAV = 'var(--navy)';
+const NAV_DARK = 'var(--navy-dark)';
+const ACCENT = 'var(--accent)'; // Blue
+const PRIMARY = 'var(--primary)'; // Red
+const SUCCESS = 'var(--secondary)'; // Green
 
 export default function BackupPage() {
   const navigate = useNavigate();
@@ -96,7 +98,7 @@ export default function BackupPage() {
       {restoringId && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: 'white', borderRadius: '16px', padding: '32px', maxWidth: '380px', width: '90%', textAlign: 'center' }}>
-            <AlertCircle size={48} color={ACCENT} style={{ marginBottom: '16px' }} />
+            <AlertCircle size={48} color={PRIMARY} style={{ marginBottom: '16px' }} />
             <h2 style={{ margin: '0 0 12px', fontSize: '20px', fontWeight: 700, color: NAV }}>Restore this backup?</h2>
             <p style={{ color: '#64748b', fontSize: '14px', lineHeight: 1.6, margin: '0 0 24px' }}>
               This will <strong>replace all your current data</strong> (registers, folders, and entries) with the backup. This cannot be undone.
@@ -139,9 +141,14 @@ export default function BackupPage() {
               borderBottom: tab === t ? `3px solid ${ACCENT}` : '3px solid transparent',
               cursor: 'pointer', fontSize: '14px', fontWeight: 600,
               transition: 'all 0.2s',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
             }}
           >
-            {t === 'backup' ? '🔒 Back Up' : '🔄 Restore'}
+            {t === 'backup' ? (
+              <><Lock size={14} /> Back Up</>
+            ) : (
+              <><RefreshCw size={14} /> Restore</>
+            )}
           </button>
         ))}
       </div>
@@ -155,21 +162,21 @@ export default function BackupPage() {
             <div style={{ background: 'white', borderRadius: '16px', padding: '24px', marginBottom: '20px', boxShadow: '0 2px 8px rgba(45,54,72,0.08)', border: '1px solid #E0E0DA' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
                 <div style={{ width: '56px', height: '56px', background: backupDue ? '#FDEEEB' : '#EEF2FF', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Database size={26} color={backupDue ? ACCENT : NAV} />
+                  <Database size={26} color={backupDue ? PRIMARY : NAV} />
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: '16px', fontWeight: 700, color: NAV }}>
                     {lastBackup ? lastBackup.label : 'No backup yet'}
                   </div>
-                  <div style={{ fontSize: '13px', color: '#7A8195', marginTop: '2px' }}>
+                  <div style={{ fontSize: '13px', color: '#7A8195', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     {lastBackup
-                      ? daysSinceBackup === 0 ? '✅ Backed up today'
+                      ? daysSinceBackup === 0 ? <><Check size={14} color={SUCCESS} /> Backed up today</>
                       : `${daysSinceBackup} day${daysSinceBackup !== 1 ? 's' : ''} ago`
                       : 'Create your first backup now'}
                   </div>
                 </div>
                 {backupDue && (
-                  <div style={{ background: '#FDEEEB', color: ACCENT, padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 700, flexShrink: 0, border: `1px solid ${ACCENT}20` }}>
+                  <div style={{ background: 'rgba(229, 57, 53, 0.1)', color: PRIMARY, padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 700, flexShrink: 0, border: `1px solid ${PRIMARY}30` }}>
                     Due!
                   </div>
                 )}
@@ -178,14 +185,14 @@ export default function BackupPage() {
               {lastBackup && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '20px' }}>
                   {[
-                    { icon: <FileText size={16} color={NAV} />, label: 'Registers', value: lastBackup.registerCount, bg: '#EEF2FF' },
+                    { icon: <FileText size={16} color={NAV} />, label: 'Registers', value: lastBackup.registerCount, bg: '#E3F2FD' },
                     { icon: <FolderOpen size={16} color="#f59e0b" />, label: 'Folders', value: lastBackup.folderCount, bg: '#fffbeb' },
-                    { icon: <Database size={16} color={NAV} />, label: 'Entries', value: lastBackup.totalEntries, bg: '#F0F0EB' },
+                    { icon: <Database size={16} color={NAV} />, label: 'Entries', value: lastBackup.totalEntries, bg: '#F5F7FA' },
                   ].map(item => (
                     <div key={item.label} style={{ background: item.bg, borderRadius: '10px', padding: '12px', textAlign: 'center' }}>
                       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '6px' }}>{item.icon}</div>
                       <div style={{ fontSize: '20px', fontWeight: 700, color: NAV }}>{item.value}</div>
-                      <div style={{ fontSize: '11px', color: '#7A8195' }}>{item.label}</div>
+                      <div style={{ fontSize: '11px', color: '#4B5E7E' }}>{item.label}</div>
                     </div>
                   ))}
                 </div>
@@ -196,30 +203,30 @@ export default function BackupPage() {
                 disabled={createMutation.isPending}
                 style={{
                   width: '100%', padding: '14px',
-                  background: `linear-gradient(135deg, ${NAV}, #3D4A63)`,
+                  background: `linear-gradient(135deg, var(--primary), var(--primary-light))`,
                   color: 'white', border: 'none', borderRadius: '12px',
                   fontSize: '15px', fontWeight: 600, cursor: createMutation.isPending ? 'not-allowed' : 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
                   opacity: createMutation.isPending ? 0.7 : 1, transition: 'opacity 0.2s',
-                  boxShadow: '0 4px 12px rgba(45,54,72,0.2)',
+                  boxShadow: '0 4px 12px rgba(13,42,92,0.15)',
                 }}
               >
                 <CloudUpload size={20} />
                 {createMutation.isPending ? 'Creating backup…' : 'Back Up Now'}
               </button>
 
-              <p style={{ textAlign: 'center', fontSize: '12px', color: '#A0A7B5', marginTop: '12px', marginBottom: 0 }}>
-                📅 Reminder every 3 days if no backup is created
+              <p style={{ textAlign: 'center', fontSize: '12px', color: '#7E8DA6', marginTop: '12px', marginBottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                <Calendar size={13} /> Reminder every 3 days if no backup is created
               </p>
             </div>
 
             {/* Backup history */}
             {backups.length > 0 && (
-              <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 2px 8px rgba(45,54,72,0.08)', border: '1px solid #E0E0DA' }}>
+              <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: 'var(--shadow-md)', border: '1px solid var(--border)' }}>
                 <h3 style={{ margin: '0 0 16px', fontSize: '15px', fontWeight: 700, color: NAV }}>Backup History</h3>
                 {backups.map((b: BackupMeta, i: number) => (
-                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 0', borderBottom: i < backups.length - 1 ? '1px solid #F0F0EB' : 'none' }}>
-                    <div style={{ width: '40px', height: '40px', background: '#EEF2FF', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 0', borderBottom: i < backups.length - 1 ? '1px solid #EEF2F6' : 'none' }}>
+                    <div style={{ width: '40px', height: '40px', background: '#E3F2FD', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <CheckCircle size={20} color={NAV} />
                     </div>
                     <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -247,8 +254,8 @@ export default function BackupPage() {
         {/* ── RESTORE TAB ── */}
         {tab === 'restore' && (
           <div style={{ background: 'white', borderRadius: '16px', padding: '20px', boxShadow: '0 2px 8px rgba(45,54,72,0.08)', border: '1px solid #E0E0DA' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '16px', background: '#FDEEEB', borderRadius: '12px', marginBottom: '20px', border: `1px solid ${ACCENT}30` }}>
-              <AlertCircle size={20} color={ACCENT} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '16px', background: 'rgba(229, 57, 53, 0.05)', borderRadius: '12px', marginBottom: '20px', border: `1px solid var(--primary)` }}>
+              <AlertCircle size={20} color={PRIMARY} style={{ flexShrink: 0, marginTop: '2px' }} />
               <p style={{ margin: 0, fontSize: '13px', color: '#92400e', lineHeight: 1.6 }}>
                 Restoring will <strong>replace all current data</strong> with the selected backup. Make a backup first before restoring.
               </p>
