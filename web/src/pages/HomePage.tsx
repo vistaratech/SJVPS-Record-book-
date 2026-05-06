@@ -138,7 +138,8 @@ export default function HomePage() {
   });
 
   const excelMutation = useMutation({
-    mutationFn: ({ name, data }: { name: string; data: Record<string, string>[] }) => importExcelData(businessId!, name, data),
+    mutationFn: ({ name, data, metadata }: { name: string; data: Record<string, string>[]; metadata?: any[] }) => 
+      importExcelData(businessId!, name, data, undefined, metadata),
     onSuccess: (newReg) => {
       queryClient.setQueryData(['registers', businessId], (old: RegisterSummary[] | undefined) => {
         const safeOld = old || [];
@@ -184,7 +185,7 @@ export default function HomePage() {
             );
           } else if (type === 'RESULT') {
             worker.terminate();
-            const { rows } = payload as { headers: string[]; rows: Record<string, string>[]; fileName: string };
+            const { rows, metadata } = payload as { headers: string[]; rows: Record<string, string>[]; fileName: string; metadata?: any[] };
             const name = file.name.replace(/\.[^/.]+$/, '');
             toast.loading(
               <div className="toast-flex">
@@ -193,7 +194,7 @@ export default function HomePage() {
               </div>,
               { id: toastId }
             );
-            excelMutation.mutate({ name, data: rows }, {
+            excelMutation.mutate({ name, data: rows, metadata }, {
               onSuccess: (newReg) => {
                 toast.success(
                   <div className="toast-flex">
@@ -226,7 +227,10 @@ export default function HomePage() {
             const wb = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: false });
             const ws = wb.Sheets[wb.SheetNames[0]];
             const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, string>[];
-            excelMutation.mutate({ name: file.name.replace(/\.[^/.]+$/, ''), data: rows }, {
+            const metaWs = wb.Sheets[wb.SheetNames.find(n => n.toLowerCase() === '_metadata_') || ''];
+            const metadata = metaWs ? XLSX.utils.sheet_to_json(metaWs) : undefined;
+
+            excelMutation.mutate({ name: file.name.replace(/\.[^/.]+$/, ''), data: rows, metadata }, {
               onSuccess: (newReg) => { toast.success('Imported!', { id: toastId }); navigate(`/register/${newReg.id}`); },
               onError: (err: Error) => toast.error(err.message, { id: toastId })
             });

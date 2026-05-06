@@ -1,18 +1,19 @@
-import { useState, useRef, useCallback, useEffect, useMemo, useDeferredValue } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo, useDeferredValue, useLayoutEffect } from 'react';
 import toast from 'react-hot-toast';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   getRegister, listRegisters, addColumn, deleteColumn, renameColumn, updateColumnDropdownOptions,
   duplicateColumn, moveColumn, reorderColumn, changeColumnType, clearColumnData, insertColumn, updateColumnWidth, updateColumnSummary,
   freezeColumn, hideColumn,
-  addEntry, updateEntry, deleteEntry, duplicateEntry, bulkDeleteEntries,
+  addEntry, updateEntry, deleteEntry, duplicateEntry, bulkDeleteEntries, insertEntry,
   restoreEntry, bulkRestoreEntries, restoreColumn,
   addPage, renamePage, deletePage,
   evaluateFormula,
   generateShareLink, addSharedUser, removeSharedUser,
   subscribeToMutationStatus, updateEntriesOrder,
   updateEntryCellStyles,
+  formatDateToDDMMYYYY,
   type Entry, type CellStyle,
 } from '../lib/api';
 import * as XLSX from 'xlsx';
@@ -23,7 +24,7 @@ import {
   Hash, FlaskConical, Pin, IndianRupee,
   Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
   Search, FileText, Download, ListOrdered, Maximize2, AlertCircle,
-  X, Link as LinkIcon, Info, AlertTriangle
+  X, Link as LinkIcon, Info, AlertTriangle, Trash2, ZoomIn, ZoomOut
 } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { RegisterHeader } from '../components/register/RegisterHeader';
@@ -43,7 +44,7 @@ import { useNotifications } from '../lib/NotificationContext';
 type CalcType = 'sum' | 'average' | 'count' | 'min' | 'max' | 'filled' | 'empty' | 'distinct' | 'none';
 
 
-// Helper to normalize DD/MM/YYYY to YYYY-MM-DD for comparison
+// Helper to normalize DD-MM-YYYY to YYYY-MM-DD for comparison
 function parseDateString(dStr: string) {
   if (!dStr) return '';
   if (dStr.includes('/') || dStr.includes('-')) {
@@ -72,6 +73,7 @@ export default function RegisterPage() {
     enabled: !!registerId,
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
   });
 
   const cachedRegister = queryClient.getQueryData(['register', registerId]) as any;
@@ -118,11 +120,13 @@ export default function RegisterPage() {
   const colHeaderRefs = useRef<Map<number, HTMLTableCellElement>>(new Map());
   const isDraggingCol = useRef(false);
   const [activeModalColId, setActiveModalColId] = useState<number | null>(null);
+  const colVirtualizerRef = useRef<any>(null);
 
   const [dateModal, setDateModal] = useState(false);
   const [dropdownModal, setDropdownModal] = useState(false);
   const [shareModal, setShareModal] = useState(false);
   const [renamePageModal, setRenamePageModal] = useState(false);
+  const [filterModal, setFilterModal] = useState(false);
 
   const isLocalStorageInitializedRef = useRef(false);
 
@@ -166,6 +170,13 @@ export default function RegisterPage() {
   const scrollToRowIdRef = useRef<number | null>(null);
   useEffect(() => {
     detailViewEntryIdRef.current = detailViewEntry?.id || null;
+    if (detailViewEntry) {
+      setDetailEdits(detailViewEntry.cells || {});
+      setDetailErrors({});
+    } else {
+      setDetailEdits({});
+      setDetailErrors({});
+    }
   }, [detailViewEntry]);
 
   const [detailEdits, setDetailEdits] = useState<Record<string, string>>({});
@@ -175,7 +186,8 @@ export default function RegisterPage() {
     detailErrorsRef.current = detailErrors;
   }, [detailErrors]);
   const detailInputRefs = useRef<Map<number, HTMLElement>>(new Map());
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; entryId?: number; colId?: string } | null>(null);
+  const [isImgZoomed, setIsImgZoomed] = useState(false);
 
   // Cell formatting toolbar
   const [formatCell, setFormatCell] = useState<{ entryId: number; colId: string; rect: DOMRect } | null>(null);
@@ -196,7 +208,7 @@ export default function RegisterPage() {
   const [dropdownConfigOptions, setDropdownConfigOptions] = useState('');
 
   // Filter
-  const [filters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>(() => {
+  const [filters, setFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>(() => {
     const saved = localStorage.getItem(`rb_filters_${registerId}`);
     return saved ? JSON.parse(saved) : [];
   });
@@ -642,26 +654,38 @@ export default function RegisterPage() {
     }
   }, [detailViewEntry, columns]);
 
-  // Sync localEntries ONLY when a network fetch returns a new register object instance
-  const lastRegisterData = useRef<any>(cachedRegister);
-  useEffect(() => {
-    if (register && register !== lastRegisterData.current) {
-      lastRegisterData.current = register;
-      setLocalEntries(register.entries);
-      localEntriesRef.current = register.entries;
+  // Sync localEntries and column settings when registerId changes or new data arrives.
+  // We do this during render (derived state) to prevent a white-screen flash.
+  // By using cachedRegister, we can often show data immediately upon navigation.
+  const lastSyncId = useRef<number | null>(null);
+  const lastSyncData = useRef<any>(null);
+
+  const dataToSync = register || (registerId !== lastSyncId.current ? cachedRegister : null);
+
+  if (registerId !== lastSyncId.current || (register && register !== lastSyncData.current)) {
+    lastSyncId.current = registerId;
+    lastSyncData.current = register;
+
+    if (dataToSync) {
+      setLocalEntries(dataToSync.entries || []);
       // Initialize column settings (widths, summaries) from saved data
-      if (register.columns) {
+      if (dataToSync.columns) {
         const widths: Record<number, number> = {};
         const calcs: Record<number, CalcType> = {};
-        register.columns.forEach((col: any) => {
+        dataToSync.columns.forEach((col: any) => {
           if (col.width) widths[col.id] = col.width;
           if (col.summary) calcs[col.id] = col.summary as CalcType;
         });
         setColWidths(widths);
         setCalcTypes(calcs);
       }
+    } else if (registerId !== lastSyncId.current) {
+      // Clear data for a new register if no cache exists, avoiding showing stale data
+      setLocalEntries([]);
+      setColWidths({});
+      setCalcTypes({});
     }
-  }, [register]);
+  }
 
   // Also sync localEntriesRef on every local state change
   useEffect(() => {
@@ -734,7 +758,12 @@ export default function RegisterPage() {
   }, [search, currentPageIndex, filters, activeFilters, registerId]);
 
   // Reset page to 0 when filters or search change to avoid being stuck on an empty page
+  const isInitialFilterRender = useRef(true);
   useEffect(() => {
+    if (isInitialFilterRender.current) {
+      isInitialFilterRender.current = false;
+      return;
+    }
     setCurrentPageIndex(0);
   }, [deferredSearch, deferredActiveFilters]);
 
@@ -778,86 +807,94 @@ export default function RegisterPage() {
       dValue2: f.value2 || '',
     }));
 
-    let result = [];
     const filterLen = preparedFilters.length;
     const isSearching = !!s || filterLen > 0;
     const entriesToFilter = isSearching ? localEntries : (entriesByPage[currentPageIndex] || []);
-    const localLen = entriesToFilter.length;
 
-    for (let i = 0; i < localLen; i++) {
-      const e = entriesToFilter[i];
+    // Fast path: No search, no filters, no sorting.
+    if (!isSearching && !sortColId) {
+      return entriesToFilter;
+    }
 
-      // 2. Search filtering
-      if (s) {
-        let match = false;
-        const cells = e.cells || {};
-        for (const key in cells) {
-          const val = cells[key];
-          if (val && typeof val === 'string' && val.toLowerCase().includes(s)) {
-            match = true;
-            break;
+    let result = isSearching ? [] : [...entriesToFilter];
+
+    if (isSearching) {
+      const localLen = entriesToFilter.length;
+      for (let i = 0; i < localLen; i++) {
+        const e = entriesToFilter[i];
+
+        // 2. Search filtering
+        if (s) {
+          let match = false;
+          const cells = e.cells || {};
+          for (const key in cells) {
+            const val = cells[key];
+            if (val && typeof val === 'string' && val.toLowerCase().includes(s)) {
+              match = true;
+              break;
+            }
           }
+          if (!match) continue;
         }
-        if (!match) continue;
-      }
 
-      // 3. Active Filters
-      if (filterLen > 0) {
-        let passFilters = true;
-        for (let j = 0; j < filterLen; j++) {
-          const f = preparedFilters[j];
-          const val = e.cells?.[f.columnId.toString()] || '';
-          const lVal = val.toLowerCase();
+        // 3. Active Filters
+        if (filterLen > 0) {
+          let passFilters = true;
+          for (let j = 0; j < filterLen; j++) {
+            const f = preparedFilters[j];
+            const val = e.cells?.[f.columnId.toString()] || '';
+            const lVal = val.toLowerCase();
 
-          let condition = true;
-          switch (f.operator) {
-            case 'contains': condition = lVal.includes(f.lFilter); break;
-            case 'not_contains': condition = !lVal.includes(f.lFilter); break;
-            case 'equals': condition = lVal === f.lFilter; break;
-            case 'not_equals': condition = lVal !== f.lFilter; break;
-            case 'starts_with': condition = lVal.startsWith(f.lFilter); break;
-            case 'ends_with': condition = lVal.endsWith(f.lFilter); break;
-            case 'eq': condition = parseFloat(val) === f.nValue; break;
-            case 'gt': condition = parseFloat(val) > f.nValue; break;
-            case 'gte': condition = parseFloat(val) >= f.nValue; break;
-            case 'lt': condition = parseFloat(val) < f.nValue; break;
-            case 'lte': condition = parseFloat(val) <= f.nValue; break;
-            case 'between': {
-              const n = parseFloat(val);
-              condition = n >= f.nValue && n <= f.nValue2;
+            let condition = true;
+            switch (f.operator) {
+              case 'contains': condition = lVal.includes(f.lFilter); break;
+              case 'not_contains': condition = !lVal.includes(f.lFilter); break;
+              case 'equals': condition = lVal === f.lFilter; break;
+              case 'not_equals': condition = lVal !== f.lFilter; break;
+              case 'starts_with': condition = lVal.startsWith(f.lFilter); break;
+              case 'ends_with': condition = lVal.endsWith(f.lFilter); break;
+              case 'eq': condition = parseFloat(val) === f.nValue; break;
+              case 'gt': condition = parseFloat(val) > f.nValue; break;
+              case 'gte': condition = parseFloat(val) >= f.nValue; break;
+              case 'lt': condition = parseFloat(val) < f.nValue; break;
+              case 'lte': condition = parseFloat(val) <= f.nValue; break;
+              case 'between': {
+                const n = parseFloat(val);
+                condition = n >= f.nValue && n <= f.nValue2;
+                break;
+              }
+              case 'not_between': {
+                const n = parseFloat(val);
+                condition = n < f.nValue || n > f.nValue2;
+                break;
+              }
+              case 'date_is': condition = parseDateString(val) === f.dValue; break;
+              case 'date_not': condition = parseDateString(val) !== f.dValue; break;
+              case 'date_before': condition = parseDateString(val) < f.dValue; break;
+              case 'date_after': condition = parseDateString(val) > f.dValue; break;
+              case 'date_between': {
+                const dVal = parseDateString(val);
+                condition = dVal >= f.dValue && dVal <= f.dValue2;
+                break;
+              }
+              case 'date_not_between': {
+                const dVal = parseDateString(val);
+                condition = dVal < f.dValue || dVal > f.dValue2;
+                break;
+              }
+              case 'empty': condition = !val; break;
+              case 'not_empty': condition = !!val; break;
+            }
+            if (!condition) {
+              passFilters = false;
               break;
             }
-            case 'not_between': {
-              const n = parseFloat(val);
-              condition = n < f.nValue || n > f.nValue2;
-              break;
-            }
-            case 'date_is': condition = parseDateString(val) === f.dValue; break;
-            case 'date_not': condition = parseDateString(val) !== f.dValue; break;
-            case 'date_before': condition = parseDateString(val) < f.dValue; break;
-            case 'date_after': condition = parseDateString(val) > f.dValue; break;
-            case 'date_between': {
-              const dVal = parseDateString(val);
-              condition = dVal >= f.dValue && dVal <= f.dValue2;
-              break;
-            }
-            case 'date_not_between': {
-              const dVal = parseDateString(val);
-              condition = dVal < f.dValue || dVal > f.dValue2;
-              break;
-            }
-            case 'empty': condition = !val; break;
-            case 'not_empty': condition = !!val; break;
           }
-          if (!condition) {
-            passFilters = false;
-            break;
-          }
+          if (!passFilters) continue;
         }
-        if (!passFilters) continue;
-      }
 
-      result.push(e);
+        result.push(e);
+      }
     }
 
     // 4. Client-side Sorting (ensures visual consistency even if backend hasn't updated)
@@ -929,6 +966,20 @@ export default function RegisterPage() {
       // Force a re-fetch to ensure all sequential logic (auto-increment) is synced from server
       queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       toast.success('Column added successfully');
+
+      // Auto-scroll to the new column
+      const oldCols = columnsRef.current;
+      const newCol = updatedReg.columns?.find((c: any) => !oldCols.some(old => old.id === c.id));
+      if (newCol) {
+        setTimeout(() => {
+          const colIdx = visibleColumnsRef.current.findIndex(c => c.id === newCol.id);
+          if (colIdx !== -1 && colVirtualizerRef.current) {
+            colVirtualizerRef.current.scrollToIndex(colIdx, { align: 'center', behavior: 'smooth' });
+          } else if (parentRef.current) {
+            parentRef.current.scrollTo({ left: parentRef.current.scrollWidth, behavior: 'smooth' });
+          }
+        }, 150);
+      }
     },
     onError: (_err, _vars, context) => {
       if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
@@ -940,14 +991,18 @@ export default function RegisterPage() {
   const deleteColumnMutation = useMutation({
     mutationFn: (colId: number) => deleteColumn(registerId, colId),
     onMutate: async (colId) => {
-      // Capture the full column definition + all cell data before deletion for undo
-      const regData = queryClient.getQueryData(['register', registerId]) as any;
-      if (regData) {
-        const col = regData.columns?.find((c: any) => c.id.toString() === colId.toString());
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const previousRegister = queryClient.getQueryData(['register', registerId]) as any;
+      const previousLocalEntries = [...localEntries];
+
+      if (previousRegister) {
+        const colIdStr = colId.toString();
+        const col = previousRegister.columns?.find((c: any) => c.id.toString() === colIdStr);
+        
         if (col) {
+          // Capture for undo
           const cellData: Record<string, string> = {};
-          const colIdStr = colId.toString();
-          (regData.entries || []).forEach((e: any) => {
+          (previousRegister.entries || []).forEach((e: any) => {
             if (e.cells?.[colIdStr] !== undefined && e.cells[colIdStr] !== '') {
               cellData[e.id.toString()] = e.cells[colIdStr];
             }
@@ -957,17 +1012,32 @@ export default function RegisterPage() {
             column: { ...col },
             cellData,
           });
+
+          // Optimistically update cache
+          const updatedReg = {
+            ...previousRegister,
+            columns: previousRegister.columns.filter((c: any) => c.id.toString() !== colIdStr),
+            entries: (previousRegister.entries || []).map((e: any) => {
+              const newCells = { ...e.cells };
+              delete newCells[colIdStr];
+              return { ...e, cells: newCells };
+            })
+          };
+          queryClient.setQueryData(['register', registerId], updatedReg);
+          setLocalEntries(updatedReg.entries || []);
         }
       }
-    },
-    onSuccess: (updatedReg) => {
-      queryClient.setQueryData(['register', registerId], updatedReg);
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
-      setLocalEntries(updatedReg.entries || []);
       setColMenuId(null);
+      return { previousRegister, previousLocalEntries };
+    },
+    onSuccess: () => {
       toast.success('Column deleted');
     },
-    onError: () => toast.error('Failed to delete column'),
+    onError: (_err, _colId, context) => {
+      if (context?.previousRegister) queryClient.setQueryData(['register', registerId], context.previousRegister);
+      if (context?.previousLocalEntries) setLocalEntries(context.previousLocalEntries);
+      toast.error('Failed to delete column');
+    },
   });
 
   const renameColumnMutation = useMutation({
@@ -1068,6 +1138,20 @@ export default function RegisterPage() {
       setColMenuId(null);
       setLocalEntries(updatedReg.entries || []);
       toast.success('Column duplicated');
+
+      // Auto-scroll to the duplicated column
+      const oldCols = columnsRef.current;
+      const newCol = updatedReg.columns?.find((c: any) => !oldCols.some(old => old.id === c.id));
+      if (newCol) {
+        setTimeout(() => {
+          const colIdx = visibleColumnsRef.current.findIndex(c => c.id === newCol.id);
+          if (colIdx !== -1 && colVirtualizerRef.current) {
+            colVirtualizerRef.current.scrollToIndex(colIdx, { align: 'center', behavior: 'smooth' });
+          } else if (parentRef.current) {
+            parentRef.current.scrollTo({ left: parentRef.current.scrollWidth, behavior: 'smooth' });
+          }
+        }, 150);
+      }
     },
     onError: () => toast.error('Failed to duplicate column'),
   });
@@ -1480,13 +1564,49 @@ export default function RegisterPage() {
 
   const clearColumnDataMutation = useMutation({
     mutationFn: (colId: number) => clearColumnData(registerId, colId),
-    onSuccess: (updatedReg) => {
-      queryClient.setQueryData(['register', registerId], updatedReg);
-      setLocalEntries(updatedReg.entries || []);
+    onMutate: async (colId) => {
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const previousRegister = queryClient.getQueryData(['register', registerId]) as any;
+      const previousLocalEntries = [...localEntries];
+
+      if (previousRegister) {
+        const colIdStr = colId.toString();
+        // Capture for undo
+        const cellData: Record<string, string> = {};
+        (previousRegister.entries || []).forEach((e: any) => {
+          if (e.cells?.[colIdStr] !== undefined && e.cells[colIdStr] !== '') {
+            cellData[e.id.toString()] = e.cells[colIdStr];
+          }
+        });
+        pushToUndoStack({
+          type: 'CLEAR_COLUMN_DATA',
+          columnId: colId,
+          cellData,
+        });
+
+        // Optimistic update
+        const updatedReg = {
+          ...previousRegister,
+          entries: (previousRegister.entries || []).map((e: any) => {
+            const newCells = { ...e.cells };
+            delete newCells[colIdStr];
+            return { ...e, cells: newCells };
+          })
+        };
+        queryClient.setQueryData(['register', registerId], updatedReg);
+        setLocalEntries(updatedReg.entries || []);
+      }
       setColMenuId(null);
+      return { previousRegister, previousLocalEntries };
+    },
+    onSuccess: () => {
       toast.success('Column data cleared');
     },
-    onError: () => toast.error('Failed to clear column data'),
+    onError: (_err, _colId, context) => {
+      if (context?.previousRegister) queryClient.setQueryData(['register', registerId], context.previousRegister);
+      if (context?.previousLocalEntries) setLocalEntries(context.previousLocalEntries);
+      toast.error('Failed to clear column data');
+    },
   });
 
   const insertColumnMutation = useMutation({
@@ -1538,6 +1658,20 @@ export default function RegisterPage() {
       setLocalEntries(updatedReg.entries || []);
       queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       toast.success('Column inserted successfully');
+
+      // Auto-scroll to the newly inserted column
+      const oldCols = columnsRef.current;
+      const newCol = updatedReg.columns?.find((c: any) => !oldCols.some(old => old.id === c.id));
+      if (newCol) {
+        setTimeout(() => {
+          const colIdx = visibleColumnsRef.current.findIndex(c => c.id === newCol.id);
+          if (colIdx !== -1 && colVirtualizerRef.current) {
+            colVirtualizerRef.current.scrollToIndex(colIdx, { align: 'center', behavior: 'smooth' });
+          } else if (parentRef.current) {
+            parentRef.current.scrollTo({ left: parentRef.current.scrollWidth, behavior: 'smooth' });
+          }
+        }, 150);
+      }
     },
     onError: (_err, _vars, context) => {
       if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
@@ -1601,7 +1735,14 @@ export default function RegisterPage() {
   const deleteEntryMutation = useMutation({
     mutationFn: (entryId: number) => deleteEntry(registerId, entryId),
     onMutate: async (entryId) => {
-      // Deep-clone entry + cells for undo — ensures data survives state mutations
+      // 1. Cancel any outgoing refetches (so they don't overwrite our optimistic update)
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+
+      // 2. Snapshot the previous value
+      const previousRegister = queryClient.getQueryData(['register', registerId]);
+      const previousLocalEntries = [...localEntries];
+
+      // 3. Capture for undo
       const entry = localEntries.find(e => e.id === entryId);
       const index = localEntries.findIndex(e => e.id === entryId);
       if (entry) {
@@ -1611,8 +1752,8 @@ export default function RegisterPage() {
           index,
         });
       }
-    },
-    onSuccess: (_data, entryId) => {
+
+      // 4. Optimistically update to the new value
       queryClient.setQueryData(['register', registerId], (old: any) => {
         if (!old) return old;
         const entries = old.entries.filter((e: any) => e.id !== entryId);
@@ -1620,6 +1761,25 @@ export default function RegisterPage() {
       });
       setLocalEntries(prev => prev.filter(e => e.id !== entryId));
       setRowMenuId(null);
+
+      // 5. Return context object with snapshotted value
+      return { previousRegister, previousLocalEntries };
+    },
+    onError: (_err, _entryId, context) => {
+      // 6. If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousRegister) {
+        queryClient.setQueryData(['register', registerId], context.previousRegister);
+      }
+      if (context?.previousLocalEntries) {
+        setLocalEntries(context.previousLocalEntries);
+      }
+      toast.error('Failed to delete row');
+    },
+    onSettled: () => {
+      // 7. Always refetch after error or success to ensure we are in sync with the server
+      // queryClient.invalidateQueries({ queryKey: ['register', registerId] });
+      // We might not want to invalidate every time if it's slow, but it's safer.
+      // For now let's just keep it optimistic.
     },
   });
 
@@ -1635,10 +1795,59 @@ export default function RegisterPage() {
     },
   });
 
+  const insertEntryMutation = useMutation({
+    mutationFn: ({ atIndex, cells }: { atIndex: number, cells?: Record<string, string> }) => 
+      insertEntry(registerId, cells || {}, currentPageIndex, atIndex),
+    onSuccess: (newEntry, { atIndex }) => {
+      queryClient.setQueryData(['register', registerId], (old: any) => {
+        if (!old) return old;
+        const newEntries = [...old.entries];
+        newEntries.splice(atIndex, 0, newEntry);
+        // Update rowNumbers for entries after this index on the same page
+        const updatedEntries = newEntries.map(e => {
+            if (e.id !== newEntry.id && (e.pageIndex || 0) === currentPageIndex && e.rowNumber >= newEntry.rowNumber) {
+                return { ...e, rowNumber: e.rowNumber + 1 };
+            }
+            return e;
+        });
+        return { ...old, entries: updatedEntries, entryCount: updatedEntries.length };
+      });
+      
+      setLocalEntries(prev => {
+        const next = [...prev];
+        next.splice(atIndex, 0, newEntry);
+        return next.map(e => {
+            if (e.id !== newEntry.id && (e.pageIndex || 0) === currentPageIndex && e.rowNumber >= newEntry.rowNumber) {
+                return { ...e, rowNumber: e.rowNumber + 1 };
+            }
+            return e;
+        });
+      });
+      setRowMenuId(null);
+      toast.success('Row added successfully');
+
+      // Focus the first editable cell of the new row
+      setTimeout(() => {
+        // Find the index of the new entry in the current view (displayEntries)
+        const viewIndex = displayEntries.findIndex(e => e.id === newEntry.id);
+        if (viewIndex !== -1) {
+          const firstCol = visibleColumns.find(c => c.type !== 'formula' && c.type !== 'image');
+          if (firstCol) {
+            const el = document.getElementById(`cell-${viewIndex}-${firstCol.id}`) || document.querySelector(`[data-cell="cell-${viewIndex}-${firstCol.id}"]`) as HTMLElement;
+            if (el) el.focus();
+          }
+        }
+      }, 150); // Slightly longer timeout to ensure re-render and virtualizer update
+    },
+  });
+
   const bulkDeleteMutation = useMutation({
     mutationFn: () => bulkDeleteEntries(registerId, Array.from(selectedRows)),
     onMutate: async () => {
-      // Capture all selected entries with their indices for undo
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const previousRegister = queryClient.getQueryData(['register', registerId]);
+      const previousLocalEntries = [...localEntries];
+
       const deletedIds = Array.from(selectedRows);
       const capturedEntries: { entry: Entry; index: number }[] = [];
       localEntries.forEach((e, idx) => {
@@ -1649,9 +1858,8 @@ export default function RegisterPage() {
       if (capturedEntries.length > 0) {
         pushToUndoStack({ type: 'BULK_DELETE_ENTRIES', entries: capturedEntries });
       }
-    },
-    onSuccess: () => {
-      const deletedIds = Array.from(selectedRows);
+
+      // Optimistic update
       queryClient.setQueryData(['register', registerId], (old: any) => {
         if (!old) return old;
         const entries = old.entries.filter((e: any) => !deletedIds.includes(e.id));
@@ -1659,6 +1867,13 @@ export default function RegisterPage() {
       });
       setLocalEntries(prev => prev.filter(e => !deletedIds.includes(e.id)));
       setSelectedRows(new Set());
+
+      return { previousRegister, previousLocalEntries };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previousRegister) queryClient.setQueryData(['register', registerId], context.previousRegister);
+      if (context?.previousLocalEntries) setLocalEntries(context.previousLocalEntries);
+      toast.error('Failed to delete rows');
     },
   });
 
@@ -1727,10 +1942,10 @@ export default function RegisterPage() {
       if (!phoneRegex.test(value)) return { isValid: false, error: 'Invalid phone format (e.g. +91 1234567890)' };
     } else if (col.type === 'date') {
       // Allow partial typing in grid, but full validation in modal or on blur
-      const dateRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
-      if (!dateRegex.test(value)) return { isValid: false, error: 'Use DD/MM/YYYY format' };
+      const dateRegex = /^(\d{1,2})-(\d{1,2})-(\d{4})$/;
+      if (!dateRegex.test(value)) return { isValid: false, error: 'Use DD-MM-YYYY format' };
       
-      const parts = value.split('/');
+      const parts = value.split('-');
       const d = parseInt(parts[0]);
       const m = parseInt(parts[1]);
       const y = parseInt(parts[2]);
@@ -1761,6 +1976,11 @@ export default function RegisterPage() {
 
     // ── System Columns Read-only ──
     if (col.type === 'auto_increment' || col.type === 'formula') return;
+
+    // ── Date Normalization (Universal Enforcement of DD-MM-YYYY) ──
+    if (col.type === 'date' && value.trim() !== '') {
+      value = formatDateToDDMMYYYY(value);
+    }
 
     // ── Type-Based Validation ──
     const validation = validateCellValue(col, value);
@@ -1793,6 +2013,14 @@ export default function RegisterPage() {
       }
     }
 
+    // Sync with Row Detail Modal if open for this entry — DECOUPLED MODE
+    if (detailViewEntryIdRef.current === entryId) {
+      setDetailEdits(prev => ({ ...prev, [columnId]: value }));
+      if (detailErrorsRef.current[columnId]) setDetailErrors(prev => ({ ...prev, [columnId]: null }));
+      // Return early: do NOT update main state or firestore until "Save Changes" is clicked
+      return; 
+    }
+
     // 1. Update local state instantly (optimistic)
     setLocalEntries((prev) => prev.map((e) => {
       if (e.id === entryId) {
@@ -1802,12 +2030,6 @@ export default function RegisterPage() {
       }
       return e;
     }));
-
-    // Sync with Row Detail Modal if open for this entry
-    if (detailViewEntryIdRef.current === entryId) {
-      setDetailEdits(prev => ({ ...prev, [columnId]: value }));
-      if (detailErrorsRef.current[columnId]) setDetailErrors(prev => ({ ...prev, [columnId]: null }));
-    }
 
     // 2. Debounce the Firestore write — no invalidateQueries, just patch the cache
     const key = `${entryId}-${columnId}`;
@@ -1995,7 +2217,7 @@ export default function RegisterPage() {
     if (m) setDateMonth(m);
     if (y) setDateYear(y);
 
-    const dateStr = `${finalD.padStart(2, '0')}/${finalM.padStart(2, '0')}/${finalY}`;
+    const dateStr = `${finalD.padStart(2, '0')}-${finalM.padStart(2, '0')}-${finalY}`;
     
     if (dateEntryId != null && dateColumnId != null) {
       const col = columns.find(c => c.id === dateColumnId);
@@ -2067,6 +2289,17 @@ export default function RegisterPage() {
           const cleaned = val.toString().replace(/[^\d.-]/g, '');
           const n = parseFloat(cleaned);
           rowData.push(isNaN(n) ? val : n);
+        } else if (c.type === 'date' && val) {
+          const parts = val.split(/[-/]/);
+          if (parts.length === 3) {
+            const d = parseInt(parts[0]);
+            const m = parseInt(parts[1]) - 1;
+            const y = parseInt(parts[2]);
+            const dt = new Date(y, m, d);
+            rowData.push(isNaN(dt.getTime()) ? val : dt);
+          } else {
+            rowData.push(val);
+          }
         } else {
           rowData.push(val);
         }
@@ -2181,6 +2414,32 @@ export default function RegisterPage() {
 
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+
+      // ── Add Hidden Metadata Sheet for round-trip preservation ──
+      const metadataAOA: any[][] = [
+        ['Column Name', 'Type', 'Dropdown Options', 'Formula', 'Width', 'Summary']
+      ];
+      visibleColumns.forEach(c => {
+        metadataAOA.push([
+          c.name,
+          c.type,
+          c.dropdownOptions ? c.dropdownOptions.join(',') : '',
+          c.formula || '',
+          colWidths[c.id] || '',
+          calcTypes[c.id] || 'none'
+        ]);
+      });
+      const metaWs = XLSX.utils.aoa_to_sheet(metadataAOA);
+      XLSX.utils.book_append_sheet(wb, metaWs, "_metadata_");
+      
+      // Hide the metadata sheet
+      if (!wb.Workbook) wb.Workbook = {};
+      if (!wb.Workbook.Sheets) wb.Workbook.Sheets = [];
+      wb.Workbook.Sheets = [
+        { name: "Sheet1", Hidden: 0 },
+        { name: "_metadata_", Hidden: 1 }
+      ];
+
       XLSX.writeFile(wb, `${register.name || 'Export'}.xlsx`);
     } catch (err) {
       console.error("Export Error: ", err);
@@ -2625,40 +2884,6 @@ export default function RegisterPage() {
     return 42; // default
   }, [wrapperSize.h]);
 
-  const colWidthsCss = useMemo(() => {
-    const h = dynamicRowHeight;
-    const cellSelectors = [
-      '.cell-input',
-      '.cell-url-wrap',
-      '.cell-date',
-      '.cell-dropdown',
-      '.cell-formula',
-      '.cell-currency',
-      '.cell-checkbox-wrap',
-      '.cell-rating',
-      '.cell-image-wrap',
-      '.cell-auto-increment',
-      '.cell-auto-increment-readonly',
-    ].map(s => `.spreadsheet td:not(.spacer) ${s}`).join(',');
-
-    const rowCss =
-      // Lock the <td> — overflow:hidden stops any child from pushing the row taller
-      `.spreadsheet td:not(.spacer), .calc-cell-td{` +
-        `height:${h}px!important;` +
-        `max-height:${h}px!important;` +
-        `overflow:hidden!important;` +
-        `vertical-align:middle!important;` +
-        `line-height:${h}px!important;` +
-      `}` +
-      // Lock every cell wrapper height — no wrapping/truncation enforced
-      `${cellSelectors}, .calc-cell-content, .calc-cell-inner{` +
-        `height:${h}px!important;` +
-        `max-height:${h}px!important;` +
-        `line-height:${h}px!important;` +
-        `overflow:hidden!important;` +
-      `}`;
-    return rowCss;
-  }, [dynamicRowHeight]);
 
   // Defer formula/stats recalculation so it doesn't block keystrokes (Fix #3)
   const deferredDisplayEntriesForStats = useDeferredValue(displayEntries);
@@ -2741,15 +2966,28 @@ export default function RegisterPage() {
         let n: number;
         if (val === 'true') n = 1;
         else if (val === 'false') n = 0;
-        else {
+        else if (col.type === 'date' && trimmed !== '') {
+          const parts = trimmed.split(/[-/]/);
+          if (parts.length === 3) {
+            const d = parseInt(parts[0]);
+            const m = parseInt(parts[1]) - 1;
+            const y = parseInt(parts[2]);
+            const dt = new Date(y, m, d);
+            n = isNaN(dt.getTime()) ? 0 : dt.getTime();
+          } else {
+            n = 0;
+          }
+        } else {
           n = parseFloat(val.replace(/[₹$,]/g, ''));
           if (isNaN(n)) n = 0;
         }
 
         s.sum += n;
         s.count++;
-        if (n < s.min) s.min = n;
-        if (n > s.max) s.max = n;
+        if (trimmed !== '') {
+          if (n < s.min) s.min = n;
+          if (n > s.max) s.max = n;
+        }
       }
     }
 
@@ -2757,19 +2995,40 @@ export default function RegisterPage() {
     const finalStats: Record<number, string | number> = {};
     activeColIds.forEach(colId => {
       const s = colStatsData[colId];
+      const col = activeColsMap.get(colId);
+
       if (s.type === 'empty' || s.type === 'filled' || s.type === 'count') {
         finalStats[colId] = s.count;
       } else if (s.type === 'distinct') {
         finalStats[colId] = s.distinct.size;
       } else if (s.type === 'sum') {
-        finalStats[colId] = Number.isInteger(s.sum) ? s.sum : parseFloat(s.sum.toFixed(2));
+        if (col?.type === 'date') {
+          finalStats[colId] = '-'; // Sum doesn't make sense for dates
+        } else {
+          finalStats[colId] = Number.isInteger(s.sum) ? s.sum : parseFloat(s.sum.toFixed(2));
+        }
       } else if (s.type === 'average') {
-        const avg = s.sum / (entryLen || 1);
-        finalStats[colId] = Number.isInteger(avg) ? avg : parseFloat(avg.toFixed(2));
+        if (col?.type === 'date') {
+          const avg = s.sum / (s.count || 1);
+          finalStats[colId] = isNaN(avg) || avg === 0 ? '-' : formatDateToDDMMYYYY(new Date(avg));
+        } else {
+          const avg = s.sum / (entryLen || 1);
+          finalStats[colId] = Number.isInteger(avg) ? avg : parseFloat(avg.toFixed(2));
+        }
       } else if (s.type === 'min') {
-        finalStats[colId] = s.min === Infinity ? 0 : s.min;
+        const val = s.min === Infinity ? 0 : s.min;
+        if (col?.type === 'date' && val > 0) {
+          finalStats[colId] = formatDateToDDMMYYYY(new Date(val));
+        } else {
+          finalStats[colId] = val;
+        }
       } else if (s.type === 'max') {
-        finalStats[colId] = s.max === -Infinity ? 0 : s.max;
+        const val = s.max === -Infinity ? 0 : s.max;
+        if (col?.type === 'date' && val > 0) {
+          finalStats[colId] = formatDateToDDMMYYYY(new Date(val));
+        } else {
+          finalStats[colId] = val;
+        }
       }
     });
 
@@ -2789,6 +3048,21 @@ export default function RegisterPage() {
 
   const parentRef = useRef<HTMLDivElement>(null);
 
+  // Read initial scroll synchronously so virtualizer can use it on first render
+  const initialScrollRef = useRef<{ left: number, top: number } | null>(null);
+  if (!initialScrollRef.current) {
+    try {
+      const saved = sessionStorage.getItem(`rb_scroll_${registerId}`);
+      if (saved) {
+        initialScrollRef.current = JSON.parse(saved);
+      }
+    } catch {}
+    if (!initialScrollRef.current) initialScrollRef.current = { left: 0, top: 0 };
+  }
+
+  // Provide initialRect to virtualizers to prevent 0-item render when parent size is not yet observed
+  const initialRect = typeof window !== 'undefined' ? { width: window.innerWidth, height: window.innerHeight } : { width: 1200, height: 800 };
+
   // ── Row virtualizer ──
   const rowVirtualizer = useVirtualizer({
     count: displayEntries.length,
@@ -2796,6 +3070,8 @@ export default function RegisterPage() {
     estimateSize: useCallback(() => dynamicRowHeight, [dynamicRowHeight]),
     overscan: 10,
     enabled: useVirtual,
+    initialOffset: initialScrollRef.current?.top || 0,
+    initialRect,
   });
 
   // ── Scroll to row from ?row= URL parameter (global search navigation) ──
@@ -2853,6 +3129,35 @@ export default function RegisterPage() {
     return () => clearTimeout(timerId);
   }, [displayEntries, rowVirtualizer]);
 
+  // Scroll persistence on refresh/remount/register switch
+  const isRestoringScroll = useRef(false);
+  const lastRestoredRegisterId = useRef<number | null>(null);
+
+
+  useLayoutEffect(() => {
+    // Only restore once per register ID, and only when we have data to scroll into
+    if (parentRef.current && displayEntries.length > 0 && lastRestoredRegisterId.current !== registerId) {
+      lastRestoredRegisterId.current = registerId;
+      try {
+        const saved = sessionStorage.getItem(`rb_scroll_${registerId}`);
+        if (saved) {
+          const { left, top } = JSON.parse(saved);
+          if (!scrollToRowIdRef.current) {
+            isRestoringScroll.current = true;
+            // Native scroll for the DOM element
+            parentRef.current.scrollTo(left, top);
+            // Also notify virtualizers directly so their internal states sync immediately
+            rowVirtualizer.scrollToOffset(top, { align: 'start' });
+            colVirtualizer.scrollToOffset(left, { align: 'start' });
+            // Allow a small window for the browser to emit the scroll event from scrollTo
+            setTimeout(() => { isRestoringScroll.current = false; }, 100);
+          }
+        }
+      } catch (e) {}
+    }
+  }, [displayEntries.length, registerId]);
+  // Row virtualizer ──
+
   // Column virtualizer (horizontal) ──
   // Uses the same scroll container (parentRef) but scrolls horizontally.
   // The serial S.No column (50px) + actions column (44px) are rendered outside the virtualizer.
@@ -2866,7 +3171,10 @@ export default function RegisterPage() {
     horizontal: true,
     overscan: 5,
     enabled: useColVirtual,
+    initialOffset: initialScrollRef.current?.left || 0,
+    initialRect,
   });
+  colVirtualizerRef.current = colVirtualizer;
 
   const virtualRows = useVirtual ? rowVirtualizer.getVirtualItems() : displayEntries.map((_, i) => ({ index: i, start: i * dynamicRowHeight, end: (i + 1) * dynamicRowHeight, size: dynamicRowHeight, key: i, lane: 0 }));
   const virtualCols = useColVirtual ? colVirtualizer.getVirtualItems() : visibleColumns.map((_, i) => ({ index: i, start: 0, end: 0, size: colWidths[visibleColumns[i]?.id] || defaultColWidth, key: i, lane: 0 }));
@@ -2970,8 +3278,12 @@ export default function RegisterPage() {
         <RegisterToolbar
           search={search}
           setSearch={setSearch}
+          filters={filters}
           activeFilters={activeFilters}
-          setFilters={setActiveFilters}
+          setFilters={setFilters}
+          setActiveFilters={setActiveFilters}
+          filterModal={filterModal}
+          setFilterModal={setFilterModal}
           addEntryMutation={addEntryMutation}
           setNewColName={setNewColName}
           setNewColType={setNewColType}
@@ -2994,15 +3306,21 @@ export default function RegisterPage() {
 
 
 
-      {/* ── Dynamic Column Widths (memoized) ── */}
-      <style dangerouslySetInnerHTML={{ __html: colWidthsCss }} />
-
       {/* ── Spreadsheet ── */}
       <div 
         ref={parentRef}
         className="spreadsheet-wrapper" 
         key={`grid-${columns.length}-${columns.map(c => c.id).join('-')}`}
         onMouseDown={handleTableMouseDown}
+        onScroll={(e) => {
+          if (isRestoringScroll.current) return;
+          const target = e.currentTarget;
+          sessionStorage.setItem(`rb_scroll_${registerId}`, JSON.stringify({
+            left: target.scrollLeft,
+            top: target.scrollTop
+          }));
+        }}
+        style={{ '--dynamic-row-height': `${dynamicRowHeight}px` } as React.CSSProperties}
       >
         <table className="spreadsheet">
           <thead>
@@ -3010,7 +3328,7 @@ export default function RegisterPage() {
               <th className="serial">S.NO.</th>
               {/* Left horizontal spacer for virtualized columns */}
               {useColVirtual && paddingLeft > 0 && (
-                <th key="pad-left" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />
+                <th key="pad-left" className="spacer" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />
               )}
               {(useColVirtual ? virtualCols : visibleColumns.map((_, i) => ({ index: i }))).map((vc) => {
                 const col = visibleColumns[vc.index];
@@ -3095,7 +3413,7 @@ export default function RegisterPage() {
               )})}
               {/* Right horizontal spacer */}
               {useColVirtual && paddingRight > 0 && (
-                <th key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />
+                <th key="pad-right" className="spacer" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />
               )}
               <th className="actions" style={{ width: '50px', minWidth: '50px', padding: 0, position: 'sticky', right: 0, zIndex: 14, background: 'var(--table-bg)', borderLeft: '1px solid var(--border-v)' }}>
                 <button
@@ -3233,6 +3551,8 @@ export default function RegisterPage() {
         clearColumnDataMutation={clearColumnDataMutation} deleteColumnMutation={deleteColumnMutation}
         rowMenuId={rowMenuId} setRowMenuId={setRowMenuId}
         duplicateEntryMutation={duplicateEntryMutation} deleteEntryMutation={deleteEntryMutation}
+        insertEntryMutation={insertEntryMutation}
+        localEntries={localEntries}
         handleRowDownloadPDF={handleRowDownloadPDF}
         handleRowDownloadExcel={handleRowDownloadExcel}
         handleRowShareText={handleRowShareText}
@@ -3454,7 +3774,7 @@ export default function RegisterPage() {
                               type="text"
                               className={`row-detail-input cell-date ${detailErrors[colKey] ? 'invalid' : ''}`} 
                               value={val}
-                              placeholder="DD/MM/YYYY"
+                              placeholder="DD-MM-YYYY"
                               autoComplete="off"
                               onChange={(e) => {
                                 setDetailEdits(prev => ({ ...prev, [colKey]: e.target.value }));
@@ -3488,7 +3808,7 @@ export default function RegisterPage() {
                           <div className="row-detail-image-field">
                             {val ? (
                               <div className="row-detail-image-container">
-                                <div className="row-detail-img-wrapper" onClick={() => setPreviewImage(val)}>
+                                <div className="row-detail-img-wrapper" onClick={() => setPreviewImage({ url: val, entryId: detailViewEntry.id, colId: col.id.toString() })}>
                                   <img 
                                     src={val} 
                                     alt="preview" 
@@ -3500,7 +3820,7 @@ export default function RegisterPage() {
                                   </div>
                                 </div>
                                 <div className="row-detail-image-actions">
-                                  <button className="row-detail-img-btn" onClick={() => setPreviewImage(val)}>View Large</button>
+                                  <button className="row-detail-img-btn" onClick={() => setPreviewImage({ url: val, entryId: detailViewEntry.id, colId: col.id.toString() })}>View Large</button>
                                   <button className="row-detail-img-btn" onClick={() => handleImageDownload(val)}>Download</button>
                                   <button className="row-detail-img-btn danger" onClick={() => setDetailEdits(prev => ({ ...prev, [colKey]: '' }))}>Remove</button>
                                 </div>
@@ -3741,31 +4061,63 @@ export default function RegisterPage() {
       )}
       
       {/* ── Image Preview Modal ── */}
-      {previewImage && (
-        <div className="img-preview-overlay" onClick={() => setPreviewImage(null)}>
+      {previewImage && previewImage.url && (
+        <div className="img-preview-overlay" onClick={() => { setPreviewImage(null); setIsImgZoomed(false); }}>
           <div className="img-preview-content" onClick={e => e.stopPropagation()}>
             <div className="img-preview-header">
               <h3>Image Preview</h3>
               <div className="img-preview-actions">
                 <button 
-                  onClick={() => handleImageDownload(previewImage)}
+                  onClick={() => handleImageDownload(previewImage.url)}
                   className="img-download-btn"
                   title="Download Image"
                 >
                   <Download size={18} />
                   Download
                 </button>
+                {previewImage.entryId !== undefined && previewImage.colId !== undefined && (
+                  <button 
+                    className="img-preview-remove" 
+                    onClick={() => {
+                      handleCellChange(previewImage.entryId!, previewImage.colId!, '');
+                      // If the row detail modal is currently open for this entry, we should also clear the detailEdits
+                      if (detailViewEntry?.id === previewImage.entryId) {
+                        setDetailEdits(prev => ({ ...prev, [previewImage.colId!]: '' }));
+                      }
+                      setPreviewImage(null);
+                      setIsImgZoomed(false);
+                    }}
+                    title="Remove Image"
+                  >
+                    <Trash2 size={18} />
+                    Remove
+                  </button>
+                )}
+                <button 
+                  className="img-preview-btn" 
+                  onClick={() => setIsImgZoomed(!isImgZoomed)}
+                  title={isImgZoomed ? "Zoom Out" : "Zoom In"}
+                >
+                  {isImgZoomed ? <ZoomOut size={20} /> : <ZoomIn size={20} />}
+                </button>
                 <button 
                   className="img-preview-close" 
-                  onClick={() => setPreviewImage(null)}
+                  onClick={() => {
+                    setPreviewImage(null);
+                    setIsImgZoomed(false);
+                  }}
                   title="Close Preview"
                 >
                   ✕
                 </button>
               </div>
             </div>
-            <div className="img-preview-body">
-              <img src={previewImage} alt="Large preview" />
+            <div className="img-preview-body" onClick={() => setIsImgZoomed(!isImgZoomed)}>
+              <img 
+                src={previewImage.url} 
+                alt="Large preview" 
+                className={isImgZoomed ? 'zoomed' : ''}
+              />
             </div>
           </div>
         </div>

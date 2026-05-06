@@ -1,4 +1,4 @@
-import { Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, SortAsc, SortDesc, Pencil, ArrowLeftRight, Copy, ArrowRight, ChevronsLeftRight, Pin, Eye, EyeOff, Eraser, Trash2, FileText, FileSpreadsheet, Share2, ArrowLeft, Link as LinkIcon } from 'lucide-react';
+import { Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, SortAsc, SortDesc, Pencil, ArrowLeftRight, Copy, ArrowRight, ChevronsLeftRight, Pin, Eye, EyeOff, Eraser, Trash2, FileText, FileSpreadsheet, Share2, ArrowLeft, Link as LinkIcon, Plus } from 'lucide-react';
 import { type Column } from '../../../lib/api';
 
 interface RegisterContextMenusProps {
@@ -38,6 +38,8 @@ interface RegisterContextMenusProps {
   setRowMenuId: (id: number | null) => void;
   duplicateEntryMutation: any;
   deleteEntryMutation: any;
+  insertEntryMutation: any;
+  localEntries: any[];
   handleRowDownloadPDF: (entryId: number) => void;
   handleRowDownloadExcel: (entryId: number) => void;
   handleRowShareText: (entryId: number) => void;
@@ -57,7 +59,7 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
     setNewColName, setNewColType, setNewColDropdownOpts, setNewColFormula, setInsertColModal,
     moveColumnMutation, frozenColumns, setFrozenColumns, freezeColumn, registerId,
     hiddenColumns, setHiddenColumns, hideColumn, clearColumnDataMutation, deleteColumnMutation,
-    rowMenuId, setRowMenuId, duplicateEntryMutation, deleteEntryMutation,
+    rowMenuId, setRowMenuId, duplicateEntryMutation, deleteEntryMutation, insertEntryMutation, localEntries,
     handleRowDownloadPDF, handleRowDownloadExcel, handleRowShareText,
     calcTypes, updateCalcType,
     manageColsMenu, setManageColsMenu
@@ -267,6 +269,19 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
 
             <button className="context-item" onClick={() => duplicateEntryMutation.mutate(rowMenuId)}>
               <Copy size={16} /> Duplicate Record
+            </button>
+
+            <button className="context-item" onClick={() => {
+              const idx = localEntries.findIndex(e => e.id === rowMenuId);
+              if (idx !== -1) {
+                insertEntryMutation.mutate({ atIndex: idx + 1 });
+              }
+            }}>
+              <Plus size={16} />
+              <div className="context-item-info">
+                <span>Add Row Below</span>
+                <span className="context-item-desc">Insert empty row at #{(localEntries.findIndex(e => e.id === rowMenuId) + 2)}</span>
+              </div>
             </button>
 
             <div className="context-divider" />

@@ -1,19 +1,17 @@
 import { Search, Filter, Trash2, Hash, FileText, Eye, Undo2, Redo2 } from 'lucide-react';
 import { memo } from 'react';
 import type { Column } from '../../lib/api';
-
-interface FilterState {
-  columnId: number;
-  operator: string;
-  value: string;
-  value2?: string;
-}
+import { FilterModal, type FilterRule } from './modals/FilterModal';
 
 interface RegisterToolbarProps {
   search: string;
   setSearch: (s: string) => void;
-  activeFilters: FilterState[];
-  setFilters: (f: FilterState[]) => void;
+  filters: FilterRule[];
+  activeFilters: FilterRule[];
+  setFilters: (f: FilterRule[]) => void;
+  setActiveFilters: (f: FilterRule[]) => void;
+  filterModal: boolean;
+  setFilterModal: (v: boolean) => void;
   addEntryMutation: any;
   setNewColName: (v: string) => void;
   setNewColType: (v: string) => void;
@@ -34,7 +32,7 @@ interface RegisterToolbarProps {
 }
 
 export const RegisterToolbar = memo(function RegisterToolbar({
-  search, setSearch, activeFilters, setFilters,
+  search, setSearch, filters, activeFilters, setFilters, setActiveFilters, filterModal, setFilterModal,
   hiddenColumns,
   selectedRows, rowCount, columns, bulkDeleteMutation,
   setManageColsMenu,
@@ -66,15 +64,26 @@ export const RegisterToolbar = memo(function RegisterToolbar({
       </div>
 
       {/* Filter */}
-      <button
-        className={`pab-icon-btn${activeFilters.length > 0 ? ' active' : ''}`}
-        title={`Filter${activeFilters.length > 0 ? ` (${activeFilters.length} active)` : ''}`}
-        onClick={() => { setFilters(activeFilters.length ? [...activeFilters] : []); }}
-        aria-label="Filter"
-      >
-        <Filter size={14} />
-        {activeFilters.length > 0 && <span className="pab-badge">{activeFilters.length}</span>}
-      </button>
+      <div className="pab-filter-wrapper">
+        <button
+          className={`pab-icon-btn${activeFilters.length > 0 ? ' active' : ''}`}
+          title={`Filter${activeFilters.length > 0 ? ` (${activeFilters.length} active)` : ''}`}
+          onClick={() => setFilterModal(!filterModal)}
+          aria-label="Filter"
+        >
+          <Filter size={14} />
+          {activeFilters.length > 0 && <span className="pab-badge">{activeFilters.length}</span>}
+        </button>
+
+        <FilterModal
+          filterModal={filterModal}
+          setFilterModal={setFilterModal}
+          filters={filters}
+          setFilters={setFilters}
+          setActiveFilters={setActiveFilters}
+          columns={columns}
+        />
+      </div>
 
       <div className="pab-divider" />
 

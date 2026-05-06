@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Plus, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { formatDateToDDMMYYYY } from '../../../lib/api';
 
 interface Column {
   id: number;
@@ -123,7 +124,15 @@ export function AddRecordModal({
     Object.entries(values).forEach(([k, v]) => {
       const col = columns.find(c => c.id.toString() === k);
       if (col?.type === 'formula') return;
-      if (v.trim() !== '') cells[k] = v.trim();
+      
+      let finalVal = v.trim();
+      if (col?.type === 'date' && finalVal !== '') {
+        finalVal = formatDateToDDMMYYYY(finalVal);
+      }
+      
+      if (finalVal !== '') {
+        cells[k] = finalVal;
+      }
     });
     onSubmit(cells);
   };
@@ -251,7 +260,7 @@ export function AddRecordModal({
                       </div>
                     ) : col.type === 'date' ? (
                       <input type="text" id={`ar-col-${col.id}`} className={inputCls}
-                        value={val} onChange={onChange} placeholder="DD/MM/YYYY"
+                        value={val} onChange={onChange} placeholder="DD-MM-YYYY"
                         ref={isFirst ? (el) => { firstInputRef.current = el; } : undefined}
                       />
                     ) : col.type === 'number' || col.type === 'currency' || col.type === 'rating' ? (

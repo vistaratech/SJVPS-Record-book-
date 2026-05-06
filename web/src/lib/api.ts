@@ -491,7 +491,14 @@ export async function getRegister(registerId: number): Promise<RegisterDetail> {
 export async function createRegister(data: {
   businessId: number; folderId?: number; name: string; icon?: string; iconColor?: string;
   category?: string; template?: string;
-  columns?: Array<{ name: string; type: string; dropdownOptions?: string[]; formula?: string }>;
+  columns?: Array<{ 
+    name: string; 
+    type: string; 
+    dropdownOptions?: string[]; 
+    formula?: string;
+    width?: number;
+    summary?: string;
+  }>;
 }): Promise<RegisterSummary> {
   const newId = generateId();
   const newReg: RegisterDetail = {
@@ -502,6 +509,7 @@ export async function createRegister(data: {
     columns: (data.columns || []).map((c, i) => ({
       id: newId + i + 1, registerId: newId, name: c.name, type: c.type,
       position: i, dropdownOptions: c.dropdownOptions, formula: c.formula,
+      width: c.width, summary: c.summary,
     })),
     entries: [], pages: [{ id: 1, name: 'Page 1', index: 0 }], sharedWith: [],
   };
@@ -682,15 +690,94 @@ const COLUMN_SUBSTRING_HINTS: { pattern: string; hint: ColumnHint }[] = [
  * Excel serial: days since 1900-01-01 (with the Lotus 1-2-3 leap year bug).
  */
 function excelSerialToDateStr(serial: number): string {
-  // Excel epoch: Jan 0 1900 (i.e. Dec 31 1899). Also has a phantom Feb 29 1900.
-  const utcDays = serial - 25569; // offset from Unix epoch (Jan 1 1970)
+  // Excel epoch: Jan 0 1900 (i.e. Dec 31 1899).
+  // 25569 is the number of days between Jan 1 1900 and Jan 1 1970.
+  const utcDays = serial - 25569;
   const ms = utcDays * 86400 * 1000;
   const d = new Date(ms);
+  
+  // Use UTC methods to avoid timezone shifts
   const dd = String(d.getUTCDate()).padStart(2, '0');
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
   const yyyy = d.getUTCFullYear();
-  return `${dd}/${mm}/${yyyy}`;
+  
+  return `${dd}-${mm}-${yyyy}`;
 }
+
+/**
+ * Robustly convert any date-like value (string, number, Date) to DD-MM-YYYY.
+ * Enforces consistency across import, display, and storage.
+ */
+export function formatDateToDDMMYYYY(val: any): string {
+  if (val === null || val === undefined || val === '') return '';
+  
+  // 1. Handle Excel Serial Dates
+  if (typeof val === 'number' && looksLikeExcelSerial(val)) {
+    return excelSerialToDateStr(val);
+  }
+
+  // 2. Handle JS Date object
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '';
+    const d = String(val.getDate()).padStart(2, '0');
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const y = val.getFullYear();
+    return `${d}-${m}-${y}`;
+  }
+
+  // 3. Handle String input
+  let s = String(val).trim();
+  if (!s) return '';
+
+  // Standardize separators to -
+  s = s.replace(/[\/.]/g, '-');
+  
+  const parts = s.split('-');
+  if (parts.length === 3) {
+    let p1 = parts[0].padStart(2, '0');
+    let p2 = parts[1].padStart(2, '0');
+    let p3 = parts[2];
+
+    // Handle YYYY/MM/DD or YYYY-MM-DD
+    if (p1.length === 4) {
+      return `${p3.padStart(2, '0')}-${p2}-${p1}`;
+    }
+
+    // Handle 2-digit years
+    if (p3.length === 2) {
+      const year = parseInt(p3);
+      p3 = (year < 50 ? '20' : '19') + p3;
+    }
+
+    const n1 = parseInt(p1);
+    const n2 = parseInt(p2);
+
+    // If it's ambiguous (both <= 12), we might need to know the source.
+    // The user explicitly stated that dates are coming in as MM/DD/YYYY incorrectly.
+    // So if n1 <= 12 and n2 > 12, it's definitely MM/DD/YYYY -> Swap.
+    // If both are <= 12, it's ambiguous, but we prioritize DD-MM-YYYY as the target.
+    
+    if (n1 <= 12 && n2 > 12) {
+      // Clearly MM/DD/YYYY (e.g. 05/15/2023) -> Swap to DD-MM-YYYY (15-05-2023)
+      return `${p2}-${p1}-${p3}`;
+    }
+
+    // Normal case or ambiguous: assume p1 is Day, p2 is Month.
+    return `${p1}-${p2}-${p3}`;
+  }
+
+  // Final fallback: try native Date parsing
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+     const dd = String(d.getDate()).padStart(2, '0');
+     const mm = String(d.getMonth() + 1).padStart(2, '0');
+     const yyyy = d.getFullYear();
+     return `${dd}/${mm}/${yyyy}`;
+  }
+
+  return s; 
+}
+
 
 /** Check if a value looks like an Excel serial date (number between ~1 and ~60000). */
 function looksLikeExcelSerial(val: unknown): boolean {
@@ -747,7 +834,7 @@ function resolveColumnType(
     .slice(0, 20); // sample up to 20 rows
 
   if (nonEmpty.length > 0) {
-    // Check if most values look like dates (DD-MM-YYYY, YYYY-MM-DD, DD/MM/YYYY, etc.)
+    // Check if most values look like dates (DD-MM-YYYY, YYYY-MM-DD, etc.)
     const datePattern = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/;
     const dateCount = nonEmpty.filter((v) => datePattern.test(String(v).trim())).length;
     if (dateCount >= nonEmpty.length * 0.6) {
@@ -770,7 +857,13 @@ function resolveColumnType(
   return { type: 'text' };
 }
 
-export const importExcelData = async (businessId: number, name: string, data: Record<string, string | number | boolean | null>[], folderId?: number): Promise<RegisterSummary> => {
+export const importExcelData = async (
+  businessId: number, 
+  name: string, 
+  data: Record<string, string | number | boolean | null>[], 
+  folderId?: number,
+  metadata?: any[]
+): Promise<RegisterSummary> => {
   if (!data || data.length === 0) throw new Error("No data found in the spreadsheet");
 
   const headers = Object.keys(data[0]);
@@ -804,44 +897,75 @@ export const importExcelData = async (businessId: number, name: string, data: Re
   }
 
   // ── Build column definitions ──
-  const columns = headers.map((h, i) => {
+  // Filter out 'S.No.' if it's the first column (likely from a previous export)
+  const filteredHeaders = headers.filter((h, i) => i > 0 || (h.toLowerCase() !== 's.no.' && h.toLowerCase() !== 's.no'));
+
+  const columns = filteredHeaders.map((h, i) => {
     // Collect sample values for this column from the data
     const sampleValues = data.slice(0, 30).map(row => row[h]);
-    const resolved = resolveColumnType(h, bestTemplate, sampleValues);
-
+    
+    let resolved: any;
+    if (metadata) {
+      const meta = metadata.find(m => m['Column Name'] === h);
+      if (meta) {
+        const parsedWidth = meta['Width'] ? parseInt(meta['Width']) : undefined;
+        resolved = {
+          type: meta['Type'] || 'text',
+          dropdownOptions: meta['Dropdown Options'] ? meta['Dropdown Options'].split(',').filter(Boolean) : undefined,
+          formula: meta['Formula'] || undefined,
+          width: isNaN(parsedWidth as any) ? undefined : parsedWidth,
+          summary: meta['Summary'] || undefined
+        };
+      }
+    }
+    
+    if (!resolved) {
+      resolved = resolveColumnType(h, bestTemplate, sampleValues);
+    }
+    
     return {
       name: h || `Column ${i + 1}`,
       type: resolved.type,
       dropdownOptions: resolved.dropdownOptions,
       formula: resolved.formula,
+      width: resolved.width,
+      summary: resolved.summary,
     };
   });
 
-  const createdReg = await createRegister({ businessId, folderId, name, columns }) as RegisterDetail;
+  const createdReg = await createRegister({ businessId, folderId, name, columns: columns as any }) as RegisterDetail;
 
   // Clear the 3 default empty rows that createRegister adds, then populate from Excel data.
   // Work with the cached copy directly — no redundant getRegDoc round-trip needed.
   createdReg.entries = [];
 
+  // Identify if there is an S.No column to preserve row numbering
+  const sNoHeader = headers.find((h, i) => i === 0 && (h.toLowerCase() === 's.no.' || h.toLowerCase() === 's.no' || h.toLowerCase() === 'sr.no' || h.toLowerCase() === 'sr.no.'));
+
   data.forEach((row, rowIndex) => {
     const cells: Record<string, string> = {};
-    headers.forEach((h, colIndex) => {
-      let val = row[h];
+    createdReg.columns.forEach((col) => {
+      let val = row[col.name];
       if (val !== undefined && val !== null && val !== '') {
-        // Convert Excel serial dates to human-readable DD-MM-YYYY
-        const colType = createdReg.columns[colIndex]?.type;
-        if (colType === 'date' && typeof val === 'number' && looksLikeExcelSerial(val)) {
-          val = excelSerialToDateStr(val);
+        // Use unified date formatter for consistency across import, display, and storage
+        if (col.type === 'date') {
+          val = formatDateToDDMMYYYY(val);
         }
-        cells[createdReg.columns[colIndex].id.toString()] = String(val);
+        cells[col.id.toString()] = String(val);
       }
     });
+
+    let rowNumber = rowIndex + 1;
+    if (sNoHeader && row[sNoHeader]) {
+      const parsed = parseInt(String(row[sNoHeader]));
+      if (!isNaN(parsed)) rowNumber = parsed;
+    }
 
     // Stable ID: use offset to avoid Number.MAX_SAFE_INTEGER precision loss.
     createdReg.entries.push({
       id: createdReg.id + 10000 + rowIndex,
       registerId: createdReg.id,
-      rowNumber: rowIndex + 1,
+      rowNumber,
       cells,
       createdAt: new Date().toISOString(),
       pageIndex: 0,
@@ -1380,6 +1504,76 @@ export async function addEntry(registerId: number, cells: Record<string, string>
 
   return entry;
 }
+
+/**
+ * Inserts a new entry at a specific index within the register's entry array.
+ * Automatically shifts rowNumbers for subsequent entries in the same page.
+ */
+export async function insertEntry(registerId: number, cells: Record<string, string> = {}, pageIndex: number = 0, atIndex: number): Promise<Entry> {
+  const result = await runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const pageEntries = reg.entries.filter((e) => (e.pageIndex || 0) === pageIndex);
+
+    // Auto-populate auto_increment columns
+    const autoIncrCols = reg.columns.filter(c => c.type === 'auto_increment');
+    for (const col of autoIncrCols) {
+      const colIdStr = col.id.toString();
+      if (!cells[colIdStr]) {
+        let maxVal = 0;
+        for (const e of pageEntries) {
+          const v = parseInt(e.cells?.[colIdStr] || '0', 10);
+          if (!isNaN(v) && v > maxVal) maxVal = v;
+        }
+        cells[colIdStr] = (maxVal + 1).toString();
+      }
+    }
+
+    // Determine the rowNumber for the new entry based on its position in the page
+    // We need to find the rowNumber of the entry currently at or after this position in the page
+    const currentEntryAtPos = reg.entries[atIndex];
+    let newRowNumber = 1;
+    
+    if (currentEntryAtPos && (currentEntryAtPos.pageIndex || 0) === pageIndex) {
+      newRowNumber = currentEntryAtPos.rowNumber;
+    } else {
+      // If we're at the end or in a different page's boundary, just use the next available number for this page
+      newRowNumber = pageEntries.length + 1;
+    }
+
+    // Shift rowNumbers for all entries in the same page that have rowNumber >= newRowNumber
+    for (const e of reg.entries) {
+      if ((e.pageIndex || 0) === pageIndex && e.rowNumber >= newRowNumber) {
+        e.rowNumber += 1;
+      }
+    }
+
+    const entry: Entry = {
+      id: generateId(), registerId, rowNumber: newRowNumber,
+      cells, createdAt: new Date().toISOString(), pageIndex,
+    };
+    
+    reg.entries.splice(atIndex, 0, entry);
+    reg.entryCount = reg.entries.length;
+    reg.updatedAt = new Date().toISOString();
+    await saveRegDocImmediate(reg);
+    await logAction(reg.businessId, 'Insert Row', `Inserted a new row at position ${atIndex + 1} in "${reg.name}"`, { registerId, registerName: reg.name });
+    return { entry, reg };
+  });
+
+  const { entry, reg } = result;
+
+  // Sync linked columns
+  for (const [colIdStr, value] of Object.entries(cells)) {
+    if (value === undefined || value === null) continue;
+    const col = reg.columns.find(c => c.id.toString() === colIdStr);
+    if (col?.linkedTo) {
+      await _syncLinkedColumn(col.linkedTo.registerId, col.linkedTo.columnId, entry.rowNumber, value);
+    }
+  }
+
+  return entry;
+}
+
 
 export async function updateEntry(registerId: number, entryId: number, cells: Record<string, string>): Promise<Entry> {
   const result = await runQueuedMutation(registerId, async () => {

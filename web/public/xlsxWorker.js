@@ -23,17 +23,44 @@ self.onmessage = function (evt) {
 
     self.postMessage({ type: 'PROGRESS', payload: { pct: 10, message: 'Reading file…' } });
 
-    const wb = XLSX.read(buffer, { type: 'array', cellDates: false, dense: false });
+    const wb = XLSX.read(buffer, { type: 'array', cellDates: true, dense: false });
 
     self.postMessage({ type: 'PROGRESS', payload: { pct: 40, message: 'Parsing sheet…' } });
 
     const wsName = wb.SheetNames[0];
     const ws = wb.Sheets[wsName];
 
+    // ── Check for Metadata Sheet ──
+    let metadata = null;
+    const metaSheetName = wb.SheetNames.find(n => n.toLowerCase() === '_metadata_');
+    if (metaSheetName) {
+      const metaWs = wb.Sheets[metaSheetName];
+      metadata = XLSX.utils.sheet_to_json(metaWs);
+    }
+
     self.postMessage({ type: 'PROGRESS', payload: { pct: 60, message: 'Converting to JSON…' } });
 
-    // sheet_to_json returns objects keyed by header name
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+    // ── Find Header Row ──
+    // If metadata exists, we can find the row that matches those names to skip any decorative headings/blank rows.
+    let headerRowIdx = 0;
+    if (metadata && metadata.length > 0) {
+      const metaNames = metadata.map(m => String(m['Column Name']).toLowerCase().trim());
+      // Get the first 20 rows to scan for the header
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, range: 0, defval: '' });
+      let maxMatches = -1;
+      for (let i = 0; i < Math.min(aoa.length, 20); i++) {
+        const row = aoa[i];
+        if (!Array.isArray(row)) continue;
+        const matches = row.filter(cell => cell && metaNames.includes(String(cell).toLowerCase().trim())).length;
+        if (matches > maxMatches && matches > 0) {
+          maxMatches = matches;
+          headerRowIdx = i;
+        }
+      }
+    }
+
+    // sheet_to_json returns objects keyed by header name, starting from the detected header row
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false, range: headerRowIdx });
 
     self.postMessage({ type: 'PROGRESS', payload: { pct: 85, message: `Loaded ${rows.length} rows…` } });
 
@@ -55,7 +82,7 @@ self.onmessage = function (evt) {
 
     self.postMessage({
       type: 'RESULT',
-      payload: { headers, rows, fileName }
+      payload: { headers, rows, fileName, metadata }
     });
 
   } catch (err) {

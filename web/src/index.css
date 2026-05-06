@@ -6348,12 +6348,13 @@ body.modal-open {
 .img-preview-content {
   background: white;
   border-radius: 20px;
-  max-width: 90vw;
-  max-height: 90vh;
+  width: 95vw;
+  height: 95vh;
+  max-width: 1400px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 25px 70px -12px rgba(0, 0, 0, 0.6);
   animation: scaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -6398,6 +6399,27 @@ body.modal-open {
   transform: translateY(-1px);
 }
 
+.img-preview-remove {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--red);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
+  border: none;
+  cursor: pointer;
+}
+
+.img-preview-remove:hover {
+  background: #cc0000;
+  transform: translateY(-1px);
+}
+
 .img-preview-close {
   width: 32px;
   height: 32px;
@@ -6422,17 +6444,32 @@ body.modal-open {
   flex: 1;
   overflow: auto;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #111;
-  padding: 20px;
+  background: #0f172a; /* Slate 900 */
+  padding: 32px;
+  position: relative;
+  /* Custom scrollbar for dark background */
+  scrollbar-color: rgba(255,255,255,0.2) transparent;
+  scrollbar-width: thin;
 }
 
 .img-preview-body img {
+  margin: auto; /* Perfect centering with overflow */
   max-width: 100%;
   max-height: 100%;
+  width: auto;
+  height: auto;
   object-fit: contain;
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  cursor: zoom-in;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.img-preview-body img.zoomed {
+  max-width: none;
+  max-height: none;
+  cursor: zoom-out;
+  transform: scale(1); /* Reset scale but remove constraints */
 }
 
 /* â”€â”€ Row Detail Image Styles â”€â”€ */
@@ -7154,17 +7191,22 @@ body.modal-open {
 }
 
 /* ── Table Layout Stability ── */
-/* Structural cell properties — heights are injected dynamically via JS for 6×9 grid */
-.spreadsheet td:not(.spacer) {
+/* Structural cell properties — heights are driven by --dynamic-row-height CSS variable */
+.spreadsheet td:not(.spacer), .calc-cell-td {
+  height: var(--dynamic-row-height, 42px) !important;
+  max-height: var(--dynamic-row-height, 42px) !important;
+  line-height: var(--dynamic-row-height, 42px) !important;
   overflow: hidden !important;
   box-sizing: border-box !important;
   padding: 0 !important;
   vertical-align: middle !important;
   white-space: nowrap !important;
+  contain: strict !important;
 }
 
 /* Spacer cells must be unconstrained for virtualizer scroll height */
-.spreadsheet td.spacer {
+.spreadsheet td.spacer,
+.spreadsheet th.spacer {
   max-height: none !important;
   overflow: visible !important;
   padding: 0 !important;
@@ -7172,14 +7214,23 @@ body.modal-open {
   line-height: 0 !important;
 }
 
-/* Prevent text from expanding cells */
-.spreadsheet td .cell-input,
-.spreadsheet td .cell-formula,
-.spreadsheet td .cell-dropdown,
-.spreadsheet td .cell-checkbox-wrap,
-.spreadsheet td .cell-rating,
-.spreadsheet td .cell-image-wrap,
-.spreadsheet td .cell-auto-increment-readonly {
+/* Prevent text from expanding cells and lock wrapper height */
+.spreadsheet td:not(.spacer) .cell-input,
+.spreadsheet td:not(.spacer) .cell-formula,
+.spreadsheet td:not(.spacer) .cell-dropdown,
+.spreadsheet td:not(.spacer) .cell-checkbox-wrap,
+.spreadsheet td:not(.spacer) .cell-rating,
+.spreadsheet td:not(.spacer) .cell-image-wrap,
+.spreadsheet td:not(.spacer) .cell-auto-increment,
+.spreadsheet td:not(.spacer) .cell-auto-increment-readonly,
+.spreadsheet td:not(.spacer) .cell-currency,
+.spreadsheet td:not(.spacer) .cell-date,
+.spreadsheet td:not(.spacer) .cell-url-wrap,
+.calc-cell-content, 
+.calc-cell-inner {
+  height: var(--dynamic-row-height, 42px) !important;
+  max-height: var(--dynamic-row-height, 42px) !important;
+  line-height: var(--dynamic-row-height, 42px) !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
   padding: 0 8px !important;

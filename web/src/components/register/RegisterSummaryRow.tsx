@@ -127,13 +127,13 @@ export const RegisterSummaryRow: React.FC<RegisterSummaryRowProps> = ({
         </td>
 
         {useColVirtual && paddingLeft > 0 && (
-          <td key="pad-left" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none', background: 'var(--table-bg)' }} />
+          <td key="pad-left" className="spacer" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none', background: 'var(--table-bg)' }} />
         )}
 
         {renderCells()}
 
         {useColVirtual && paddingRight > 0 && (
-          <td key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none', background: 'var(--table-bg)' }} />
+          <td key="pad-right" className="spacer" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none', background: 'var(--table-bg)' }} />
         )}
 
         {/* Action Column Placeholder */}

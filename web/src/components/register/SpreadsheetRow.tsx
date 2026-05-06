@@ -169,7 +169,10 @@ const CurrencyCell = React.memo(({ idx, col, entry, colIdx, totalRows, visibleCo
 });
 
 const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colIdx, totalRows, handleCellChange, type = 'text', placeholder, searchTerm }: SpreadsheetTextInputProps) => {
-  const initialValue = entry.cells?.[col.id.toString()] || '';
+  let initialValue = entry.cells?.[col.id.toString()] || '';
+  if (col.type === 'date' && initialValue.includes('/')) {
+    initialValue = initialValue.replace(/\//g, '-');
+  }
   const [val, setVal] = useState(initialValue);
 
   // Sync if the entry is replaced (e.g., after add-row optimistic swap)
@@ -319,7 +322,7 @@ interface SpreadsheetRowProps {
   toggleMenu: (id: number) => void;
   registerColumns: Column[];
   onRowDetail?: (entry: Entry) => void;
-  onImagePreview?: (src: string) => void;
+  onImagePreview?: (data: { url: string; entryId: number; colId: string }) => void;
   frozenColumns?: Set<number>;
   frozenLeftOffsets?: Record<number, number>;
   colWidths?: Record<number, number>;
@@ -421,7 +424,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     <tr id={`row-${entry.id}`} data-entry-id={entry.id} style={rowHeight ? { height: rowHeight, maxHeight: rowHeight } : undefined}>
       <td className="serial" style={{ cursor: 'pointer' }} onClick={handleSerialClick} title="Click to view details">{idx + 1}</td>
       {/* Left padding cell for column virtualization */}
-      {paddingLeft > 0 && <td key="pad-left" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />}
+      {paddingLeft > 0 && <td key="pad-left" className="spacer" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />}
       {colItems.map((vc) => {
         const col = visibleColumns[vc.index];
         if (!col) return null;
@@ -458,7 +461,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
             <div className="cell-url-wrap">
               <SpreadsheetTextInput 
                 idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange}
-                placeholder="DD/MM/YYYY" searchTerm={searchTerm}
+                placeholder="DD-MM-YYYY" searchTerm={searchTerm}
               />
               <button 
                 className="cell-url-link" 
@@ -499,7 +502,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
               onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)}
               onClick={() => {
                 const val = entry.cells?.[col.id.toString()];
-                if (val) onImagePreview?.(val);
+                if (val) onImagePreview?.({ url: val, entryId: entry.id, colId: col.id.toString() });
               }}
               title={entry.cells?.[col.id.toString()] ? "Click to view full image" : "No image"}
             >
@@ -585,7 +588,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
         );
       })}
       {/* Right padding cell for column virtualization */}
-      {paddingRight > 0 && <td key="pad-right" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />}
+      {paddingRight > 0 && <td key="pad-right" className="spacer" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />}
       <td className="actions" style={{ width: '50px', minWidth: '50px', position: 'sticky', right: 0, zIndex: 1, background: 'var(--table-bg)', borderLeft: '1px solid var(--border-v)' }}>
         <button
           className={`row-menu-btn ${isMenuOpen ? 'menu-open' : ''}`}
