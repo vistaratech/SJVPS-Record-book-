@@ -16,9 +16,9 @@ import {
   formatDateToDDMMYYYY,
   type Entry, type CellStyle,
 } from '../lib/api';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+// xlsx, jsPDF, and jspdf-autotable are now dynamically imported via useExport hook
+import { useExport } from '../hooks/useExport';
+import { useColumnStats } from '../hooks/useColumnStats';
 import {
   Plus, ChevronDown, Calendar,
   Hash, FlaskConical, Pin, IndianRupee,
@@ -30,7 +30,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { RegisterHeader } from '../components/register/RegisterHeader';
 import { SpreadsheetRow } from '../components/register/SpreadsheetRow';
 import { CellFormatToolbar } from '../components/register/CellFormatToolbar';
-import { ExportModal, type ExportOptions } from '../components/register/modals/ExportModal';
+import { ExportModal } from '../components/register/modals/ExportModal';
 import { ShareModal } from '../components/register/modals/ShareModal';
 import { ColumnModals } from '../components/register/modals/ColumnModals';
 import { OtherModals } from '../components/register/modals/OtherModals';
@@ -94,7 +94,16 @@ export default function RegisterPage() {
   });
   const [localEntries, setLocalEntries] = useState<Entry[]>(cachedRegister?.entries || []);
 
-  const [calcTypes, setCalcTypes] = useState<Record<number, CalcType>>({});
+  const [calcTypes, setCalcTypes] = useState<Record<number, CalcType>>(() => {
+    if (cachedRegister?.columns) {
+      const calcs: Record<number, CalcType> = {};
+      cachedRegister.columns.forEach((col: any) => {
+        if (col.summary) calcs[col.id] = col.summary as CalcType;
+      });
+      return calcs;
+    }
+    return {};
+  });
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
 
@@ -643,14 +652,22 @@ export default function RegisterPage() {
     }
   }, [detailViewEntry]);
 
-  // Auto-initialize edit values when Row Detail view opens
+  // Auto-initialize edit values when Row Detail view opens (but NOT when columns change mid-edit)
+  const detailInitEntryIdRef = useRef<number | null>(null);
   useEffect(() => {
     if (detailViewEntry && columns.length > 0) {
-      const init: Record<string, string> = {};
-      columns.filter(c => c.type !== 'formula').forEach(c => {
-        init[c.id.toString()] = detailViewEntry.cells?.[c.id.toString()] || '';
-      });
-      setDetailEdits(init);
+      // Only initialize when opening a new/different entry, not when columns update
+      if (detailInitEntryIdRef.current !== detailViewEntry.id) {
+        detailInitEntryIdRef.current = detailViewEntry.id;
+        const init: Record<string, string> = {};
+        columns.filter(c => c.type !== 'formula').forEach(c => {
+          init[c.id.toString()] = detailViewEntry.cells?.[c.id.toString()] || '';
+        });
+        setDetailEdits(init);
+      }
+    } else {
+      // Reset tracker when modal closes
+      detailInitEntryIdRef.current = null;
     }
   }, [detailViewEntry, columns]);
 
@@ -1176,7 +1193,6 @@ export default function RegisterPage() {
     },
     onSuccess: (updatedReg) => {
       queryClient.setQueryData(['register', registerId], updatedReg);
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
     },
     onError: (_err, _vars, context) => {
       if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
@@ -1213,7 +1229,6 @@ export default function RegisterPage() {
     },
     onSuccess: (updatedReg) => {
       queryClient.setQueryData(['register', registerId], updatedReg);
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
     },
     onError: (_err, _vars, context) => {
       if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
@@ -2239,529 +2254,26 @@ export default function RegisterPage() {
     dropdownRectRef.current = rect ? { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width } : null;
     setDropdownModal(true);
   }, []);
+  // ── Export Functions (extracted to useExport hook for code splitting) ──
+  const {
+    handleExportExcel,
+    handleExportPDF,
+    handleRowDownloadPDF,
+    handleRowDownloadExcel,
+    handleRowShareText,
+  } = useExport({
+    register,
+    columns,
+    displayEntries,
+    localEntries,
+    hiddenColumns,
+    selectedRows,
+    calcTypes,
+    colWidths,
+  });
 
-  const handleExportExcel = (options: ExportOptions) => {
-    if (!register) return;
 
-    const visibleColumns = columns.filter((col) => 
-      !hiddenColumns.has(col.id) && 
-      col.type !== 'image' &&
-      options.selectedColumnIds.has(col.id)
-    );
-    const headerRow = ['S.No.', ...visibleColumns.map(c => c.name)];
 
-    if (headerRow.length === 0) {
-      toast.error('No columns selected for export.');
-      return;
-    }
-
-    const entriesToExport = options.exportRows === 'selected' 
-      ? displayEntries.filter(e => selectedRows.has(e.id))
-      : displayEntries;
-
-    if (entriesToExport.length === 0) {
-      toast.error('No rows to export.');
-      return;
-    }
-
-    const dataAOA: any[][] = [];
-    
-    if (options.includeHeading) {
-      dataAOA.push([register.name || 'Export']);
-    }
-    if (options.includeDateTime) {
-      dataAOA.push([`Exported on ${new Date().toLocaleString()}`]);
-    }
-    if (options.includeHeading || options.includeDateTime) {
-      dataAOA.push([]); // blank row
-    }
-
-    dataAOA.push(headerRow);
-
-    entriesToExport.forEach((entry, idx) => {
-      const rowData: any[] = [(idx + 1).toString()];
-      visibleColumns.forEach(c => {
-        const val = c.type === 'formula'
-          ? evaluateFormula(c.formula || '', entry, columns)
-          : (entry.cells?.[c.id.toString()] || '');
-        
-        if (c.type === 'number' || c.type === 'currency') {
-          const cleaned = val.toString().replace(/[^\d.-]/g, '');
-          const n = parseFloat(cleaned);
-          rowData.push(isNaN(n) ? val : n);
-        } else if (c.type === 'date' && val) {
-          const parts = val.split(/[-/]/);
-          if (parts.length === 3) {
-            const d = parseInt(parts[0]);
-            const m = parseInt(parts[1]) - 1;
-            const y = parseInt(parts[2]);
-            const dt = new Date(y, m, d);
-            rowData.push(isNaN(dt.getTime()) ? val : dt);
-          } else {
-            rowData.push(val);
-          }
-        } else {
-          rowData.push(val);
-        }
-      });
-      dataAOA.push(rowData);
-    });
-
-    // ── Add Summation/Footer Row ──
-    const footerRow: any[] = ['TOTALS'];
-    let hasAnyCalc = false;
-    visibleColumns.forEach(c => {
-      const calcType = calcTypes[c.id] || 'none';
-      
-      if (calcType === 'none') {
-        footerRow.push('');
-        return;
-      }
-
-      hasAnyCalc = true;
-      const values = entriesToExport.map(entry => {
-        if (c.type === 'formula') return evaluateFormula(c.formula || '', entry, columns);
-        return entry.cells?.[c.id.toString()] || '';
-      });
-
-      let calcValue: string | number = 0;
-      if (calcType === 'empty') {
-        calcValue = values.filter(v => v.trim() === '').length;
-      } else if (calcType === 'filled' || calcType === 'count') {
-        calcValue = values.filter(v => v.trim() !== '').length;
-      } else if (calcType === 'distinct') {
-        calcValue = new Set(values.filter(v => v.trim() !== '')).size;
-      } else if (calcType === 'sum' || calcType === 'average' || calcType === 'min' || calcType === 'max') {
-        const nums = values.map(v => {
-          if (v === 'true') return 1;
-          if (v === 'false' || !v) return 0;
-          const cleaned = v.toString().replace(/[^\d.-]/g, '');
-          const n = parseFloat(cleaned);
-          return isNaN(n) ? 0 : n;
-        });
-
-        if (calcType === 'sum') {
-          calcValue = nums.reduce((a, b) => a + b, 0);
-        } else if (calcType === 'average') {
-          calcValue = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2) : 0;
-        } else if (calcType === 'min') {
-          calcValue = nums.length > 0 ? Math.min(...nums) : 0;
-        } else if (calcType === 'max') {
-          calcValue = nums.length > 0 ? Math.max(...nums) : 0;
-        }
-      }
-
-      const prefix = calcType === 'sum' ? 'SUM: ' : 
-                     calcType === 'count' ? 'COUNT: ' : 
-                     calcType === 'distinct' ? 'DISTINCT: ' : 
-                     calcType === 'average' ? 'AVG: ' : 
-                     calcType === 'min' ? 'MIN: ' : 
-                     calcType === 'max' ? 'MAX: ' : '';
-      footerRow.push(`${prefix}${calcValue}`);
-    });
-
-    if (hasAnyCalc) {
-      dataAOA.push(footerRow);
-    }
-
-    try {
-      const ws = XLSX.utils.aoa_to_sheet(dataAOA);
-      
-      const getColLetter = (n: number) => {
-        let s = '';
-        while (n >= 0) {
-          s = String.fromCharCode(n % 26 + 65) + s;
-          n = Math.floor(n / 26) - 1;
-        }
-        return s;
-      };
-
-      ws['!dataValidation'] = [];
-
-      visibleColumns.forEach((c, cIdx) => {
-        const colLetter = getColLetter(cIdx + 1); // +1 because we added S.No.
-
-        if (c.type === 'dropdown' && c.dropdownOptions && c.dropdownOptions.length > 0) {
-          const validationFormula = `"${c.dropdownOptions.join(',')}"`;
-          if (validationFormula.length <= 255) {
-            ws['!dataValidation'].push({
-              sqref: `${colLetter}2:${colLetter}2000`,
-              type: 'list',
-              allowBlank: true,
-              showDropDown: true,
-              formula1: validationFormula
-            });
-          }
-        }
-
-        if (c.type === 'formula' && c.formula) {
-          entriesToExport.forEach((_, rIdx) => {
-            let excelF = c.formula || '';
-            visibleColumns.forEach((col, refIdx) => {
-              const refLetter = getColLetter(refIdx + 1);
-              // Shift row index down if we added heading/datetime rows
-              const headingOffset = (options.includeHeading ? 1 : 0) + (options.includeDateTime ? 1 : 0) + ((options.includeHeading || options.includeDateTime) ? 1 : 0);
-              excelF = excelF.replace(new RegExp(`\\{${col.name}\\}`, 'g'), `${refLetter}${rIdx + 2 + headingOffset}`);
-            });
-            const headingOffset = (options.includeHeading ? 1 : 0) + (options.includeDateTime ? 1 : 0) + ((options.includeHeading || options.includeDateTime) ? 1 : 0);
-            const cellRef = `${colLetter}${rIdx + 2 + headingOffset}`;
-            const val = evaluateFormula(c.formula || '', entriesToExport[rIdx], columns);
-            const n = parseFloat(val);
-            ws[cellRef] = { t: isNaN(n) ? 's' : 'n', f: excelF, v: isNaN(n) ? val : n };
-          });
-        }
-      });
-
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
-
-      // ── Add Hidden Metadata Sheet for round-trip preservation ──
-      const metadataAOA: any[][] = [
-        ['Column Name', 'Type', 'Dropdown Options', 'Formula', 'Width', 'Summary']
-      ];
-      visibleColumns.forEach(c => {
-        metadataAOA.push([
-          c.name,
-          c.type,
-          c.dropdownOptions ? c.dropdownOptions.join(',') : '',
-          c.formula || '',
-          colWidths[c.id] || '',
-          calcTypes[c.id] || 'none'
-        ]);
-      });
-      const metaWs = XLSX.utils.aoa_to_sheet(metadataAOA);
-      XLSX.utils.book_append_sheet(wb, metaWs, "_metadata_");
-      
-      // Hide the metadata sheet
-      if (!wb.Workbook) wb.Workbook = {};
-      if (!wb.Workbook.Sheets) wb.Workbook.Sheets = [];
-      wb.Workbook.Sheets = [
-        { name: "Sheet1", Hidden: 0 },
-        { name: "_metadata_", Hidden: 1 }
-      ];
-
-      XLSX.writeFile(wb, `${register.name || 'Export'}.xlsx`);
-    } catch (err) {
-      console.error("Export Error: ", err);
-      alert("Failed to export Excel file.");
-    }
-  };
-
-  const handleExportPDF = (options: ExportOptions) => {
-    if (!register) return;
-
-    const visibleCols = columns.filter((col) => 
-      !hiddenColumns.has(col.id) && 
-      col.type !== 'image' &&
-      options.selectedColumnIds.has(col.id)
-    );
-    const headerRow = ['S.No.', ...visibleCols.map(c => c.name)];
-    
-    if (headerRow.length === 0) {
-      toast.error('No columns selected for export.');
-      return;
-    }
-
-    const entriesToExport = options.exportRows === 'selected' 
-      ? displayEntries.filter(e => selectedRows.has(e.id))
-      : displayEntries;
-
-    if (entriesToExport.length === 0) {
-      toast.error('No rows to export.');
-      return;
-    }
-
-    const bodyRows = entriesToExport.map((entry, idx) => {
-      return [
-        (idx + 1).toString(),
-        ...visibleCols.map(c => {
-          const cellValue = c.type === 'formula'
-            ? evaluateFormula(c.formula || '', entry, columns)
-            : (entry.cells?.[c.id.toString()] || '');
-          return cellValue;
-        })
-      ];
-    });
-
-    // ── Add Summation/Footer Row ──
-    const footerRow: string[] = ['TOTALS'];
-    let hasAnyCalc = false;
-    visibleCols.forEach(c => {
-      const calcType = calcTypes[c.id] || 'none';
-      
-      if (calcType === 'none') {
-        footerRow.push('');
-        return;
-      }
-
-      hasAnyCalc = true;
-      const values = entriesToExport.map(entry => {
-        if (c.type === 'formula') return evaluateFormula(c.formula || '', entry, columns);
-        return entry.cells?.[c.id.toString()] || '';
-      });
-
-      let calcValue: string | number = 0;
-      if (calcType === 'empty') {
-        calcValue = values.filter(v => v.trim() === '').length;
-      } else if (calcType === 'filled' || calcType === 'count') {
-        calcValue = values.filter(v => v.trim() !== '').length;
-      } else if (calcType === 'distinct') {
-        calcValue = new Set(values.filter(v => v.trim() !== '')).size;
-      } else if (calcType === 'sum' || calcType === 'average' || calcType === 'min' || calcType === 'max') {
-        const nums = values.map(v => {
-          if (v === 'true') return 1;
-          if (v === 'false' || !v) return 0;
-          const cleaned = v.toString().replace(/[^\d.-]/g, '');
-          const n = parseFloat(cleaned);
-          return isNaN(n) ? 0 : n;
-        });
-
-        if (calcType === 'sum') {
-          calcValue = nums.reduce((a, b) => a + b, 0);
-        } else if (calcType === 'average') {
-          calcValue = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2) : 0;
-        } else if (calcType === 'min') {
-          calcValue = nums.length > 0 ? Math.min(...nums) : 0;
-        } else if (calcType === 'max') {
-          calcValue = nums.length > 0 ? Math.max(...nums) : 0;
-        }
-      }
-
-      const prefix = calcType === 'sum' ? 'SUM: ' : 
-                     calcType === 'count' ? 'COUNT: ' : 
-                     calcType === 'distinct' ? 'DISTINCT: ' : 
-                     calcType === 'average' ? 'AVG: ' : 
-                     calcType === 'min' ? 'MIN: ' : 
-                     calcType === 'max' ? 'MAX: ' : '';
-      footerRow.push(`${prefix}${calcValue}`);
-    });
-
-    try {
-      const doc = new jsPDF({ orientation: headerRow.length > 6 ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
-
-      let currentY = 18;
-
-      if (options.includeHeading) {
-        doc.setFontSize(16);
-        doc.setFont('helvetica', 'bold');
-        doc.text(register.name || 'Export', 14, currentY);
-        currentY += 6;
-      }
-
-      if (options.includeDateTime) {
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(120, 120, 120);
-        doc.text(`Exported on ${new Date().toLocaleString()} • ${entriesToExport.length} rows`, 14, currentY);
-        doc.setTextColor(0, 0, 0);
-        currentY += 6;
-      } else {
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(120, 120, 120);
-        doc.text(`${entriesToExport.length} rows`, 14, currentY);
-        doc.setTextColor(0, 0, 0);
-        currentY += 6;
-      }
-
-      doc.setProperties({ title: register.name || 'Register Export' });
-
-      autoTable(doc, {
-        startY: currentY + 6,
-        showHead: options.includeHeading ? 'everyPage' : 'firstPage',
-        head: [headerRow],
-        body: bodyRows,
-        foot: hasAnyCalc ? [footerRow] : undefined,
-        theme: 'grid',
-        tableWidth: 'auto',
-        horizontalPageBreak: true,
-        horizontalPageBreakRepeat: 0,
-        headStyles: {
-          fillColor: [20, 83, 45],
-          textColor: 255,
-          fontStyle: 'bold',
-          fontSize: 7,
-          halign: 'center',
-          valign: 'middle',
-        },
-        footStyles: {
-          fillColor: [230, 240, 230],
-          textColor: [20, 83, 45],
-          fontStyle: 'bold',
-          fontSize: 7,
-          halign: 'center',
-        },
-        bodyStyles: {
-          fontSize: 7,
-          cellPadding: 2,
-          valign: 'middle',
-        },
-        alternateRowStyles: {
-          fillColor: [245, 247, 250],
-        },
-        styles: {
-          lineColor: [200, 200, 200],
-          lineWidth: 0.1,
-          overflow: 'linebreak',
-          minCellWidth: 10,
-        },
-        columnStyles: {
-          0: { halign: 'center', cellWidth: 10 },
-        },
-        margin: { left: 10, right: 10 },
-        didDrawPage: (data: any) => {
-          // Footer with page number
-          const pageCount = (doc as any).internal.getNumberOfPages();
-          doc.setFontSize(8);
-          doc.setTextColor(150);
-          doc.text(
-            `Page ${data.pageNumber} of ${pageCount}`,
-            doc.internal.pageSize.getWidth() / 2,
-            doc.internal.pageSize.getHeight() - 8,
-            { align: 'center' }
-          );
-        },
-      });
-
-      doc.save(`${register.name || 'Export'}.pdf`);
-    } catch (err) {
-      console.error('PDF Export Error:', err);
-      alert('Failed to export PDF file.');
-    }
-  };
-
-  // ── Row-level actions ──
-  const handleRowDownloadPDF = useCallback((entryId: number) => {
-    if (!register) return;
-    const entry = localEntries.find(e => e.id === entryId);
-    if (!entry) return;
-    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
-    const rowIdx = localEntries.indexOf(entry) + 1;
-
-    try {
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-
-      // Title
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
-      doc.text(register.name || 'Record', 14, 18);
-
-      // Subtitle
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(120, 120, 120);
-      doc.text(`Row ${rowIdx} • Exported on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`, 14, 24);
-      doc.setTextColor(0, 0, 0);
-
-      const bodyRows = [
-        ['S.No.', rowIdx.toString()],
-        ...visibleCols.map(c => {
-        const val = c.type === 'formula'
-          ? evaluateFormula(c.formula || '', entry, columns)
-          : (entry.cells?.[c.id.toString()] || '');
-        return [c.name, val];
-      })];
-
-      autoTable(doc, {
-        startY: 30,
-        head: [['Field', 'Value']],
-        body: bodyRows,
-        theme: 'grid',
-        headStyles: {
-          fillColor: [20, 83, 45],
-          textColor: 255,
-          fontStyle: 'bold',
-          fontSize: 9,
-          halign: 'left',
-          valign: 'middle'
-        },
-        bodyStyles: {
-          fontSize: 9,
-          cellPadding: 4,
-          valign: 'middle'
-        },
-        alternateRowStyles: {
-          fillColor: [245, 247, 250]
-        },
-        styles: {
-          lineColor: [200, 200, 200],
-          lineWidth: 0.2,
-          overflow: 'linebreak'
-        },
-        columnStyles: {
-          0: { fontStyle: 'bold', cellWidth: 50, fillColor: [240, 244, 240] },
-          1: { cellWidth: 'auto' }
-        },
-        margin: { left: 14, right: 14 },
-      });
-
-      doc.save(`${register.name || 'Record'}_Row${rowIdx}.pdf`);
-    } catch (err) {
-      console.error('Row PDF Error:', err);
-      alert('Failed to export row as PDF.');
-    }
-  }, [register, localEntries, columns, hiddenColumns]);
-
-  const handleRowDownloadExcel = useCallback((entryId: number) => {
-    if (!register) return;
-    const entry = localEntries.find(e => e.id === entryId);
-    if (!entry) return;
-    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
-    const rowIdx = localEntries.indexOf(entry) + 1;
-
-    try {
-      const headerRow = ['S.No.', ...visibleCols.map(c => c.name)];
-      const dataRow = [(localEntries.indexOf(entry) + 1).toString(), ...visibleCols.map(c => {
-        const val = c.type === 'formula'
-          ? evaluateFormula(c.formula || '', entry, columns)
-          : (entry.cells?.[c.id.toString()] || '');
-        
-        if (c.type === 'number' || c.type === 'currency') {
-          const cleaned = val.toString().replace(/[^\d.-]/g, '');
-          const n = parseFloat(cleaned);
-          return isNaN(n) ? val : n;
-        }
-        return val;
-      })];
-
-      const ws = XLSX.utils.aoa_to_sheet([headerRow, dataRow]);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Row Data');
-      XLSX.writeFile(wb, `${register.name || 'Record'}_Row${rowIdx}.xlsx`);
-    } catch (err) {
-      console.error('Row Excel Error:', err);
-      alert('Failed to export row as Excel.');
-    }
-  }, [register, localEntries, columns, hiddenColumns]);
-
-  const handleRowShareText = useCallback((entryId: number) => {
-    if (!register) return;
-    const entry = localEntries.find(e => e.id === entryId);
-    if (!entry) return;
-    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
-
-    const lines = visibleCols.map(c => {
-      const val = c.type === 'formula'
-        ? evaluateFormula(c.formula || '', entry, columns)
-        : (entry.cells?.[c.id.toString()] || '—');
-      return `${c.name}: ${val}`;
-    });
-
-    const text = `${register.name}\n${'─'.repeat(30)}\n${lines.join('\n')}`;
-
-    navigator.clipboard.writeText(text).then(() => {
-      alert('Row copied to clipboard!');
-    }).catch(() => {
-      // Fallback
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      alert('Row copied to clipboard!');
-    });
-  }, [register, localEntries, columns, hiddenColumns]);
 
 
   const toggleSelectRow = useCallback((id: number) => {
@@ -2885,155 +2397,18 @@ export default function RegisterPage() {
   }, [wrapperSize.h]);
 
 
-  // Defer formula/stats recalculation so it doesn't block keystrokes (Fix #3)
-  const deferredDisplayEntriesForStats = useDeferredValue(displayEntries);
+  // stats recalculation depends directly on displayEntries for live updates
 
-  // Optimized single-pass statistics calculation (Fix performance #4)
-  const columnStats = useMemo(() => {
-    if (!register || columns.length === 0) return {};
-    
-    const entriesToCalc = selectedRows.size > 0 
-      ? deferredDisplayEntriesForStats.filter(e => selectedRows.has(e.id)) 
-      : deferredDisplayEntriesForStats;
+  // Column statistics (extracted to useColumnStats hook)
+  const columnStats = useColumnStats({
+    register,
+    columns,
+    visibleColumns,
+    displayEntries,
+    selectedRows,
+    calcTypes,
+  });
 
-    if (entriesToCalc.length === 0) return {};
-
-    // Initialize stats accumulators for all columns
-    const colStatsData: Record<number, { type: CalcType; sum: number; count: number; min: number; max: number; distinct: Set<string> }> = {};
-    const visibleColIds = new Set(visibleColumns.map(c => c.id));
-    
-    columns.forEach(col => {
-      // Only calc if column is visible to save cycles
-      if (!visibleColIds.has(col.id)) return;
-
-      const calcType = calcTypes[col.id] || 'none';
-      
-      if (calcType === 'none') return;
-
-      colStatsData[col.id] = {
-        type: calcType,
-        sum: 0,
-        count: 0,
-        min: Infinity,
-        max: -Infinity,
-        distinct: new Set<string>()
-      };
-    });
-
-    const activeColIds = Object.keys(colStatsData).map(Number);
-    if (activeColIds.length === 0) return {};
-
-    // Map column IDs to objects for O(1) lookup in the loop
-    const activeColsMap = new Map<number, any>();
-    activeColIds.forEach(id => {
-      const col = columns.find(c => c.id === id);
-      if (col) activeColsMap.set(id, col);
-    });
-
-    // Single pass over entries to accumulate all stats
-    const entryLen = entriesToCalc.length;
-    for (let i = 0; i < entryLen; i++) {
-      const e = entriesToCalc[i];
-      for (let j = 0; j < activeColIds.length; j++) {
-        const colId = activeColIds[j];
-        const col = activeColsMap.get(colId);
-        if (!col) continue;
-
-        const s = colStatsData[colId];
-        let val = '';
-        if (col.type === 'formula') {
-          val = evaluateFormula(col.formula || '', e, columns);
-        } else {
-          val = e.cells?.[colId.toString()] || '';
-        }
-
-        const trimmed = val.trim();
-        
-        if (s.type === 'empty') {
-          if (trimmed === '') s.count++;
-          continue;
-        }
-        if (s.type === 'filled' || s.type === 'count') {
-          if (trimmed !== '') s.count++;
-          continue;
-        }
-        if (s.type === 'distinct') {
-          if (trimmed !== '') s.distinct.add(trimmed);
-          continue;
-        }
-
-        // Numeric calculations
-        let n: number;
-        if (val === 'true') n = 1;
-        else if (val === 'false') n = 0;
-        else if (col.type === 'date' && trimmed !== '') {
-          const parts = trimmed.split(/[-/]/);
-          if (parts.length === 3) {
-            const d = parseInt(parts[0]);
-            const m = parseInt(parts[1]) - 1;
-            const y = parseInt(parts[2]);
-            const dt = new Date(y, m, d);
-            n = isNaN(dt.getTime()) ? 0 : dt.getTime();
-          } else {
-            n = 0;
-          }
-        } else {
-          n = parseFloat(val.replace(/[₹$,]/g, ''));
-          if (isNaN(n)) n = 0;
-        }
-
-        s.sum += n;
-        s.count++;
-        if (trimmed !== '') {
-          if (n < s.min) s.min = n;
-          if (n > s.max) s.max = n;
-        }
-      }
-    }
-
-    // Finalize stats values
-    const finalStats: Record<number, string | number> = {};
-    activeColIds.forEach(colId => {
-      const s = colStatsData[colId];
-      const col = activeColsMap.get(colId);
-
-      if (s.type === 'empty' || s.type === 'filled' || s.type === 'count') {
-        finalStats[colId] = s.count;
-      } else if (s.type === 'distinct') {
-        finalStats[colId] = s.distinct.size;
-      } else if (s.type === 'sum') {
-        if (col?.type === 'date') {
-          finalStats[colId] = '-'; // Sum doesn't make sense for dates
-        } else {
-          finalStats[colId] = Number.isInteger(s.sum) ? s.sum : parseFloat(s.sum.toFixed(2));
-        }
-      } else if (s.type === 'average') {
-        if (col?.type === 'date') {
-          const avg = s.sum / (s.count || 1);
-          finalStats[colId] = isNaN(avg) || avg === 0 ? '-' : formatDateToDDMMYYYY(new Date(avg));
-        } else {
-          const avg = s.sum / (entryLen || 1);
-          finalStats[colId] = Number.isInteger(avg) ? avg : parseFloat(avg.toFixed(2));
-        }
-      } else if (s.type === 'min') {
-        const val = s.min === Infinity ? 0 : s.min;
-        if (col?.type === 'date' && val > 0) {
-          finalStats[colId] = formatDateToDDMMYYYY(new Date(val));
-        } else {
-          finalStats[colId] = val;
-        }
-      } else if (s.type === 'max') {
-        const val = s.max === -Infinity ? 0 : s.max;
-        if (col?.type === 'date' && val > 0) {
-          finalStats[colId] = formatDateToDDMMYYYY(new Date(val));
-        } else {
-          finalStats[colId] = val;
-        }
-      }
-    });
-
-    return finalStats;
-  }, [register, columns, visibleColumns, deferredDisplayEntriesForStats, selectedRows, calcTypes]);
 
   // ── Virtualization ──
   // Always-on virtualization for both rows AND columns.
@@ -3132,6 +2507,7 @@ export default function RegisterPage() {
   // Scroll persistence on refresh/remount/register switch
   const isRestoringScroll = useRef(false);
   const lastRestoredRegisterId = useRef<number | null>(null);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 
   useLayoutEffect(() => {
@@ -3185,12 +2561,32 @@ export default function RegisterPage() {
   const paddingTop = useVirtual && virtualRows.length > 0 ? virtualRows[0].start : 0;
   const paddingBottom = useVirtual && virtualRows.length > 0 ? totalVirtualHeight - virtualRows[virtualRows.length - 1].end : 0;
   // Horizontal padding for the column virtualizer
-  const paddingLeft = useColVirtual && virtualCols.length > 0 ? virtualCols[0].start : 0;
-  const paddingRight = useColVirtual && virtualCols.length > 0 ? totalVirtualWidth - virtualCols[virtualCols.length - 1].end : 0;
+  let paddingLeft = useColVirtual && virtualCols.length > 0 ? virtualCols[0].start : 0;
+  let paddingRight = useColVirtual && virtualCols.length > 0 ? totalVirtualWidth - virtualCols[virtualCols.length - 1].end : 0;
+
+  const beforeVirtualCols: { index: number }[] = [];
+  const afterVirtualCols: { index: number }[] = [];
+
+  if (useColVirtual && virtualCols.length > 0) {
+    const firstIdx = virtualCols[0].index;
+    const lastIdx = virtualCols[virtualCols.length - 1].index;
+
+    visibleColumns.forEach((col, i) => {
+      if (frozenColumns.has(col.id)) {
+        if (i < firstIdx) {
+          beforeVirtualCols.push({ index: i });
+          paddingLeft -= (colWidths[col.id] || defaultColWidth);
+        } else if (i > lastIdx) {
+          afterVirtualCols.push({ index: i });
+          paddingRight -= (colWidths[col.id] || defaultColWidth);
+        }
+      }
+    });
+  }
 
   const frozenLeftOffsets = useMemo(() => {
     const offsets: Record<number, number> = {};
-    let left = 50; // S.No column
+    let left = 60; // S.No column (widened to fit checkbox)
     for (const vc of visibleColumns) {
       if (frozenColumns.has(vc.id)) {
         offsets[vc.id] = left;
@@ -3315,106 +2711,141 @@ export default function RegisterPage() {
         onScroll={(e) => {
           if (isRestoringScroll.current) return;
           const target = e.currentTarget;
-          sessionStorage.setItem(`rb_scroll_${registerId}`, JSON.stringify({
-            left: target.scrollLeft,
-            top: target.scrollTop
-          }));
+          const left = target.scrollLeft;
+          const top = target.scrollTop;
+          
+          if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+          scrollTimeoutRef.current = setTimeout(() => {
+            sessionStorage.setItem(`rb_scroll_${registerId}`, JSON.stringify({ left, top }));
+          }, 150);
         }}
         style={{ '--dynamic-row-height': `${dynamicRowHeight}px` } as React.CSSProperties}
       >
         <table className="spreadsheet">
           <thead>
             <tr>
-              <th className="serial">S.NO.</th>
-              {/* Left horizontal spacer for virtualized columns */}
-              {useColVirtual && paddingLeft > 0 && (
-                <th key="pad-left" className="spacer" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />
-              )}
-              {(useColVirtual ? virtualCols : visibleColumns.map((_, i) => ({ index: i }))).map((vc) => {
-                const col = visibleColumns[vc.index];
-                if (!col) return null;
-                const IconComponent = (() => {
-                  const nameL = (col.name || '').toLowerCase();
-                  const isPayment = nameL.includes('amount') || nameL.includes('fee') || nameL.includes('payment') || nameL.includes('balance') || nameL.includes('price');
-                  if (isPayment && col.type !== 'currency') return <IndianRupee size={12} />;
-                  switch (col.type) {
-                    case 'number':         return <Hash size={12} />;
-                    case 'auto_increment': return <ListOrdered size={12} />;
-                    case 'currency':       return <IndianRupee size={12} />;
-                    case 'date':           return <Calendar size={12} />;
-                    case 'dropdown':       return <ChevronDown size={12} />;
-                    case 'formula':        return <FlaskConical size={12} />;
-                    case 'phone':          return <Phone size={12} />;
-                    case 'email':          return <Mail size={12} />;
-                    case 'url':            return <Globe size={12} />;
-                    case 'rating':         return <Star size={12} />;
-                    case 'checkbox':       return <CheckSquare size={12} />;
-                    case 'image':          return <ImageIcon size={12} />;
-                    default:               return <span className="col-type-text-icon">T</span>;
-                  }
-                })();
+              <th className="serial">
+                <div className="serial-inner">
+                  <input
+                    type="checkbox"
+                    className="row-select-checkbox"
+                    checked={displayEntries.length > 0 && selectedRows.size === displayEntries.length}
+                    ref={(el) => { if (el) el.indeterminate = selectedRows.size > 0 && selectedRows.size < displayEntries.length; }}
+                    onChange={() => {
+                      if (selectedRows.size === displayEntries.length) {
+                        setSelectedRows(new Set());
+                      } else {
+                        setSelectedRows(new Set(displayEntries.map(e => e.id)));
+                      }
+                    }}
+                    tabIndex={-1}
+                    title="Select All"
+                  />
+                  <span style={{ fontSize: '10px' }}>S.NO.</span>
+                </div>
+              </th>
+              {(() => {
+                const elements: { type: 'cell' | 'pad-left' | 'pad-right', vc?: { index: number } }[] = [];
+                if (useColVirtual) {
+                  beforeVirtualCols.forEach(vc => elements.push({ type: 'cell', vc }));
+                  if (paddingLeft > 0) elements.push({ type: 'pad-left' });
+                  virtualCols.forEach(vc => elements.push({ type: 'cell', vc }));
+                  if (paddingRight > 0) elements.push({ type: 'pad-right' });
+                  afterVirtualCols.forEach(vc => elements.push({ type: 'cell', vc }));
+                } else {
+                  visibleColumns.forEach((_, i) => elements.push({ type: 'cell', vc: { index: i } }));
+                }
 
-                const isFrozen = frozenColumns.has(col.id);
-                const stickyLeft = isFrozen ? frozenLeftOffsets[col.id] : undefined;
-                const colW = colWidths[col.id] || defaultColWidth;
-
-                return (
-                <th
-                  key={col.id}
-                  className={`col-header-cell ${draggedColumnId === col.id ? 'dragging' : ''}${isFrozen ? ' frozen-col' : ''}`}
-                  ref={(el) => {
-                    if (el) colHeaderRefs.current.set(col.id, el);
-                    else colHeaderRefs.current.delete(col.id);
-                  }}
-                  style={isFrozen
-                    ? { position: 'sticky', left: stickyLeft, zIndex: 13, background: 'var(--border-light)', width: colW, minWidth: colW, maxWidth: colW }
-                    : { width: colW, minWidth: colW, maxWidth: colW }
+                return elements.map((el) => {
+                  if (el.type === 'pad-left') {
+                    return <th key="pad-left" className="spacer" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />;
                   }
-                >
-                  <div className="col-header-inner">
-                    {IconComponent}
-                    <span
-                      className="col-header-name"
-                      title="Click for options, Drag to reorder"
-                      onMouseDown={(e) => handleColDragMouseDown(e, col.id)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (colMenuId === col.id) {
-                          setColMenuId(null);
-                          setColMenuRect(null);
-                        } else {
-                          const th = (e.currentTarget as HTMLElement).closest('th');
-                          if (th) setColMenuRect(th.getBoundingClientRect());
-                          setColMenuId(col.id);
-                        }
-                      }}
-                      style={{ cursor: 'default' }}
-                    >
-                      {col.name}
-                      {col.type === 'formula' && <span className="col-formula-badge" title={col.formula}>Fx</span>}
-                      {col.linkedTo && (
-                        <span title={`Linked to ${col.linkedTo.registerId}`} style={{ display: 'inline-flex', alignItems: 'center' }}>
-                          <LinkIcon size={12} color="var(--primary)" style={{ marginLeft: 4 }} />
+                  if (el.type === 'pad-right') {
+                    return <th key="pad-right" className="spacer" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />;
+                  }
+
+                  const vc = el.vc!;
+                  const col = visibleColumns[vc.index];
+                  if (!col) return null;
+                  const IconComponent = (() => {
+                    const nameL = (col.name || '').toLowerCase();
+                    const isPayment = nameL.includes('amount') || nameL.includes('fee') || nameL.includes('payment') || nameL.includes('balance') || nameL.includes('price');
+                    if (isPayment && col.type !== 'currency') return <IndianRupee size={12} />;
+                    switch (col.type) {
+                      case 'number':         return <Hash size={12} />;
+                      case 'auto_increment': return <ListOrdered size={12} />;
+                      case 'currency':       return <IndianRupee size={12} />;
+                      case 'date':           return <Calendar size={12} />;
+                      case 'dropdown':       return <ChevronDown size={12} />;
+                      case 'formula':        return <FlaskConical size={12} />;
+                      case 'phone':          return <Phone size={12} />;
+                      case 'email':          return <Mail size={12} />;
+                      case 'url':            return <Globe size={12} />;
+                      case 'rating':         return <Star size={12} />;
+                      case 'checkbox':       return <CheckSquare size={12} />;
+                      case 'image':          return <ImageIcon size={12} />;
+                      default:               return <span className="col-type-text-icon">T</span>;
+                    }
+                  })();
+
+                  const isFrozen = frozenColumns.has(col.id);
+                  const stickyLeft = isFrozen ? frozenLeftOffsets[col.id] : undefined;
+                  const colW = colWidths[col.id] || defaultColWidth;
+
+                  return (
+                  <th
+                    key={col.id}
+                    className={`col-header-cell ${draggedColumnId === col.id ? 'dragging' : ''}${isFrozen ? ' frozen-col' : ''}`}
+                    ref={(el) => {
+                      if (el) colHeaderRefs.current.set(col.id, el);
+                      else colHeaderRefs.current.delete(col.id);
+                    }}
+                    style={isFrozen
+                      ? { position: 'sticky', left: stickyLeft, zIndex: 13, background: 'var(--border-light)', width: colW, minWidth: colW, maxWidth: colW }
+                      : { width: colW, minWidth: colW, maxWidth: colW }
+                    }
+                  >
+                    <div className="col-header-inner">
+                      {IconComponent}
+                      <span
+                        className="col-header-name"
+                        title="Click for options, Drag to reorder"
+                        onMouseDown={(e) => handleColDragMouseDown(e, col.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (colMenuId === col.id) {
+                            setColMenuId(null);
+                            setColMenuRect(null);
+                          } else {
+                            const th = (e.currentTarget as HTMLElement).closest('th');
+                            if (th) setColMenuRect(th.getBoundingClientRect());
+                            setColMenuId(col.id);
+                          }
+                        }}
+                        style={{ cursor: 'default' }}
+                      >
+                        {col.name}
+                        {col.type === 'formula' && <span className="col-formula-badge" title={col.formula}>Fx</span>}
+                        {col.linkedTo && (
+                          <span title={`Linked to ${col.linkedTo.registerId}`} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                            <LinkIcon size={12} color="var(--primary)" style={{ marginLeft: 4 }} />
+                          </span>
+                        )}
+                      </span>
+                      {sortColId === col.id && sortDir && (
+                        <span className="sort-indicator" title={sortDir === 'asc' ? 'Sorted A→Z' : 'Sorted Z→A'}>
+                          {sortDir === 'asc' ? '▲' : '▼'}
                         </span>
                       )}
-                    </span>
-                    {sortColId === col.id && sortDir && (
-                      <span className="sort-indicator" title={sortDir === 'asc' ? 'Sorted A→Z' : 'Sorted Z→A'}>
-                        {sortDir === 'asc' ? '▲' : '▼'}
-                      </span>
-                    )}
-                    {frozenColumns.has(col.id) && <Pin size={10} color="var(--muted)" className="frozen-pin" />}
-                    <div
-                      className="col-resize-handle"
-                      onMouseDown={(e) => handleColResizeMouseDown(e, col.id)}
-                    />
-                  </div>
-                </th>
-              )})}
-              {/* Right horizontal spacer */}
-              {useColVirtual && paddingRight > 0 && (
-                <th key="pad-right" className="spacer" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />
-              )}
+                      {frozenColumns.has(col.id) && <Pin size={10} color="var(--muted)" className="frozen-pin" />}
+                      <div
+                        className="col-resize-handle"
+                        onMouseDown={(e) => handleColResizeMouseDown(e, col.id)}
+                      />
+                    </div>
+                  </th>
+                )});
+              })()}
               <th className="actions" style={{ width: '50px', minWidth: '50px', padding: 0, position: 'sticky', right: 0, zIndex: 14, background: 'var(--table-bg)', borderLeft: '1px solid var(--border-v)' }}>
                 <button
                   onClick={(e) => {
@@ -3451,6 +2882,8 @@ export default function RegisterPage() {
                   idx={virtualRow.index}
                   visibleColumns={visibleColumns}
                   virtualCols={useColVirtual ? virtualCols : undefined}
+                  beforeVirtualCols={useColVirtual ? beforeVirtualCols : undefined}
+                  afterVirtualCols={useColVirtual ? afterVirtualCols : undefined}
                   paddingLeft={useColVirtual ? paddingLeft : 0}
                   paddingRight={useColVirtual ? paddingRight : 0}
                   isSelected={selectedRows.has(entry.id)}
@@ -3512,7 +2945,7 @@ export default function RegisterPage() {
               </tr>
             ))}
           </tbody>
-            {displayEntries.length > 0 && (() => {
+            {columns.length > 0 && (() => {
               return (
               <RegisterSummaryRow
                 visibleColumns={visibleColumns}
@@ -3522,6 +2955,8 @@ export default function RegisterPage() {
                 onAddRecord={() => addEntryMutation.mutate({})}
                 useColVirtual={useColVirtual}
                 virtualCols={virtualCols}
+                beforeVirtualCols={beforeVirtualCols}
+                afterVirtualCols={afterVirtualCols}
                 paddingLeft={paddingLeft}
                 paddingRight={paddingRight}
                 columnStats={columnStats}
@@ -3535,6 +2970,64 @@ export default function RegisterPage() {
           </table>
         </div>
 
+      {/* ── Floating Selection Toolbar ── */}
+      {selectedRows.size > 0 && (
+        <div className="selection-toolbar">
+          <div className="selection-toolbar-info">
+            <CheckSquare size={16} />
+            <span><strong>{selectedRows.size}</strong> row{selectedRows.size > 1 ? 's' : ''} selected</span>
+          </div>
+          <div className="selection-toolbar-actions">
+            <button
+              className="selection-toolbar-btn excel"
+              onClick={() => {
+                const allColIds = new Set(columns.map(c => c.id));
+                handleExportExcel({
+                  format: 'excel',
+                  exportRows: 'selected',
+                  selectedColumnIds: allColIds,
+                  includeHeading: true,
+                  includeDateTime: false,
+                });
+              }}
+            >
+              <Download size={14} /> Excel
+            </button>
+            <button
+              className="selection-toolbar-btn pdf"
+              onClick={() => {
+                const allColIds = new Set(columns.map(c => c.id));
+                handleExportPDF({
+                  format: 'pdf',
+                  exportRows: 'selected',
+                  selectedColumnIds: allColIds,
+                  includeHeading: true,
+                  includeDateTime: false,
+                });
+              }}
+            >
+              <FileText size={14} /> PDF
+            </button>
+            <button
+              className="selection-toolbar-btn delete"
+              onClick={() => {
+                if (confirm(`Delete ${selectedRows.size} selected row(s)?`)) {
+                  bulkDeleteMutation.mutate();
+                }
+              }}
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+            <button
+              className="selection-toolbar-btn clear"
+              onClick={() => setSelectedRows(new Set())}
+              title="Clear selection"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
       {/* ── Context Menus ── */}
       <RegisterContextMenus 
         colMenuId={colMenuId} colMenuRect={colMenuRect} setColMenuId={setColMenuId} columns={columns}

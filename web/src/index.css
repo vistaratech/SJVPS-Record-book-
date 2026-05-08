@@ -148,8 +148,8 @@ a {
 }
 
 .spreadsheet-wrapper::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
 }
 
 .spreadsheet-wrapper::-webkit-scrollbar-track {
@@ -158,13 +158,13 @@ a {
 
 .spreadsheet-wrapper::-webkit-scrollbar-thumb {
   background: transparent;
-  border-radius: 20px;
+  border-radius: 8px; /* Slightly less round for larger scrollbar */
 }
 
 .spreadsheet-wrapper:hover::-webkit-scrollbar-thumb {
   background: #B0B0A8;
-  border: 2px solid transparent;
-  background-clip: content-box;
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 
 .spreadsheet-wrapper::-webkit-scrollbar-thumb:hover {
@@ -528,6 +528,16 @@ a {
   text-transform: uppercase;
   margin-top: 1px;
   white-space: nowrap;
+}
+
+.serial-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 0 4px;
 }
 
 .sidebar-close-btn {
@@ -1856,7 +1866,8 @@ a {
   overflow: auto;
   position: relative;
   overflow-anchor: none;
-  will-change: transform;
+  will-change: transform, scroll-position;
+  -webkit-overflow-scrolling: touch;
   background: var(--surface);
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
@@ -1894,14 +1905,15 @@ a {
 }
 
 .spreadsheet th.serial {
-  width: 50px;
-  min-width: 50px;
+  width: 60px;
+  min-width: 60px;
   text-align: center;
   cursor: default;
   position: sticky;
   left: 0;
   z-index: 12;
   background: var(--surface);
+  padding: 0 4px;
 }
 
 .spreadsheet th.serial-header-checkbox {
@@ -2025,12 +2037,13 @@ a {
   font-size: 12px;
   font-family: 'Inter', sans-serif;
   background: var(--surface);
-  width: 50px;
-  min-width: 50px;
+  width: 60px;
+  min-width: 60px;
   position: sticky;
   left: 0;
   z-index: 11;
-  overflow: hidden;
+  overflow: visible;
+  padding: 0 4px;
 }
 
 .spreadsheet td.serial-header-checkbox {
@@ -5498,7 +5511,7 @@ body.modal-open {
   background: #ffffff;
   border-radius: 20px;
   box-shadow: 0 32px 100px rgba(0, 0, 0, 0.3), 0 8px 32px rgba(0, 0, 0, 0.12);
-  width: min(500px, 100%);
+  width: min(640px, 95%);
   max-height: calc(100vh - 40px);
   display: flex;
   flex-direction: column;
@@ -5607,6 +5620,8 @@ body.modal-open {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 .row-detail-label {
@@ -5630,6 +5645,36 @@ body.modal-open {
   border-radius: 4px;
   letter-spacing: 0.5px;
   border: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+/* Container holding label-group + chevron button */
+.row-detail-label-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.row-detail-col-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid #e2e8f0;
+  background: #f8faff;
+  color: var(--muted-light);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  padding: 0;
+}
+
+.row-detail-col-btn:hover {
+  background: var(--navy);
+  color: #fff;
+  border-color: var(--navy);
 }
 
 .row-detail-value {
@@ -7755,3 +7800,161 @@ body.modal-open {
 .drag-fill-overlay { position: absolute; border: 2px dashed #3b82f6; background: rgba(59, 130, 246, 0.1); pointer-events: none; z-index: 9; transition: all 0.1s; }
 
 .drag-fill-target { outline: 2px dashed #3b82f6 !important; background: rgba(59, 130, 246, 0.1) !important; }
+
+/* ═══════════ ROW SELECTION ═══════════ */
+.serial-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0 4px;
+}
+
+.row-select-checkbox {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--navy);
+  flex-shrink: 0;
+  margin: 0;
+  opacity: 0.25;
+  transition: all 0.2s;
+  border: 1.5px solid var(--border);
+  border-radius: 3px;
+}
+
+.row-select-checkbox:checked,
+.row-select-checkbox:indeterminate {
+  opacity: 1;
+}
+
+tr:hover .row-select-checkbox,
+thead .row-select-checkbox {
+  opacity: 0.7;
+}
+
+tr:hover .row-select-checkbox:checked,
+thead .row-select-checkbox:checked,
+thead .row-select-checkbox:indeterminate {
+  opacity: 1;
+}
+
+.serial-number {
+  cursor: pointer;
+  flex: 1;
+  text-align: center;
+}
+
+/* Selected row highlight */
+tr.row-selected td {
+  background: rgba(13, 42, 92, 0.05) !important;
+}
+
+tr.row-selected td.serial {
+  background: rgba(13, 42, 92, 0.08) !important;
+}
+
+tr.row-selected .row-select-checkbox {
+  opacity: 1;
+}
+
+/* ═══════════ FLOATING SELECTION TOOLBAR ═══════════ */
+.selection-toolbar {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 20px;
+  background: var(--navy);
+  color: #fff;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+  animation: slideUpToolbar 0.25s ease-out;
+}
+
+@keyframes slideUpToolbar {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.selection-toolbar-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.selection-toolbar-info strong {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.selection-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.selection-toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.selection-toolbar-btn.excel {
+  background: rgba(255, 255, 255, 0.15);
+  color: #A5D6A7;
+}
+
+.selection-toolbar-btn.excel:hover {
+  background: rgba(76, 175, 80, 0.3);
+  color: #fff;
+}
+
+.selection-toolbar-btn.pdf {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ef9a9a;
+}
+
+.selection-toolbar-btn.pdf:hover {
+  background: rgba(229, 57, 53, 0.3);
+  color: #fff;
+}
+
+.selection-toolbar-btn.delete {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ef9a9a;
+}
+
+.selection-toolbar-btn.delete:hover {
+  background: rgba(229, 57, 53, 0.35);
+  color: #fff;
+}
+
+.selection-toolbar-btn.clear {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  padding: 7px 8px;
+}
+
+.selection-toolbar-btn.clear:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, memo, lazy, Suspense } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate, Routes, Route, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -14,12 +14,14 @@ import { DashboardContent } from '../components/home/DashboardContent';
 import { Sidebar } from '../components/home/Sidebar';
 import { NotificationPanel } from '../components/common/NotificationPanel';
 import { useNotifications } from '../lib/NotificationContext';
-import RegisterPage from './RegisterPage';
-import TemplatesPage from './TemplatesPage';
-import HistoryPage from './HistoryPage';
-import RecycleBinPage from './RecycleBinPage';
-import ProfilePage from './ProfilePage';
-import BackupPage from './BackupPage';
+
+// Lazy-load heavy page components — only downloaded when navigated to
+const RegisterPage = lazy(() => import('./RegisterPage'));
+const TemplatesPage = lazy(() => import('./TemplatesPage'));
+const HistoryPage = lazy(() => import('./HistoryPage'));
+const RecycleBinPage = lazy(() => import('./RecycleBinPage'));
+const ProfilePage = lazy(() => import('./ProfilePage'));
+const BackupPage = lazy(() => import('./BackupPage'));
 
 const RegisterPageWrapper = memo(() => {
   const { id } = useParams();
@@ -324,23 +326,32 @@ export default function HomePage() {
         />
       )}
 
-      <Routes>
-        <Route index element={
-          <DashboardContent
-            filtered={filtered}
-            excelMutation={excelMutation}
-            handleFileUpload={handleFileUpload}
-            onInputFolder={handleFolderUpload}
-          />
-        } />
-        <Route path="register/:id" element={<RegisterPageWrapper />} />
-        <Route path="templates" element={<TemplatesPage />} />
-        <Route path="templates/:categoryId" element={<TemplatesPage />} />
-        <Route path="history" element={<HistoryPage />} />
-        <Route path="recycle-bin" element={<RecycleBinPage />} />
-        <Route path="profile" element={<ProfilePage />} />
-        <Route path="backup" element={<BackupPage />} />
-      </Routes>
+      <Suspense fallback={
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--muted-light)', fontSize: 14 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div className="loading-spinner" style={{ width: 32, height: 32, margin: '0 auto 12px', border: '3px solid var(--border)', borderTopColor: 'var(--navy)', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
+            Loading…
+          </div>
+        </div>
+      }>
+        <Routes>
+          <Route index element={
+            <DashboardContent
+              filtered={filtered}
+              excelMutation={excelMutation}
+              handleFileUpload={handleFileUpload}
+              onInputFolder={handleFolderUpload}
+            />
+          } />
+          <Route path="register/:id" element={<RegisterPageWrapper />} />
+          <Route path="templates" element={<TemplatesPage />} />
+          <Route path="templates/:categoryId" element={<TemplatesPage />} />
+          <Route path="history" element={<HistoryPage />} />
+          <Route path="recycle-bin" element={<RecycleBinPage />} />
+          <Route path="profile" element={<ProfilePage />} />
+          <Route path="backup" element={<BackupPage />} />
+        </Routes>
+      </Suspense>
 
       {/* ── Register Context Menu ── */}
       {menuId !== null && (

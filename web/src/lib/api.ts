@@ -1130,8 +1130,14 @@ export function evaluateFormula(formula: string, entry: Entry, columns: Column[]
         const nested = evaluateFormula(col.formula, entry, columns);
         numStr = (nested === '') ? '0' : nested;
       } else {
-        const parsed = parseFloat(rawVal.replace(/[₹$,]/g, ''));
-        numStr = isNaN(parsed) ? '0' : parsed.toString();
+        // Strip currency symbols and commas first
+        const cleaned = rawVal.replace(/[₹$,]/g, '').trim();
+        // Only parse if the cleaned value is purely numeric — ignore values with suffixes like "x", "INT"
+        if (/^-?\d+(\.\d+)?$/.test(cleaned)) {
+          numStr = parseFloat(cleaned).toString();
+        } else {
+          numStr = '0';
+        }
       }
       expression = expression.replace(regex, numStr);
     }
@@ -2109,11 +2115,22 @@ export async function createBackup(businessId: number, label?: string): Promise<
   const mainDoc = { meta: snapshot.meta, folders: snapshot.folders };
   await setDoc(backupDoc(id), mainDoc);
 
-  // Store registers in chunks of 5 to avoid size limits
-  const CHUNK_SIZE = 5;
-  for (let i = 0; i < validRegisters.length; i += CHUNK_SIZE) {
-    const chunk = validRegisters.slice(i, i + CHUNK_SIZE);
-    await setDoc(doc(db, 'backups', id, 'registerChunks', `chunk_${Math.floor(i / CHUNK_SIZE)}`), { registers: JSON.parse(JSON.stringify(chunk)) });
+  // Option A: Per-Register Chunking (Scalable for 50+ registers)
+  // Each register gets its own document, with entries split into sub-chunks.
+  for (const reg of validRegisters) {
+    const regCopy: any = JSON.parse(JSON.stringify(reg));
+    const entries = regCopy.entries || [];
+    delete regCopy.entries; // Store entries separately
+    
+    const regRef = doc(db, 'backups', id, 'registers', reg.id.toString());
+    await setDoc(regRef, regCopy);
+    
+    // Store entries in chunks under this register
+    for (let i = 0; i < entries.length; i += ENTRIES_PER_CHUNK) {
+      const chunkIdx = Math.floor(i / ENTRIES_PER_CHUNK);
+      const chunkEntries = entries.slice(i, i + ENTRIES_PER_CHUNK);
+      await setDoc(doc(db, 'backups', id, 'registers', reg.id.toString(), 'entryChunks', chunkIdx.toString()), { entries: chunkEntries });
+    }
   }
 
   await logAction(businessId, 'Backup Created', `Created backup: ${snapshot.meta.label} (${validRegisters.length} registers, ${totalEntries} entries)`);
@@ -2139,16 +2156,37 @@ export async function restoreBackup(backupId: string): Promise<void> {
   if (!snap.exists()) throw new Error('Backup not found');
   const { meta, folders } = snap.data() as { meta: BackupMeta; folders: Folder[] };
 
-  // Load register chunks
-  const chunkSnap = await getDocs(collection(db, 'backups', backupId, 'registerChunks'));
+  // Load registers
   const allRegisters: RegisterDetail[] = [];
-  chunkSnap.docs.forEach(d => {
-    const { registers } = d.data() as { registers: RegisterDetail[] };
-    allRegisters.push(...registers);
-  });
+
+  // Try NEW structure first: /backups/{id}/registers/{regId}
+  const regsSnap = await getDocs(collection(db, 'backups', backupId, 'registers'));
+  if (!regsSnap.empty) {
+    for (const d of regsSnap.docs) {
+      const reg = d.data() as RegisterDetail;
+      // Load its entry chunks
+      const entryChunksSnap = await getDocs(collection(d.ref, 'entryChunks'));
+      const entries: Entry[] = [];
+      const chunks = entryChunksSnap.docs.map(cd => ({
+        idx: parseInt(cd.id),
+        entries: (cd.data() as { entries: Entry[] }).entries
+      }));
+      // Sort by index to preserve order
+      chunks.sort((a, b) => a.idx - b.idx).forEach(c => entries.push(...c.entries));
+      reg.entries = entries;
+      allRegisters.push(reg);
+    }
+  } else {
+    // Fallback to LEGACY structure: /backups/{id}/registerChunks/chunk_n
+    const chunkSnap = await getDocs(collection(db, 'backups', backupId, 'registerChunks'));
+    chunkSnap.docs.forEach(d => {
+      const { registers } = d.data() as { registers: RegisterDetail[] };
+      allRegisters.push(...registers);
+    });
+  }
 
   if (allRegisters.length === 0 && meta.registerCount > 0) {
-    throw new Error(`Failed to load registers from backup chunks. Found 0 but expected ${meta.registerCount}.`);
+    throw new Error(`Failed to load registers from backup. Found 0 but expected ${meta.registerCount}.`);
   }
 
   // Delete existing registers for this business
@@ -2200,9 +2238,18 @@ export async function restoreBackup(backupId: string): Promise<void> {
  * Delete a backup permanently.
  */
 export async function deleteBackup(backupId: string): Promise<void> {
-  // Delete register chunks subcollection
+  // Delete legacy register chunks
   const chunkSnap = await getDocs(collection(db, 'backups', backupId, 'registerChunks'));
   await Promise.all(chunkSnap.docs.map(d => deleteDoc(d.ref)));
+
+  // Delete NEW structure registers and their entry chunks
+  const regsSnap = await getDocs(collection(db, 'backups', backupId, 'registers'));
+  for (const d of regsSnap.docs) {
+    const entryChunksSnap = await getDocs(collection(d.ref, 'entryChunks'));
+    await Promise.all(entryChunksSnap.docs.map(cd => deleteDoc(cd.ref)));
+    await deleteDoc(d.ref);
+  }
+
   await deleteDoc(backupDoc(backupId));
 }
 

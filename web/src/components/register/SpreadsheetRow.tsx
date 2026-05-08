@@ -306,6 +306,10 @@ interface SpreadsheetRowProps {
   visibleColumns: Column[];
   /** The virtual columns from TanStack Virtual */
   virtualCols?: any[];
+  /** Frozen columns before virtual window */
+  beforeVirtualCols?: { index: number }[];
+  /** Frozen columns after virtual window */
+  afterVirtualCols?: { index: number }[];
   /** Horizontal left padding (px) to represent off-screen columns left of viewport */
   paddingLeft?: number;
   /** Horizontal right padding (px) to represent off-screen columns right of viewport */
@@ -337,6 +341,8 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     idx,
     visibleColumns,
     virtualCols,
+    beforeVirtualCols,
+    afterVirtualCols,
     paddingLeft = 0,
     paddingRight = 0,
     rowHeight,
@@ -356,8 +362,16 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
     onCellFormatClick,
     searchTerm,
   } = props;
-  // Columns to actually render — either the virtual items or all visible columns
-  const colItems = virtualCols ?? visibleColumns.map((_, i) => ({ index: i }));
+  const elements: { type: 'cell' | 'pad-left' | 'pad-right', vc?: { index: number } }[] = [];
+  if (virtualCols && beforeVirtualCols && afterVirtualCols) {
+    beforeVirtualCols.forEach(vc => elements.push({ type: 'cell', vc }));
+    if (paddingLeft > 0) elements.push({ type: 'pad-left' });
+    virtualCols.forEach(vc => elements.push({ type: 'cell', vc }));
+    if (paddingRight > 0) elements.push({ type: 'pad-right' });
+    afterVirtualCols.forEach(vc => elements.push({ type: 'cell', vc }));
+  } else {
+    visibleColumns.forEach((_, i) => elements.push({ type: 'cell', vc: { index: i } }));
+  }
 
 
   const handleCellKeyDown = useCallback((e: React.KeyboardEvent, colId: number | string, colIdx: number) => {
@@ -420,12 +434,37 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
   const handleSerialClick = useCallback(() => {
     onRowDetail?.(entry);
   }, [entry, onRowDetail]);
+  const { isSelected, toggleSelectRow } = props;
+
+  const handleCheckboxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    toggleSelectRow(entry.id);
+  }, [entry.id, toggleSelectRow]);
+
   return (
-    <tr id={`row-${entry.id}`} data-entry-id={entry.id} style={rowHeight ? { height: rowHeight, maxHeight: rowHeight } : undefined}>
-      <td className="serial" style={{ cursor: 'pointer' }} onClick={handleSerialClick} title="Click to view details">{idx + 1}</td>
-      {/* Left padding cell for column virtualization */}
-      {paddingLeft > 0 && <td key="pad-left" className="spacer" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />}
-      {colItems.map((vc) => {
+    <tr id={`row-${entry.id}`} data-entry-id={entry.id} className={isSelected ? 'row-selected' : ''} style={rowHeight ? { height: rowHeight, maxHeight: rowHeight } : undefined}>
+      <td className="serial" style={{ cursor: 'pointer' }}>
+        <div className="serial-inner">
+          <input
+            type="checkbox"
+            className="row-select-checkbox"
+            checked={isSelected}
+            onChange={handleCheckboxChange}
+            onClick={(e) => e.stopPropagation()}
+            tabIndex={-1}
+          />
+          <span className="serial-number" onClick={handleSerialClick} title="Click to view details">{idx + 1}</span>
+        </div>
+      </td>
+      {elements.map((el) => {
+        if (el.type === 'pad-left') {
+          return <td key="pad-left" className="spacer" style={{ width: paddingLeft, minWidth: paddingLeft, padding: 0, border: 'none' }} />;
+        }
+        if (el.type === 'pad-right') {
+          return <td key="pad-right" className="spacer" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />;
+        }
+
+        const vc = el.vc!;
         const col = visibleColumns[vc.index];
         if (!col) return null;
         
@@ -587,8 +626,6 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
         </td>
         );
       })}
-      {/* Right padding cell for column virtualization */}
-      {paddingRight > 0 && <td key="pad-right" className="spacer" style={{ width: paddingRight, minWidth: paddingRight, padding: 0, border: 'none' }} />}
       <td className="actions" style={{ width: '50px', minWidth: '50px', position: 'sticky', right: 0, zIndex: 1, background: 'var(--table-bg)', borderLeft: '1px solid var(--border-v)' }}>
         <button
           className={`row-menu-btn ${isMenuOpen ? 'menu-open' : ''}`}
