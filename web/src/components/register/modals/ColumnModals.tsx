@@ -173,7 +173,7 @@ function FormulaBuilder({ formula, onChange, columns, entries, outputName, exclu
         <button 
           className={`mode-tab ${mode === 'custom' ? 'active' : ''}`} 
           onClick={() => setMode('custom')}
-          style={{ flex: 1, padding: '6px', fontSize: '12px', borderRadius: '6px', border: '1px solid var(--border)', background: mode === 'custom' ? 'var(--navy)' : 'white', color: mode === 'custom' ? 'white' : 'var(--text-main)', cursor: 'pointer', fontWeight: mode === 'custom' ? 600 : 400 }}
+          style={{ flex: 1, padding: '8px', fontSize: '13px', borderRadius: '8px', border: '1px solid var(--border)', background: mode === 'custom' ? 'var(--navy)' : 'white', color: mode === 'custom' ? 'white' : 'var(--text-main)', cursor: 'pointer', fontWeight: mode === 'custom' ? 700 : 500, transition: 'all 0.2s' }}
         >
           Custom Formula (Advanced)
         </button>
@@ -349,13 +349,14 @@ function FormulaBuilder({ formula, onChange, columns, entries, outputName, exclu
         </div>
       ) : (
         <div className="custom-editor">
-          <label className="modal-label" style={{ fontSize: '11px' }}>Formula</label>
-          <input 
-            ref={inputRef}
-            className="modal-input" 
+          <label className="modal-label" style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Formula Expression</label>
+          <textarea 
+            ref={inputRef as any}
+            className="modal-textarea" 
             value={formula} 
             onChange={(e) => onChange(e.target.value)} 
-            placeholder="e.g. {A} + {B} * 0.18" 
+            placeholder="e.g. {Marks} / {Full Marks} * 100"
+            style={{ minHeight: '100px', fontSize: '15px', fontWeight: 600, fontFamily: 'monospace' }}
           />
           
           <div style={{ marginTop: '8px', marginBottom: '12px' }}>
@@ -406,37 +407,63 @@ function FormulaBuilder({ formula, onChange, columns, entries, outputName, exclu
             </div>
           </div>
 
-          <div style={{ marginTop: '8px' }}>
-            <label style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>Insert Column:</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+          <div style={{ marginTop: '12px' }}>
+            <label style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginBottom: '8px', fontWeight: 700, textTransform: 'uppercase' }}>Select Columns to Insert:</label>
+            <div style={{ 
+              display: 'flex', 
+              flexWrap: 'wrap', 
+              gap: '6px', 
+              padding: '12px', 
+              background: 'white', 
+              border: '1px solid var(--border)', 
+              borderRadius: '10px',
+              minHeight: '160px',
+              maxHeight: '250px',
+              overflowY: 'auto',
+              alignContent: 'flex-start',
+              boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)'
+            }}>
               {columns.filter(c => c.id !== excludeId).map(c => (
                 <button 
                   key={c.id} 
                   onClick={() => insertText(`{${c.name}}`)}
                   style={{ 
-                    padding: '4px 10px', 
-                    fontSize: '11px', 
-                    fontWeight: 500,
-                    borderRadius: '6px', 
+                    padding: '6px 12px', 
+                    fontSize: '12px', 
+                    fontWeight: 600,
+                    borderRadius: '8px', 
                     border: '1px solid var(--border)', 
-                    background: 'white', 
+                    background: 'var(--bg-light)', 
                     cursor: 'pointer',
                     transition: 'all 0.2s',
-                    color: 'var(--text-main)'
+                    color: 'var(--navy)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
                   }}
                   type="button"
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'var(--bg-light)';
-                    e.currentTarget.style.borderColor = 'var(--primary-light)';
+                    e.currentTarget.style.background = 'white';
+                    e.currentTarget.style.borderColor = 'var(--navy)';
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                    e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'white';
+                    e.currentTarget.style.background = 'var(--bg-light)';
                     e.currentTarget.style.borderColor = 'var(--border)';
+                    e.currentTarget.style.transform = 'none';
+                    e.currentTarget.style.boxShadow = 'none';
                   }}
                 >
-                  +{c.name}
+                  <Plus size={12} />
+                  {c.name}
                 </button>
               ))}
+              {columns.filter(c => c.id !== excludeId).length === 0 && (
+                <div style={{ width: '100%', textAlign: 'center', color: 'var(--muted)', fontSize: '12px', padding: '20px' }}>
+                  No other columns available to reference.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -624,7 +651,7 @@ export function ColumnModals(props: ColumnModalsProps) {
       {/* ── Add New Column ── */}
       {newColumnModal && (
         <div className="modal-overlay" onClick={() => setNewColumnModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className={`modal-content ${newColType === 'formula' ? 'modal-content--formula' : ''}`} onClick={(e) => e.stopPropagation()}>
             <h3 className="modal-title">Add New Column</h3>
             <label className="modal-label">Column Name</label>
             <input className="modal-input" value={newColName} onChange={(e) => setNewColName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && newColName.trim() && addColumnMutation.mutate()} placeholder="e.g. Amount" autoFocus />
@@ -694,7 +721,7 @@ export function ColumnModals(props: ColumnModalsProps) {
       {/* ── Change Type ── */}
       {changeTypeModal && (
         <div className="modal-overlay" onClick={() => setChangeTypeModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className={`modal-content ${changeTypeValue === 'formula' ? 'modal-content--formula' : ''}`} onClick={(e) => e.stopPropagation()}>
             <h3 className="modal-title">Change Column Type</h3>
             <p className="modal-p-text">Changing the type may affect existing data in this column.</p>
             <div className="type-chips">
@@ -731,7 +758,7 @@ export function ColumnModals(props: ColumnModalsProps) {
       {/* ── Insert Column ── */}
       {insertColModal !== null && (
         <div className="modal-overlay" onClick={() => setInsertColModal(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className={`modal-content ${newColType === 'formula' ? 'modal-content--formula' : ''}`} onClick={(e) => e.stopPropagation()}>
             <h3 className="modal-title">Insert Column {insertColModal === 'left' ? 'Left' : 'Right'}</h3>
             <label className="modal-label">Column Name</label>
             <input className="modal-input" value={newColName} onChange={(e) => setNewColName(e.target.value)} placeholder="e.g. Amount" autoFocus />

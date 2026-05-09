@@ -299,6 +299,7 @@ async function getRegDoc(registerId: number): Promise<RegisterDetail> {
   
   // Ensure basic arrays exist so mutations don't crash
   if (!data.columns) data.columns = [];
+  data.columns.sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   if (!data.pages) data.pages = [];
   if (!data.sharedWith) data.sharedWith = [];
 
@@ -468,6 +469,7 @@ export async function getRegister(registerId: number): Promise<RegisterDetail> {
   if (!reg.pages || reg.pages.length === 0) reg.pages = [{ id: 1, name: 'Page 1', index: 0 }];
   if (!reg.entries) reg.entries = [];
   if (!reg.columns) reg.columns = [];
+  reg.columns.sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
 
   // MIGRATION: Fix duplicate IDs caused by precision loss in older Excel imports
   let hasDuplicates = false;

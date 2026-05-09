@@ -6,14 +6,14 @@
 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 :root {
   /* Primary palette — AG Trust Dark Blue */
-  --navy: #0D2A5C;
-  --navy-light: #1A3A75;
-  --navy-dark: #081B3D;
+  --navy: #002D5D;
+  --navy-light: #003D7A;
+  --navy-dark: #001D40;
 
   /* Accent — AG Trust Accent Blue */
   --accent: #1E88E5;
   --accent-dark: #1565C0;
-  --accent-light: #E3F2FD;
+  --accent-light: #FFFFFF;
 
   /* Brand Green — AG Trust Secondary Green */
   --brand-green: #43A047;
@@ -33,19 +33,19 @@
   --warning: #FB8C00;
 
   /* Backgrounds — AG Trust Background Grey/Blue */
-  --background: #F5F7FA;
+  --background: #FFFFFF;
   --bg-light: #FFFFFF;
-  --bg-secondary: #EEF2F6;
+  --bg-secondary: #FFFFFF;
   --table-bg: #FFFFFF;
   --surface: #FFFFFF;
   --white: #FFFFFF;
-  --border-light: #E1E8F0;
-  --border: #D1D9E6;
+  --border-light: #E8EDF2;
+  --border: #D8DEE6;
   --border-v: rgba(13, 42, 92, 0.06);
 
   /* Text */
-  --foreground: #0D2A5C;
-  --fg: #0D2A5C;
+  --foreground: #002D5D;
+  --fg: #002D5D;
   --muted: #4B5E7E;
   --muted-light: #7E8DA6;
   --placeholder: #A5B0C1;
@@ -53,9 +53,9 @@
   /* Sidebar / Surface */
   --sidebar-bg: #FFFFFF;
   --surface-hover: #F0F4F8;
-  --primary: #E53935; /* AG Trust Primary Red */
-  --primary-light: #ef5350;
-  --primary-dark: #c62828;
+  --primary: var(--navy); /* AG Trust Primary Blue */
+  --primary-light: #003D7A;
+  --primary-dark: #001D40;
 
   /* Border radius */
   --radius-sm: 6px;
@@ -880,9 +880,9 @@ a {
   overflow: hidden;
   min-width: 0;
   background: var(--background);
-  padding: 16px;
+  padding: 0;
   animation: pageContentFadeIn 0.35s ease-out;
-  border-radius: var(--radius-lg);
+  border-radius: 0;
 }
 
 @keyframes pageContentFadeIn {
@@ -907,8 +907,8 @@ a {
 .register-header {
   background: var(--surface);
   border-bottom: 1px solid var(--border-light);
-  padding: 0 20px;
-  height: 56px;
+  padding: 0 12px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -938,16 +938,16 @@ a {
 .register-header-btn {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 14px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--navy);
-  font-size: 12px;
-  font-weight: 600;
   background: var(--surface);
   cursor: pointer;
   transition: all 0.15s;
+  flex-shrink: 0;
 }
 
 .register-header-btn:hover {
@@ -1308,8 +1308,8 @@ a {
 .register-toolbar {
   display: flex;
   align-items: center;
-  padding: 10px 24px;
-  min-height: 48px;
+  padding: 8px 12px;
+  min-height: 44px;
   gap: 6px;
   border-bottom: 1px solid var(--border-light);
   background: var(--surface);
@@ -1514,7 +1514,7 @@ a {
   display: flex;
   align-items: center;
   height: 36px;
-  padding: 0 24px;
+  padding: 0 12px;
   background: var(--surface);
   border-bottom: 1px solid var(--border-light);
   flex-shrink: 0;
@@ -1869,7 +1869,7 @@ a {
   will-change: transform, scroll-position;
   -webkit-overflow-scrolling: touch;
   background: var(--surface);
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  border-radius: 0;
 }
 
 .spreadsheet {
@@ -1883,16 +1883,16 @@ a {
   top: 0;
   z-index: 10;
   background: var(--surface);
-  border-bottom: 2px solid var(--border);
-  border-right: 1px solid var(--border-v);
+  border-bottom: 1px solid var(--border-light);
+  border-right: 1px solid var(--border-light);
   padding: 0;
-  height: 42px;
+  height: 44px;
   text-align: left;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--foreground);
-  text-transform: none;
-  letter-spacing: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--navy);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   white-space: nowrap;
   cursor: default;
   -webkit-user-select: none;
@@ -1914,6 +1914,8 @@ a {
   z-index: 12;
   background: var(--surface);
   padding: 0 4px;
+  border-right: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
 }
 
 .spreadsheet th.serial-header-checkbox {
@@ -2022,7 +2024,7 @@ a {
 
 .spreadsheet td {
   border-bottom: 1px solid var(--border-light);
-  border-right: 1px solid var(--border-v);
+  border-right: 1px solid var(--border-light);
   padding: 0;
   height: 46px;
   font-size: 13px;
@@ -2700,6 +2702,33 @@ a {
   box-shadow: 0 0 0 3px rgba(20, 83, 45, 0.08);
 }
 
+.modal-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  color: var(--foreground);
+  margin-bottom: 16px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  background: var(--background);
+  resize: vertical;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+.modal-textarea:focus {
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(20, 83, 45, 0.08);
+}
+
+.modal-content--formula {
+  max-width: 600px;
+  width: 90%;
+  max-height: 90vh;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -3245,9 +3274,9 @@ a {
 /* â•â•â•â•â•â•â•â•â•â•â• CATEGORIES GRID â•â•â•â•â•â•â•â•â•â•â• */
 .categories-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 16px;
-  padding: 32px 40px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  padding: 12px 16px;
 }
 
 .category-card {
@@ -7483,9 +7512,9 @@ body.modal-open {
 .add-record-overlay { z-index: 11500 !important; }
 
 .add-record-modal {
-  width: 100%;
-  max-width: 560px;
-  max-height: 82vh;
+  width: 95vw;
+  max-width: 1100px;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
   padding: 0 !important;
@@ -7540,10 +7569,10 @@ body.modal-open {
 .add-record-fields {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  padding: 20px 24px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px 24px;
 }
 
 .add-record-field {
@@ -7556,7 +7585,7 @@ body.modal-open {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--foreground);
   text-transform: uppercase;
@@ -7575,11 +7604,11 @@ body.modal-open {
 }
 
 .add-record-input {
-  height: 38px;
-  padding: 0 12px;
+  height: 44px;
+  padding: 0 14px;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-md);
-  font-size: 13.5px;
+  font-size: 14px;
   color: var(--foreground);
   background: var(--background);
   width: 100%;

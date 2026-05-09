@@ -53,7 +53,7 @@ export const RegisterToolbar = memo(function RegisterToolbar({
         <input
           id="pab-search-input"
           className="pab-search-input"
-          placeholder="Find in register…"
+          placeholder="Search records..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           onKeyDown={e => { if (e.key === 'Escape') setSearch(''); }}

@@ -66,16 +66,16 @@ export function RegisterHeader({ register, setShareModal, handleOpenExport }: Re
   return (
     <div className="register-header-actions">
 
-      <button className="register-header-btn" onClick={() => setShareModal(true)}>
-        <Share2 size={14} /> Share
+      <button className="register-header-btn" onClick={() => setShareModal(true)} title="Share Register">
+        <Share2 size={18} />
       </button>
       <div className="export-dropdown-wrap">
-        <button className="register-header-btn" onClick={handleOpenExport}>
-          <Download size={14} /> Download Options
+        <button className="register-header-btn" onClick={handleOpenExport} title="Download Options">
+          <Download size={18} />
         </button>
       </div>
-      <button className="register-header-btn outline" onClick={() => { setTemplateName(register?.name || ''); setSaveTemplateModal(true); }}>
-        <Bookmark size={14} /> Save Template
+      <button className="register-header-btn outline" onClick={() => { setTemplateName(register?.name || ''); setSaveTemplateModal(true); }} title="Save as Template">
+        <Bookmark size={18} />
       </button>
 
       {/* Save Template Modal */}

@@ -8,7 +8,7 @@ import {
   freezeColumn, hideColumn,
   addEntry, updateEntry, deleteEntry, duplicateEntry, bulkDeleteEntries, insertEntry,
   restoreEntry, bulkRestoreEntries, restoreColumn,
-  addPage, renamePage, deletePage,
+  renamePage, deletePage,
   evaluateFormula,
   generateShareLink, addSharedUser, removeSharedUser,
   subscribeToMutationStatus, updateEntriesOrder,
@@ -256,7 +256,7 @@ export default function RegisterPage() {
   const [sharePermission, setSharePermission] = useState<'view' | 'edit'>('view');
   const [showExportModal, setShowExportModal] = useState(false);
   // Rename page
-  const [renamePageId, setRenamePageId] = useState<number | null>(null);
+  const [renamePageId] = useState<number | null>(null);
   const [renamePageValue, setRenamePageValue] = useState('');
 
   const [calcMenu, setCalcMenu] = useState<{ colId: number; rect: DOMRect } | null>(null);
@@ -1892,17 +1892,7 @@ export default function RegisterPage() {
     },
   });
 
-  const addPageMutation = useMutation({
-    mutationFn: () => addPage(registerId),
-    onSuccess: (newPage) => {
-      queryClient.setQueryData(['register', registerId], (old: any) => {
-        if (!old) return old;
-        return { ...old, pages: [...(old.pages || []), newPage] };
-      });
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
-      setCurrentPageIndex(newPage.index);
-    },
-  });
+  /* Unused: addPageMutation */
 
   const renamePageMutation = useMutation({
     mutationFn: () => renamePage(registerId, renamePageId!, renamePageValue),
@@ -2357,7 +2347,7 @@ export default function RegisterPage() {
 
   // ── Fixed viewport grid: exactly 6 columns × 9 rows visible ──
   // Measure the actual container to compute column/row sizing dynamically
-  const TARGET_COLS = 6;
+  const TARGET_COLS = 4;
   const TARGET_ROWS = 9;
   const SERIAL_COL_W = 50; // S.NO column width
   const HEADER_OVERHEAD = 42; // column header row height
@@ -2381,9 +2371,9 @@ export default function RegisterPage() {
   // Column width: fill 6 columns exactly into available width
   const defaultColWidth = useMemo(() => {
     if (wrapperSize.w > 0) {
-      return Math.max(130, Math.floor((wrapperSize.w - SERIAL_COL_W) / TARGET_COLS));
+      return Math.max(160, Math.floor((wrapperSize.w - SERIAL_COL_W) / TARGET_COLS));
     }
-    return 155; // fallback for ~1024px screens
+    return 240; 
   }, [wrapperSize.w]);
 
   // Row height: fit 9 rows exactly into available height (minus header row)
@@ -2632,41 +2622,9 @@ export default function RegisterPage() {
       <div className="pages-actions-bar">
         {/* Left: Page tabs + Add Page + Add Column + Add Row */}
         <div className="pages-actions-tabs">
-          {pages.map((page, idx) => (
-            <button
-              key={page.id}
-              className={`page-tab ${idx === currentPageIndex ? 'active' : ''}`}
-              onClick={() => setCurrentPageIndex(idx)}
-              onDoubleClick={() => { setRenamePageId(page.id); setRenamePageValue(page.name); setRenamePageModal(true); }}
-            >
-              <FileText size={11} style={{ flexShrink: 0 }} />
-              {page.name}
-              {pages.length > 1 && (
-                <span
-                  className="page-tab-close"
-                  title={`Delete ${page.name}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (confirm(`Delete "${page.name}" and all its rows?`)) {
-                      deletePageMutation.mutate(page.id);
-                    }
-                  }}
-                >
-                  <X size={11} />
-                </span>
-              )}
-            </button>
-          ))}
-          <button className="page-add-btn" onClick={() => addPageMutation.mutate()} title="Add Page" aria-label="Add Page">
-            <Plus size={14} />
-          </button>
-
-          <div className="pab-divider" />
-
-
-          {/* Add Record — opens form modal */}
-          <button className="pab-tab-action-btn primary" onClick={() => setShowAddRecordModal(true)}>
-            <Plus size={12} /> Add Record
+          {/* Page controls removed as requested - only Add Register remains */}
+          <button className="pab-tab-action-btn primary" onClick={() => setShowAddRecordModal(true)} style={{ marginLeft: 0 }}>
+            <Plus size={12} /> Add Register
           </button>
         </div>
 
@@ -2741,7 +2699,7 @@ export default function RegisterPage() {
                     tabIndex={-1}
                     title="Select All"
                   />
-                  <span style={{ fontSize: '10px' }}>S.NO.</span>
+                  <span style={{ fontSize: '11px', fontWeight: 700 }}>S.NO</span>
                 </div>
               </th>
               {(() => {
@@ -2846,7 +2804,7 @@ export default function RegisterPage() {
                   </th>
                 )});
               })()}
-              <th className="actions" style={{ width: '50px', minWidth: '50px', padding: 0, position: 'sticky', right: 0, zIndex: 14, background: 'var(--table-bg)', borderLeft: '1px solid var(--border-v)' }}>
+              <th className="actions" style={{ width: '50px', minWidth: '50px', padding: 0, position: 'sticky', right: 0, zIndex: 14, background: 'var(--table-bg)', borderLeft: '1px solid var(--border-light)' }}>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

@@ -335,7 +335,7 @@ export function useExport({
         body: allBodyRows,
         theme: 'grid',
         headStyles: {
-          fillColor: [20, 83, 45],
+          fillColor: [0, 45, 93], // Navy Blue
           textColor: 255,
           fontStyle: 'bold',
           fontSize: 8,
@@ -419,11 +419,11 @@ export function useExport({
         head: [['Field', 'Value']],
         body: bodyRows,
         theme: 'grid',
-        headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold', fontSize: 9, halign: 'left', valign: 'middle' },
+        headStyles: { fillColor: [0, 45, 93], textColor: 255, fontStyle: 'bold', fontSize: 9, halign: 'left', valign: 'middle' },
         bodyStyles: { fontSize: 9, cellPadding: 4, valign: 'middle' },
         alternateRowStyles: { fillColor: [245, 247, 250] },
         styles: { lineColor: [200, 200, 200], lineWidth: 0.2, overflow: 'linebreak' },
-        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50, fillColor: [240, 244, 240] }, 1: { cellWidth: 'auto' } },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50, fillColor: [245, 247, 250] }, 1: { cellWidth: 'auto' } },
         margin: { left: 14, right: 14 },
       });
 
