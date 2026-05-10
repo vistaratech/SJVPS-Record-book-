@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { Share2, Download, Bookmark, X } from 'lucide-react';
+import { Bookmark, Download, Share2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 
 interface SavedTemplate {

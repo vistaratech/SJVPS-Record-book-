@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tansta
 import {
   getRegister, listRegisters, addColumn, deleteColumn, renameColumn, updateColumnDropdownOptions,
   duplicateColumn, moveColumn, reorderColumn, changeColumnType, clearColumnData, insertColumn, updateColumnWidth, updateColumnSummary,
-  freezeColumn, hideColumn,
+  freezeColumn, hideColumn, setColumnMandatory, setColumnUnique,
   addEntry, updateEntry, deleteEntry, duplicateEntry, bulkDeleteEntries, insertEntry,
   restoreEntry, bulkRestoreEntries, restoreColumn,
   renamePage, deletePage,
@@ -24,7 +24,7 @@ import {
   Hash, FlaskConical, Pin, IndianRupee,
   Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
   Search, FileText, Download, ListOrdered, Maximize2, AlertCircle,
-  X, Link as LinkIcon, Info, AlertTriangle, Trash2, ZoomIn, ZoomOut
+  X, Link as LinkIcon, Info, AlertTriangle, Trash2, ZoomIn, ZoomOut, Bell
 } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { RegisterHeader } from '../components/register/RegisterHeader';
@@ -66,7 +66,7 @@ export default function RegisterPage() {
   const location = useLocation();
   const registerId = Number(id);
   const queryClient = useQueryClient();
-  const { addNotification } = useNotifications();
+  const { addNotification, scheduleReminder } = useNotifications();
   const { data: register, isLoading, error } = useQuery({
     queryKey: ['register', registerId],
     queryFn: () => getRegister(Number(registerId)),
@@ -200,6 +200,12 @@ export default function RegisterPage() {
 
   // Cell formatting toolbar
   const [formatCell, setFormatCell] = useState<{ entryId: number; colId: string; rect: DOMRect } | null>(null);
+
+  // Reminders
+  const [reminderModal, setReminderModal] = useState<{ entryId: number; colId: string } | null>(null);
+  const [reminderDate, setReminderDate] = useState('');
+  const [reminderTime, setReminderTime] = useState('');
+  const [reminderMessage, setReminderMessage] = useState('');
 
   // New column form (shared by Add Column and Insert Column)
   const [newColName, setNewColName] = useState('');
@@ -984,6 +990,12 @@ export default function RegisterPage() {
       queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       toast.success('Column added successfully');
 
+      // Reset form fields
+      setNewColName('');
+      setNewColType('text');
+      setNewColDropdownOpts('');
+      setNewColFormula('');
+
       // Auto-scroll to the new column
       const oldCols = columnsRef.current;
       const newCol = updatedReg.columns?.find((c: any) => !oldCols.some(old => old.id === c.id));
@@ -1624,37 +1636,91 @@ export default function RegisterPage() {
     },
   });
 
-  const insertColumnMutation = useMutation({
-    mutationFn: () => {
-      const col = columns.find((c) => c.id === activeModalColId);
-      const pos = col ? (insertColModal === 'left' ? col.position : col.position + 1) : columns.length;
-      return insertColumn(registerId, {
-        name: newColName, type: newColType,
-        dropdownOptions: newColType === 'dropdown' ? cleanOptions(newColDropdownOpts.split(',')) : undefined,
-        formula: newColType === 'formula' ? newColFormula : undefined,
-      }, pos);
+  const setColumnMandatoryMutation = useMutation({
+    mutationFn: ({ colId, mandatory }: { colId: number; mandatory: boolean }) =>
+      setColumnMandatory(registerId, colId, mandatory),
+    onMutate: async ({ colId, mandatory }) => {
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const prev = queryClient.getQueryData(['register', registerId]) as any;
+      if (prev) {
+        queryClient.setQueryData(['register', registerId], {
+          ...prev,
+          columns: (prev.columns || []).map((c: any) =>
+            c.id === colId ? { ...c, mandatory } : c
+          ),
+        });
+      }
+      setColMenuId(null);
+      return { prev };
     },
-    onMutate: async () => {
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
+      toast.error('Failed to update mandatory setting');
+    },
+  });
+
+  const setColumnUniqueMutation = useMutation({
+    mutationFn: ({ colId, unique }: { colId: number; unique: boolean }) =>
+      setColumnUnique(registerId, colId, unique),
+    onMutate: async ({ colId, unique }) => {
+      await queryClient.cancelQueries({ queryKey: ['register', registerId] });
+      const prev = queryClient.getQueryData(['register', registerId]) as any;
+      if (prev) {
+        queryClient.setQueryData(['register', registerId], {
+          ...prev,
+          columns: (prev.columns || []).map((c: any) =>
+            c.id === colId ? { ...c, unique } : c
+          ),
+        });
+      }
+      setColMenuId(null);
+      return { prev };
+    },
+    onSuccess: (updatedReg) => {
+      queryClient.setQueryData(['register', registerId], updatedReg);
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(['register', registerId], context.prev);
+      toast.error('Failed to update unique setting');
+    },
+  });
+
+  const insertColumnMutation = useMutation({
+    mutationFn: (vars: { 
+      pos: number,           // pre-calculated, snapshot at click time
+      name: string, 
+      type: string, 
+      dropdownOpts: string, 
+      formula: string 
+    }) => {
+      return insertColumn(registerId, {
+        name: vars.name, type: vars.type,
+        dropdownOptions: vars.type === 'dropdown' ? cleanOptions(vars.dropdownOpts.split(',')) : undefined,
+        formula: vars.type === 'formula' ? vars.formula : undefined,
+      }, vars.pos);
+    },
+    onMutate: async (vars) => {
       await queryClient.cancelQueries({ queryKey: ['register', registerId] });
       const prev = queryClient.getQueryData(['register', registerId]) as any;
       const dummyId = Date.now();
       if (prev) {
-        const colNode = prev.columns?.find((c: any) => c.id === activeModalColId);
-        const pos = colNode ? (insertColModal === 'left' ? colNode.position : colNode.position + 1) : (prev.columns?.length || 0);
-        
         const newCol = {
           id: dummyId,
           registerId,
-          name: newColName,
-          type: newColType,
-          position: pos,
-          dropdownOptions: newColType === 'dropdown' ? cleanOptions(newColDropdownOpts.split(',')) : undefined,
-          formula: newColType === 'formula' ? newColFormula : undefined,
+          name: vars.name,
+          type: vars.type,
+          position: vars.pos,
+          dropdownOptions: vars.type === 'dropdown' ? cleanOptions(vars.dropdownOpts.split(',')) : undefined,
+          formula: vars.type === 'formula' ? vars.formula : undefined,
           createdAt: new Date().toISOString()
         };
         
+        // Shift all columns at or after the insert position
         const newColumns = (prev.columns || []).map((c: any) => 
-          c.position >= pos ? { ...c, position: c.position + 1 } : c
+          c.position >= vars.pos ? { ...c, position: c.position + 1 } : c
         );
         newColumns.push(newCol);
         newColumns.sort((a: any, b: any) => a.position - b.position);
@@ -1669,10 +1735,16 @@ export default function RegisterPage() {
       return { prev, dummyId };
     },
     onSuccess: (updatedReg) => {
+      // updatedReg from server is authoritative — no need to invalidate/refetch
       queryClient.setQueryData(['register', registerId], updatedReg);
       setLocalEntries(updatedReg.entries || []);
-      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
       toast.success('Column inserted successfully');
+
+      // Reset form fields
+      setNewColName('');
+      setNewColType('text');
+      setNewColDropdownOpts('');
+      setNewColFormula('');
 
       // Auto-scroll to the newly inserted column
       const oldCols = columnsRef.current;
@@ -1683,7 +1755,7 @@ export default function RegisterPage() {
           if (colIdx !== -1 && colVirtualizerRef.current) {
             colVirtualizerRef.current.scrollToIndex(colIdx, { align: 'center', behavior: 'smooth' });
           } else if (parentRef.current) {
-            parentRef.current.scrollTo({ left: parentRef.current.scrollWidth, behavior: 'smooth' });
+            parentRef.current.scrollTo({ left: parentRef.current.scrollLeft + 200, behavior: 'smooth' });
           }
         }, 150);
       }
@@ -1694,7 +1766,6 @@ export default function RegisterPage() {
     },
     onSettled: () => { setNewColName(''); setNewColType('text'); setNewColDropdownOpts(''); setNewColFormula(''); },
   });
-
 
 
   const addEntryMutation = useMutation({
@@ -1857,16 +1928,15 @@ export default function RegisterPage() {
   });
 
   const bulkDeleteMutation = useMutation({
-    mutationFn: () => bulkDeleteEntries(registerId, Array.from(selectedRows)),
-    onMutate: async () => {
+    mutationFn: (entryIds: number[]) => bulkDeleteEntries(registerId, entryIds),
+    onMutate: async (entryIds) => {
       await queryClient.cancelQueries({ queryKey: ['register', registerId] });
       const previousRegister = queryClient.getQueryData(['register', registerId]);
       const previousLocalEntries = [...localEntries];
 
-      const deletedIds = Array.from(selectedRows);
       const capturedEntries: { entry: Entry; index: number }[] = [];
       localEntries.forEach((e, idx) => {
-        if (deletedIds.includes(e.id)) {
+        if (entryIds.includes(e.id)) {
           capturedEntries.push({ entry: { ...e, cells: { ...e.cells } }, index: idx });
         }
       });
@@ -1877,18 +1947,24 @@ export default function RegisterPage() {
       // Optimistic update
       queryClient.setQueryData(['register', registerId], (old: any) => {
         if (!old) return old;
-        const entries = old.entries.filter((e: any) => !deletedIds.includes(e.id));
+        const entries = old.entries.filter((e: any) => !entryIds.includes(e.id));
         return { ...old, entries, entryCount: entries.length };
       });
-      setLocalEntries(prev => prev.filter(e => !deletedIds.includes(e.id)));
+      setLocalEntries(prev => prev.filter(e => !entryIds.includes(e.id)));
       setSelectedRows(new Set());
 
       return { previousRegister, previousLocalEntries };
+    },
+    onSuccess: () => {
+      toast.success('Rows deleted');
     },
     onError: (_err, _vars, context) => {
       if (context?.previousRegister) queryClient.setQueryData(['register', registerId], context.previousRegister);
       if (context?.previousLocalEntries) setLocalEntries(context.previousLocalEntries);
       toast.error('Failed to delete rows');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['register', registerId] });
     },
   });
 
@@ -1982,6 +2058,12 @@ export default function RegisterPage() {
     // ── System Columns Read-only ──
     if (col.type === 'auto_increment' || col.type === 'formula') return;
 
+    // ── Mandatory Field Validation ──
+    if ((col as any).mandatory && value.trim() === '') {
+      toast.error(`${col.name} is a mandatory field and cannot be empty.`);
+      return false; // Return false to indicate rejection
+    }
+
     // ── Date Normalization (Universal Enforcement of DD-MM-YYYY) ──
     if (col.type === 'date' && value.trim() !== '') {
       value = formatDateToDDMMYYYY(value);
@@ -2000,21 +2082,26 @@ export default function RegisterPage() {
       }
     }
 
-    // ── Double Entry Detection ──
+    // ── Double Entry Detection & Unique Enforcement ──
     if (value.trim() !== '') {
       const isDuplicate = localEntriesRef.current.some(
         e => e.id !== entryId && e.cells?.[columnId]?.trim().toLowerCase() === value.trim().toLowerCase()
       );
       if (isDuplicate) {
-        addNotification({
-          title: 'Double Entry Detected',
-          message: `The value "${value}" already exists in column "${col.name}".`,
-          type: 'warning',
-          link: {
-            registerId: registerId.toString(),
-            rowId: entryId,
-          }
-        });
+        if ((col as any).unique) {
+          toast.error(`${col.name} is a unique field. The value "${value}" already exists.`);
+          return false; // Return false to indicate rejection
+        } else {
+          addNotification({
+            title: 'Double Entry Detected',
+            message: `The value "${value}" already exists in column "${col.name}".`,
+            type: 'warning',
+            link: {
+              registerId: registerId.toString(),
+              rowId: entryId,
+            }
+          });
+        }
       }
     }
 
@@ -2080,6 +2167,7 @@ export default function RegisterPage() {
         });
       });
     }, 600);
+    return true;
   }, [registerId, queryClient, pushToUndoStack, addNotification]);
 
   // ── Cell Formatting ──
@@ -2780,6 +2868,12 @@ export default function RegisterPage() {
                         style={{ cursor: 'default' }}
                       >
                         {col.name}
+                        {(col as any).mandatory && (
+                          <span title="Mandatory field" style={{ color: 'var(--primary)', fontWeight: 900, marginLeft: 2, fontSize: '13px' }}>*</span>
+                        )}
+                        {(col as any).unique && (
+                          <span title="Unique field" style={{ color: 'var(--primary)', fontWeight: 900, marginLeft: 2, fontSize: '12px' }}>★</span>
+                        )}
                         {col.type === 'formula' && <span className="col-formula-badge" title={col.formula}>Fx</span>}
                         {col.linkedTo && (
                           <span title={`Linked to ${col.linkedTo.registerId}`} style={{ display: 'inline-flex', alignItems: 'center' }}>
@@ -2967,7 +3061,7 @@ export default function RegisterPage() {
               className="selection-toolbar-btn delete"
               onClick={() => {
                 if (confirm(`Delete ${selectedRows.size} selected row(s)?`)) {
-                  bulkDeleteMutation.mutate();
+                  bulkDeleteMutation.mutate(Array.from(selectedRows));
                 }
               }}
             >
@@ -2997,6 +3091,8 @@ export default function RegisterPage() {
         frozenColumns={frozenColumns} setFrozenColumns={setFrozenColumns} freezeColumn={freezeColumn} registerId={registerId}
         hiddenColumns={hiddenColumns} setHiddenColumns={setHiddenColumns} hideColumn={hideColumn}
         clearColumnDataMutation={clearColumnDataMutation} deleteColumnMutation={deleteColumnMutation}
+        setColumnMandatoryMutation={setColumnMandatoryMutation}
+        setColumnUniqueMutation={setColumnUniqueMutation}
         rowMenuId={rowMenuId} setRowMenuId={setRowMenuId}
         duplicateEntryMutation={duplicateEntryMutation} deleteEntryMutation={deleteEntryMutation}
         insertEntryMutation={insertEntryMutation}
@@ -3092,16 +3188,16 @@ export default function RegisterPage() {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button
-                  className="register-header-btn"
-                  style={{ border: '1px solid #dce4f5', background: '#fff', color: '#dc2626' }}
+                  className="pab-tab-action-btn"
+                  style={{ borderColor: '#fca5a5', color: '#dc2626' }}
                   onClick={() => handleRowDownloadPDF(detailViewEntry.id)}
                   title="Download PDF"
                 >
                   <FileText size={14} /> PDF
                 </button>
                 <button
-                  className="register-header-btn"
-                  style={{ border: '1px solid #dce4f5', background: '#fff', color: '#16a34a' }}
+                  className="pab-tab-action-btn"
+                  style={{ borderColor: '#86efac', color: '#16a34a' }}
                   onClick={() => handleRowDownloadExcel(detailViewEntry.id)}
                   title="Download Excel"
                 >
@@ -3364,11 +3460,28 @@ export default function RegisterPage() {
                   let hasErrors = false;
 
                   columns.forEach(col => {
-                    const val = detailEdits[col.id.toString()] || '';
-                    const validation = validateCellValue(col, val);
-                    if (!validation.isValid) {
-                      errors[col.id.toString()] = validation.error;
+                    // Fallback to existing value if not edited in this session
+                    const val = detailEdits[col.id.toString()] ?? detailViewEntry.cells?.[col.id.toString()] ?? '';
+                    
+                    if ((col as any).mandatory && col.type !== 'formula' && col.type !== 'auto_increment' && val.trim() === '') {
+                      errors[col.id.toString()] = "This field is mandatory and cannot be empty.";
                       hasErrors = true;
+                    } else if ((col as any).unique && val.trim() !== '') {
+                      const isDuplicate = localEntriesRef.current.some(
+                        e => e.id !== detailViewEntry.id && e.cells?.[col.id.toString()]?.trim().toLowerCase() === val.trim().toLowerCase()
+                      );
+                      if (isDuplicate) {
+                        errors[col.id.toString()] = `Unique field: The value "${val}" already exists.`;
+                        hasErrors = true;
+                      }
+                    } 
+                    
+                    if (!errors[col.id.toString()]) {
+                      const validation = validateCellValue(col, val);
+                      if (!validation.isValid && val.trim() !== '') {
+                        errors[col.id.toString()] = validation.error;
+                        hasErrors = true;
+                      }
                     }
                   });
 
@@ -3571,6 +3684,71 @@ export default function RegisterPage() {
         </div>
       )}
 
+      {/* Reminder Modal */}
+      {reminderModal && (
+        <div className="modal-overlay" onClick={() => setReminderModal(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ width: '400px' }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Bell size={18} color="var(--primary)" />
+                <h3 style={{ margin: 0 }}>Set Reminder</h3>
+              </div>
+              <button className="modal-close" onClick={() => setReminderModal(null)}><X size={16} /></button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label className="modal-label" style={{ marginBottom: '6px', display: 'block' }}>Reminder Date <span style={{color: 'red'}}>*</span></label>
+                <input type="date" className="modal-input" value={reminderDate} onChange={e => setReminderDate(e.target.value)} style={{ width: '100%', marginBottom: 0 }} />
+              </div>
+              
+              <div>
+                <label className="modal-label" style={{ marginBottom: '6px', display: 'block' }}>Reminder Time <span style={{color: 'red'}}>*</span></label>
+                <input type="time" className="modal-input" value={reminderTime} onChange={e => setReminderTime(e.target.value)} style={{ width: '100%', marginBottom: 0 }} />
+              </div>
+
+              <div>
+                <label className="modal-label" style={{ marginBottom: '6px', display: 'block' }}>Message / Description <span style={{color: 'red'}}>*</span></label>
+                <textarea 
+                  className="modal-textarea" 
+                  value={reminderMessage} 
+                  onChange={e => setReminderMessage(e.target.value)} 
+                  placeholder="What should this reminder tell you?"
+                  rows={3}
+                  style={{ width: '100%', resize: 'none', marginBottom: 0 }}
+                />
+              </div>
+            </div>
+            <div className="modal-footer" style={{ marginTop: '16px' }}>
+              <button className="modal-cancel-btn" onClick={() => setReminderModal(null)}>Cancel</button>
+              <button 
+                className="modal-confirm-btn" 
+                onClick={() => {
+                  if (!reminderDate || !reminderTime || !reminderMessage) {
+                    toast.error('Please fill in all fields');
+                    return;
+                  }
+                  const dt = new Date(`${reminderDate}T${reminderTime}`);
+                  if (dt.getTime() < Date.now()) {
+                    toast.error('Reminder time must be in the future');
+                    return;
+                  }
+                  scheduleReminder({
+                    triggerTime: dt.getTime(),
+                    message: reminderMessage,
+                    registerId: registerId.toString(),
+                    rowId: reminderModal.entryId
+                  });
+                  toast.success('Reminder set successfully!');
+                  setReminderModal(null);
+                }}
+              >
+                Save Reminder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Cell Format Toolbar ── */}
       {formatCell && (
         <CellFormatToolbar
@@ -3581,6 +3759,12 @@ export default function RegisterPage() {
           onStyleChange={handleCellStyleChange}
           onClearStyle={handleClearCellStyle}
           onClose={() => setFormatCell(null)}
+          onAddReminder={() => {
+            setReminderDate('');
+            setReminderTime('');
+            setReminderMessage('');
+            setReminderModal({ entryId: formatCell.entryId, colId: formatCell.colId });
+          }}
         />
       )}
     </div>

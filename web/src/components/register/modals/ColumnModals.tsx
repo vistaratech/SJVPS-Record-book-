@@ -1,4 +1,4 @@
-import { AlertCircle, X, Plus } from 'lucide-react';
+import { AlertCircle, X, Plus, AlertTriangle } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { 
   Calculator, PlusCircle, MinusCircle, XCircle, DivideCircle, 
@@ -159,6 +159,8 @@ function FormulaBuilder({ formula, onChange, columns, entries, outputName, exclu
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
   }, [formula, entries, columns]);
+
+  const duplicateColsInFormula = columns.filter(c => c.id !== excludeId && formula.split(`{${c.name}}`).length > 2);
 
   return (
     <div className="formula-builder" style={{ marginTop: '12px', padding: '12px', background: 'var(--bg-light)', borderRadius: '8px', border: '1px solid var(--border)' }}>
@@ -356,8 +358,15 @@ function FormulaBuilder({ formula, onChange, columns, entries, outputName, exclu
             value={formula} 
             onChange={(e) => onChange(e.target.value)} 
             placeholder="e.g. {Marks} / {Full Marks} * 100"
-            style={{ minHeight: '100px', fontSize: '15px', fontWeight: 600, fontFamily: 'monospace' }}
+            style={{ minHeight: '100px', fontSize: '15px', fontWeight: 600, fontFamily: 'monospace', borderColor: duplicateColsInFormula.length > 0 ? '#ef4444' : undefined }}
           />
+          
+          {duplicateColsInFormula.length > 0 && (
+            <div style={{ marginTop: '4px', fontSize: '12px', color: '#dc2626', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+              <AlertTriangle size={14} /> 
+              Warning: Columns cannot be used multiple times ({duplicateColsInFormula.map(c => `{${c.name}}`).join(', ')})
+            </div>
+          )}
           
           <div style={{ marginTop: '8px', marginBottom: '12px' }}>
             <label style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginBottom: '6px' }}>Operators:</label>
@@ -423,42 +432,52 @@ function FormulaBuilder({ formula, onChange, columns, entries, outputName, exclu
               alignContent: 'flex-start',
               boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)'
             }}>
-              {columns.filter(c => c.id !== excludeId).map(c => (
-                <button 
-                  key={c.id} 
-                  onClick={() => insertText(`{${c.name}}`)}
-                  style={{ 
-                    padding: '6px 12px', 
-                    fontSize: '12px', 
-                    fontWeight: 600,
-                    borderRadius: '8px', 
-                    border: '1px solid var(--border)', 
-                    background: 'var(--bg-light)', 
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    color: 'var(--navy)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                  type="button"
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'white';
-                    e.currentTarget.style.borderColor = 'var(--navy)';
-                    e.currentTarget.style.transform = 'translateY(-1px)';
-                    e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'var(--bg-light)';
-                    e.currentTarget.style.borderColor = 'var(--border)';
-                    e.currentTarget.style.transform = 'none';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                >
-                  <Plus size={12} />
-                  {c.name}
-                </button>
-              ))}
+              {columns.filter(c => c.id !== excludeId).map(c => {
+                const isUsed = formula.includes(`{${c.name}}`);
+                return (
+                  <button 
+                    key={c.id} 
+                    onClick={() => {
+                      if (!isUsed) insertText(`{${c.name}}`);
+                    }}
+                    style={{ 
+                      padding: '6px 12px', 
+                      fontSize: '12px', 
+                      fontWeight: 600,
+                      borderRadius: '8px', 
+                      border: isUsed ? '1px solid #fca5a5' : '1px solid var(--border)', 
+                      background: isUsed ? '#fef2f2' : 'var(--bg-light)', 
+                      cursor: isUsed ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.2s',
+                      color: isUsed ? '#dc2626' : 'var(--navy)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      opacity: isUsed ? 0.8 : 1
+                    }}
+                    type="button"
+                    onMouseEnter={(e) => {
+                      if (!isUsed) {
+                        e.currentTarget.style.background = 'white';
+                        e.currentTarget.style.borderColor = 'var(--navy)';
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                        e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isUsed) {
+                        e.currentTarget.style.background = 'var(--bg-light)';
+                        e.currentTarget.style.borderColor = 'var(--border)';
+                        e.currentTarget.style.transform = 'none';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }
+                    }}
+                    title={isUsed ? 'Column already added' : `Insert ${c.name}`}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
               {columns.filter(c => c.id !== excludeId).length === 0 && (
                 <div style={{ width: '100%', textAlign: 'center', color: 'var(--muted)', fontSize: '12px', padding: '20px' }}>
                   No other columns available to reference.
@@ -731,12 +750,7 @@ export function ColumnModals(props: ColumnModalsProps) {
                 </button>
               ))}
             </div>
-            {changeTypeValue === 'dropdown' && (
-              <>
-                <label className="modal-label" style={{ marginTop: '12px', display: 'block', marginBottom: '8px' }}>Options</label>
-                <OptionsEditor value={newColDropdownOpts} onChange={setNewColDropdownOpts} />
-              </>
-            )}
+
             {changeTypeValue === 'formula' && (
               <FormulaBuilder 
                 formula={newColFormula} 
@@ -787,7 +801,20 @@ export function ColumnModals(props: ColumnModalsProps) {
             )}
             <div className="modal-actions">
               <button className="modal-cancel-btn" onClick={() => setInsertColModal(null)}>Cancel</button>
-              <button className="modal-confirm-btn" disabled={!newColName.trim()} onClick={() => insertColumnMutation.mutate()}>Insert Column</button>
+              <button className="modal-confirm-btn" disabled={!newColName.trim()} onClick={() => {
+                // Pre-calculate position HERE (click-time snapshot) before modal state is cleared
+                const targetCol = columns.find(c => c.id === activeModalColId);
+                const pos = targetCol
+                  ? (insertColModal === 'left' ? targetCol.position : targetCol.position + 1)
+                  : columns.length;
+                insertColumnMutation.mutate({
+                  pos,
+                  name: newColName,
+                  type: newColType,
+                  dropdownOpts: newColDropdownOpts,
+                  formula: newColFormula,
+                });
+              }}>Insert Column</button>
             </div>
           </div>
         </div>

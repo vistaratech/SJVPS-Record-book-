@@ -45,7 +45,7 @@ interface SpreadsheetTextInputProps {
   visibleColumns: Column[];
   colIdx: number;
   totalRows: number;
-  handleCellChange: (entryId: number, columnId: string, value: string) => void;
+  handleCellChange: (entryId: number, columnId: string, value: string) => void | boolean;
   type?: string;
   placeholder?: string;
   searchTerm?: string;
@@ -167,8 +167,12 @@ const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colI
   }, []);
 
   const onBlur = useCallback(() => {
-    if (val !== (entry.cells?.[col.id.toString()] || '')) {
-      handleCellChange(entry.id, col.id.toString(), val);
+    const prevVal = entry.cells?.[col.id.toString()] || '';
+    if (val !== prevVal) {
+      const success = handleCellChange(entry.id, col.id.toString(), val);
+      if (success === false) {
+        setVal(prevVal);
+      }
     }
   }, [val, entry, col.id, handleCellChange]);
 
@@ -185,8 +189,13 @@ const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colI
 
     if (e.key === 'Tab' || e.key === 'Enter') {
       e.preventDefault();
-      if (val !== (entry.cells?.[col.id.toString()] || '')) {
-        handleCellChange(entry.id, col.id.toString(), val);
+      const prevVal = entry.cells?.[col.id.toString()] || '';
+      if (val !== prevVal) {
+        const success = handleCellChange(entry.id, col.id.toString(), val);
+        if (success === false) {
+          setVal(prevVal);
+          return; // Stop focus change if validation failed
+        }
       }
       if (e.shiftKey) {
         // Shift+Enter/Tab: Move left, wrap to previous row

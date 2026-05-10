@@ -32,6 +32,9 @@ interface RegisterContextMenusProps {
   hideColumn: (regId: number, colId: number, hide: boolean) => void;
   clearColumnDataMutation: any;
   deleteColumnMutation: any;
+  setColumnMandatoryMutation: any;
+  setColumnUniqueMutation: any;
+
 
   // Row Menu
   rowMenuId: number | null;
@@ -59,6 +62,7 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
     setNewColName, setNewColType, setNewColDropdownOpts, setNewColFormula, setInsertColModal,
     moveColumnMutation, frozenColumns, setFrozenColumns, freezeColumn, registerId,
     hiddenColumns, setHiddenColumns, hideColumn, clearColumnDataMutation, deleteColumnMutation,
+    setColumnMandatoryMutation, setColumnUniqueMutation,
     rowMenuId, setRowMenuId, duplicateEntryMutation, deleteEntryMutation, insertEntryMutation, localEntries,
     handleRowDownloadPDF, handleRowDownloadExcel, handleRowShareText,
     calcTypes, updateCalcType,
@@ -125,6 +129,34 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
               setColMenuId(null);
             }}>
               <LinkIcon size={16} /> Link
+            </button>
+            <button className="context-item" onClick={() => {
+              const col = columns.find((c) => c.id === colMenuId);
+              const isMandatory = !!(col as any)?.mandatory;
+              setColumnMandatoryMutation.mutate({ colId: colMenuId!, mandatory: !isMandatory });
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', justifyContent: 'space-between' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '16px', color: 'var(--primary)' }}>＊</span> Mandatory Field
+                </span>
+                {!!(columns.find((c) => c.id === colMenuId) as any)?.mandatory && (
+                  <span style={{ background: 'var(--primary)', color: 'white', borderRadius: '10px', padding: '1px 8px', fontSize: '10px', fontWeight: 700 }}>ON</span>
+                )}
+              </span>
+            </button>
+            <button className="context-item" onClick={() => {
+              const col = columns.find((c) => c.id === colMenuId);
+              const isUnique = !!(col as any)?.unique;
+              setColumnUniqueMutation.mutate({ colId: colMenuId!, unique: !isUnique });
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', justifyContent: 'space-between' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '16px', color: 'var(--primary)' }}>★</span> Unique Field
+                </span>
+                {!!(columns.find((c) => c.id === colMenuId) as any)?.unique && (
+                  <span style={{ background: 'var(--primary)', color: 'white', borderRadius: '10px', padding: '1px 8px', fontSize: '10px', fontWeight: 700 }}>ON</span>
+                )}
+              </span>
             </button>
             {columns.find((c) => c.id === colMenuId)?.type === 'dropdown' && (
               <button className="context-item" onClick={() => {

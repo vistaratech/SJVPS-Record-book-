@@ -78,6 +78,67 @@ self.onmessage = function (evt) {
       headers = Object.keys(rows[0]);
     }
 
+    // ── Extract Native Data Validations (Dropdowns) ──
+    try {
+      const nativeValidations = ws['!dataValidation'];
+      if (nativeValidations && nativeValidations.length > 0) {
+        if (!metadata) metadata = [];
+        
+        nativeValidations.forEach(dv => {
+          if (dv.type === 'list' && dv.formula1) {
+            let options = [];
+            // formula1 is often '"A,B,C"'
+            if (dv.formula1.startsWith('"') && dv.formula1.endsWith('"')) {
+              options = dv.formula1.slice(1, -1).split(',').map(s => s.trim());
+            } else if (dv.formula1.includes(':') || /^[A-Z]+\d+$/.test(dv.formula1)) {
+              // Range reference (e.g. $Z$1:$Z$10)
+              try {
+                const refRange = XLSX.utils.decode_range(dv.formula1.replace(/\$/g, ''));
+                for (let r = refRange.s.r; r <= refRange.e.r; r++) {
+                  for (let c = refRange.s.c; c <= refRange.e.c; c++) {
+                    const cell = ws[XLSX.utils.encode_cell({ r, c })];
+                    if (cell && cell.v !== undefined) {
+                      const val = String(cell.v).trim();
+                      if (val) options.push(val);
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn('Failed to resolve range validation', dv.formula1);
+              }
+            }
+
+            if (options.length > 0) {
+              const sqrefs = dv.sqref.split(' ');
+              sqrefs.forEach(ref => {
+                try {
+                  const r = XLSX.utils.decode_range(ref);
+                  for (let C = r.s.c; C <= r.e.c; C++) {
+                    const headerCellAddr = XLSX.utils.encode_cell({ r: headerRowIdx, c: C });
+                    const headerCell = ws[headerCellAddr];
+                    const headerName = headerCell ? String(headerCell.v) : `Column ${C + 1}`;
+
+                    let existing = metadata.find(m => m['Column Name'] === headerName);
+                    if (!existing) {
+                      existing = { 'Column Name': headerName };
+                      metadata.push(existing);
+                    }
+                    // Only set to dropdown if not already defined (e.g. by _metadata_ sheet)
+                    if (!existing['Type']) {
+                      existing['Type'] = 'dropdown';
+                      existing['Dropdown Options'] = options.join(',');
+                    }
+                  }
+                } catch (e) {}
+              });
+            }
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('Data validation extraction failed', err);
+    }
+
     self.postMessage({ type: 'PROGRESS', payload: { pct: 100, message: 'Done!' } });
 
     self.postMessage({

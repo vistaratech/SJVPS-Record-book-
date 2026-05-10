@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
 
 export type NotificationType = 'warning' | 'error' | 'info' | 'success';
 
@@ -15,6 +15,14 @@ export interface AppNotification {
   };
 }
 
+export interface Reminder {
+  id: string;
+  triggerTime: number; // Unix timestamp
+  message: string;
+  registerId: string;
+  rowId?: string | number;
+}
+
 interface NotificationContextType {
   notifications: AppNotification[];
   unreadCount: number;
@@ -23,14 +31,27 @@ interface NotificationContextType {
   markAllAsRead: () => void;
   removeNotification: (id: string) => void;
   clearAll: () => void;
+  scheduleReminder: (reminder: Omit<Reminder, 'id'>) => void;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>(() => {
+    try {
+      const stored = localStorage.getItem('ag_reminders');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  useEffect(() => {
+    localStorage.setItem('ag_reminders', JSON.stringify(reminders));
+  }, [reminders]);
 
   const addNotification = (notif: Omit<AppNotification, 'id' | 'timestamp' | 'isRead'>) => {
     const newNotif: AppNotification = {
@@ -41,6 +62,42 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     };
     setNotifications(prev => [newNotif, ...prev]);
   };
+
+  const remindersRef = useRef(reminders);
+  
+  useEffect(() => {
+    remindersRef.current = reminders;
+  }, [reminders]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const currentReminders = remindersRef.current;
+      
+      const triggered = currentReminders.filter(r => r.triggerTime <= now);
+      
+      if (triggered.length > 0) {
+        // Push the notifications
+        setNotifications(curr => {
+          const newNotifs: AppNotification[] = triggered.map(r => ({
+            id: Date.now().toString() + Math.random().toString(36).substring(7),
+            title: 'Reminder',
+            message: r.message,
+            type: 'info',
+            timestamp: new Date().toISOString(),
+            isRead: false,
+            link: { registerId: r.registerId, rowId: r.rowId }
+          }));
+          return [...newNotifs, ...curr];
+        });
+        
+        // Remove from reminders
+        setReminders(prev => prev.filter(r => r.triggerTime > now));
+      }
+    }, 10000); // Check every 10 seconds
+
+    return () => clearInterval(interval);
+  }, []);
 
   const markAsRead = (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
@@ -58,6 +115,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     setNotifications([]);
   };
 
+  const scheduleReminder = (reminder: Omit<Reminder, 'id'>) => {
+    setReminders(prev => [...prev, { ...reminder, id: Date.now().toString() }]);
+  };
+
   return (
     <NotificationContext.Provider value={{
       notifications,
@@ -66,7 +127,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       markAsRead,
       markAllAsRead,
       removeNotification,
-      clearAll
+      clearAll,
+      scheduleReminder
     }}>
       {children}
     </NotificationContext.Provider>

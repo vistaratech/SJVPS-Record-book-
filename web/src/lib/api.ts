@@ -1,7 +1,7 @@
 // Firestore-backed API client for RecordBook Web
 import { db } from './firebase';
 import {
-  collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, where, orderBy,
+  collection, doc, getDocs, getDoc, getDocsFromServer, setDoc, deleteDoc, query, where, orderBy,
 } from 'firebase/firestore';
 import { TEMPLATES, type Template, type TemplateColumn } from './templates';
 // Local filesystem completely unmounted from regular API.
@@ -109,6 +109,8 @@ export interface Column {
   id: number; registerId: number; name: string; type: string; position: number;
   dropdownOptions?: string[]; formula?: string; width?: number; summary?: string;
   linkedTo?: { registerId: number; columnId: number };
+  mandatory?: boolean;
+  unique?: boolean;
 }
 
 export interface CellStyle {
@@ -323,7 +325,8 @@ async function getRegDoc(registerId: number): Promise<RegisterDetail> {
   // If the main document has no inline entries, load from subcollection chunks.
   // Legacy registers that still have entries[] inline will use those directly.
   if (!data.entries || data.entries.length === 0) {
-    const chunkSnap = await getDocs(chunksCol(registerId));
+    // Use getDocsFromServer to always bypass Firestore SDK cache and get fresh chunk data
+    const chunkSnap = await getDocsFromServer(chunksCol(registerId));
     const allEntries: Entry[] = [];
     chunkSnap.docs.forEach(d => {
       const chunkData = d.data() as { entries: Entry[] };
@@ -362,7 +365,8 @@ async function saveRegDocImmediate(reg: RegisterDetail): Promise<void> {
 
   // ── Write entry chunks to subcollection ──
   // First, delete any existing chunks that are now beyond the new chunk count
-  const existingChunksSnap = await getDocs(chunksCol(reg.id));
+  // Use getDocsFromServer so we always see the true server state of existing chunks
+  const existingChunksSnap = await getDocsFromServer(chunksCol(reg.id));
   const newChunkCount = Math.ceil(entries.length / ENTRIES_PER_CHUNK) || 0;
 
   const deletePromises: Promise<void>[] = [];
@@ -1189,17 +1193,19 @@ export function evaluateFormula(formula: string, entry: Entry, columns: Column[]
 export async function addColumn(registerId: number, data: { name: string; type: string; dropdownOptions?: string[]; formula?: string }): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
+    reg.columns.sort((a, b) => a.position - b.position); // ensure canonical order
     const colId = generateId();
     const col: Column = {
       id: colId, registerId, name: data.name, type: data.type,
       position: reg.columns.length, dropdownOptions: data.dropdownOptions, formula: data.formula,
     };
     reg.columns.push(col);
+    reg.columns.forEach((c, i) => c.position = i); // re-normalise
     if (data.type === 'auto_increment') {
       populateAutoIncrement(reg, colId);
     }
     await saveRegDocImmediate(reg);
-    await logAction(reg.businessId, 'Add Column', `Added column "${data.name}" to "${reg.name}"`, { registerId, registerName: reg.name });
+    await logAction(reg.businessId, 'Add Column', `Added column "${data.name}" (${data.type}) to "${reg.name}"`, { registerId, registerName: reg.name });
     return reg;
   });
 }
@@ -1209,6 +1215,7 @@ export async function deleteColumn(registerId: number, columnId: number): Promis
     const reg = await getRegDoc(registerId);
     const col = reg.columns.find(c => c.id.toString() === columnId.toString());
     if (!col) return reg;
+    const colName = col.name;
     
     // Collect cell data for this column before removing
     const columnCellData: Record<string, string> = {};
@@ -1232,11 +1239,12 @@ export async function deleteColumn(registerId: number, columnId: number): Promis
     });
     
     reg.columns = reg.columns.filter((c) => c.id.toString() !== columnId.toString());
+    reg.columns.sort((a, b) => a.position - b.position); // ensure canonical order before re-normalise
     reg.columns.forEach((c, i) => c.position = i);
     // Cleanup entry data
     reg.entries.forEach((e) => { if (e.cells) delete e.cells[columnId.toString()]; });
     await saveRegDocImmediate(reg);
-    await logAction(reg.businessId, 'Delete Column', `Moved column "${col.name}" to bin from "${reg.name}"`, { registerId, registerName: reg.name });
+    await logAction(reg.businessId, 'Delete Column', `Deleted column "${colName}" from "${reg.name}"`, { registerId, registerName: reg.name });
     return reg;
   });
 }
@@ -1255,6 +1263,7 @@ export async function restoreColumn(
     const reg = await getRegDoc(registerId);
 
     // Splice at the exact original index (clamped to current length)
+    reg.columns.sort((a, b) => a.position - b.position); // ensure canonical order
     const insertAt = Math.min(column.position, reg.columns.length);
     reg.columns.splice(insertAt, 0, column);
 
@@ -1281,9 +1290,11 @@ export async function renameColumn(registerId: number, columnId: number, newName
     const reg = await getRegDoc(registerId);
     const col = reg.columns.find((c) => c.id.toString() === columnId.toString());
     if (!col) throw new Error('Column not found');
+    const oldName = col.name;
     col.name = newName;
     updateColumnSymbol(col, col.type);
     await saveRegDocImmediate(reg);
+    await logAction(reg.businessId, 'Rename Column', `Renamed column "${oldName}" to "${newName}" in "${reg.name}"`, { registerId, registerName: reg.name });
     return reg;
   });
 }
@@ -1302,6 +1313,7 @@ export async function updateColumnDropdownOptions(registerId: number, columnId: 
 export async function duplicateColumn(registerId: number, columnId: number): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
+    reg.columns.sort((a, b) => a.position - b.position); // ensure canonical order
     const original = reg.columns.find((c) => c.id.toString() === columnId.toString());
     if (!original) throw new Error('Column not found');
     const newColId = generateId();
@@ -1312,6 +1324,7 @@ export async function duplicateColumn(registerId: number, columnId: number): Pro
       position: reg.columns.length,
     };
     reg.columns.push(newCol);
+    reg.columns.forEach((c, i) => c.position = i); // re-normalise
     reg.entries.forEach((entry) => {
       const val = entry.cells?.[columnId.toString()];
       if (val !== undefined) {
@@ -1327,6 +1340,7 @@ export async function duplicateColumn(registerId: number, columnId: number): Pro
 export async function moveColumn(registerId: number, columnId: number, direction: 'left' | 'right'): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
+    reg.columns.sort((a, b) => a.position - b.position); // ensure array index === position
     const idx = reg.columns.findIndex((c) => c.id.toString() === columnId.toString());
     if (idx === -1) throw new Error('Column not found');
     const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
@@ -1366,6 +1380,7 @@ export async function updateColumnSummary(registerId: number, columnId: number, 
 export async function reorderColumn(registerId: number, columnId: number, targetIndex: number): Promise<RegisterDetail> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
+    reg.columns.sort((a, b) => a.position - b.position); // ensure array index === position
     const idx = reg.columns.findIndex((c) => c.id.toString() === columnId.toString());
     if (idx === -1) throw new Error('Column not found');
     
@@ -1373,7 +1388,6 @@ export async function reorderColumn(registerId: number, columnId: number, target
     const [col] = reg.columns.splice(idx, 1);
     
     // Insert it at the target position
-    // If targetIndex is out of bounds, splice handles it decently, but let's clamp it.
     const clampedTarget = Math.max(0, Math.min(targetIndex, reg.columns.length));
     reg.columns.splice(clampedTarget, 0, col);
     
@@ -1437,6 +1451,7 @@ export async function changeColumnType(
     }
 
     await saveRegDocImmediate(reg);
+    await logAction(reg.businessId, 'Change Column Type', `Changed column "${col.name}" type from "${oldType}" to "${newType}" in "${reg.name}"`, { registerId, registerName: reg.name });
     return { reg, col };
   });
 
@@ -1448,6 +1463,28 @@ export async function changeColumnType(
   }
 
   return reg;
+}
+
+export async function setColumnMandatory(registerId: number, columnId: number, mandatory: boolean): Promise<RegisterDetail> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const col = reg.columns.find((c) => c.id.toString() === columnId.toString());
+    if (!col) throw new Error('Column not found');
+    (col as any).mandatory = mandatory;
+    await saveRegDocImmediate(reg);
+    return reg;
+  });
+}
+
+export async function setColumnUnique(registerId: number, columnId: number, unique: boolean): Promise<RegisterDetail> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const col = reg.columns.find((c) => c.id.toString() === columnId.toString());
+    if (!col) throw new Error('Column not found');
+    (col as any).unique = unique;
+    await saveRegDocImmediate(reg);
+    return reg;
+  });
 }
 
 export async function clearColumnData(registerId: number, columnId: number): Promise<RegisterDetail> {
@@ -1471,12 +1508,14 @@ export async function insertColumn(registerId: number, data: { name: string; typ
       position, dropdownOptions: data.dropdownOptions, formula: data.formula,
     };
     updateColumnSymbol(col, data.type);
+    reg.columns.sort((a, b) => a.position - b.position); // ensure array index === position
     reg.columns.splice(position, 0, col);
     reg.columns.forEach((c, i) => c.position = i);
     if (data.type === 'auto_increment') {
       populateAutoIncrement(reg, colId);
     }
     await saveRegDocImmediate(reg);
+    await logAction(reg.businessId, 'Add Column', `Added column "${data.name}" (${data.type}) to "${reg.name}"`, { registerId, registerName: reg.name });
     return reg;
   });
 }
@@ -1532,7 +1571,11 @@ export async function addEntry(registerId: number, cells: Record<string, string>
     reg.entryCount = reg.entries.length;
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
-    await logAction(reg.businessId, 'Add Row', `Added a new row to "${reg.name}"`, { registerId, registerName: reg.name });
+    const preview = Object.entries(cells).slice(0, 3).map(([id, val]) => {
+      const c = reg.columns.find(col => col.id.toString() === id);
+      return `${c?.name || id}: ${val}`;
+    }).join(', ');
+    await logAction(reg.businessId, 'Add Row', `Added new row to "${reg.name}"${preview ? ` (${preview}...)` : ''}`, { registerId, registerName: reg.name });
     return { entry, reg };
   });
 
@@ -1601,7 +1644,11 @@ export async function insertEntry(registerId: number, cells: Record<string, stri
     reg.entryCount = reg.entries.length;
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
-    await logAction(reg.businessId, 'Insert Row', `Inserted a new row at position ${atIndex + 1} in "${reg.name}"`, { registerId, registerName: reg.name });
+    const preview = Object.entries(cells).slice(0, 3).map(([id, val]) => {
+      const c = reg.columns.find(col => col.id.toString() === id);
+      return `${c?.name || id}: ${val}`;
+    }).join(', ');
+    await logAction(reg.businessId, 'Insert Row', `Inserted row at position ${atIndex + 1} in "${reg.name}"${preview ? ` (${preview}...)` : ''}`, { registerId, registerName: reg.name });
     return { entry, reg };
   });
 
@@ -1635,6 +1682,14 @@ export async function updateEntry(registerId: number, entryId: number, cells: Re
     entry.cells = { ...entry.cells, ...safeCells };
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
+    
+    // Log edit details
+    const changes = Object.entries(cells).map(([id, val]) => {
+      const c = reg.columns.find(col => col.id.toString() === id);
+      return `${c?.name || id}="${val}"`;
+    }).join(', ');
+    await logAction(reg.businessId, 'Edit Row', `Updated row #${entry.rowNumber} in "${reg.name}": ${changes}`, { registerId, registerName: reg.name });
+    
     return { entry, reg };
   });
 
@@ -1743,7 +1798,7 @@ export async function deleteEntry(registerId: number, entryId: number): Promise<
     reg.entries = reg.entries.filter((e) => e.id !== entryId);
     reg.entryCount = reg.entries.length;
     await saveRegDocImmediate(reg);
-    await logAction(reg.businessId, 'Delete Row', `Moved row to bin from "${reg.name}"`, { registerId, registerName: reg.name });
+    await logAction(reg.businessId, 'Delete Row', `Deleted row #${entry.rowNumber} from "${reg.name}"`, { registerId, registerName: reg.name });
   });
 }
 
@@ -1947,13 +2002,14 @@ export async function logAction(
   meta?: { registerId?: number; registerName?: string }
 ): Promise<void> {
   try {
+    const savedUser = JSON.parse(localStorage.getItem('rb_user') || 'null');
     const entry: HistoryEntry = {
       id: generateId(),
       businessId,
       action,
       details,
       timestamp: new Date().toISOString(),
-      userName: 'Test User',
+      userName: savedUser?.name || 'User',
       ...meta,
     };
     await setDoc(doc(db, 'history', entry.id.toString()), entry);

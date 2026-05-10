@@ -230,7 +230,50 @@ export default function HomePage() {
             const ws = wb.Sheets[wb.SheetNames[0]];
             const rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, string>[];
             const metaWs = wb.Sheets[wb.SheetNames.find(n => n.toLowerCase() === '_metadata_') || ''];
-            const metadata = metaWs ? XLSX.utils.sheet_to_json(metaWs) : undefined;
+            let metadata: any[] = metaWs ? XLSX.utils.sheet_to_json(metaWs) : [];
+
+            // Native Data Validation extraction fallback
+            try {
+              const nativeValidations = ws['!dataValidation'];
+              if (nativeValidations && nativeValidations.length > 0) {
+                nativeValidations.forEach((dv: any) => {
+                  if (dv.type === 'list' && dv.formula1) {
+                    let options: string[] = [];
+                    if (dv.formula1.startsWith('"') && dv.formula1.endsWith('"')) {
+                      options = dv.formula1.slice(1, -1).split(',').map((s: string) => s.trim());
+                    } else if (dv.formula1.includes(':') || /^[A-Z]+\d+$/.test(dv.formula1)) {
+                      try {
+                        const refRange = XLSX.utils.decode_range(dv.formula1.replace(/\$/g, ''));
+                        for (let r = refRange.s.r; r <= refRange.e.r; r++) {
+                          for (let c = refRange.s.c; c <= refRange.e.c; c++) {
+                            const cell = ws[XLSX.utils.encode_cell({ r, c })];
+                            if (cell && cell.v !== undefined) {
+                              const val = String(cell.v).trim();
+                              if (val) options.push(val);
+                            }
+                          }
+                        }
+                      } catch {}
+                    }
+                    if (options.length > 0) {
+                      const sqrefs = dv.sqref.split(' ');
+                      sqrefs.forEach((ref: string) => {
+                        try {
+                          const r = XLSX.utils.decode_range(ref);
+                          for (let C = r.s.c; C <= r.e.c; C++) {
+                            const headerCell = ws[XLSX.utils.encode_cell({ r: 0, c: C })];
+                            const headerName = headerCell ? String(headerCell.v) : `Column ${C + 1}`;
+                            let existing = metadata.find(m => m['Column Name'] === headerName);
+                            if (!existing) { existing = { 'Column Name': headerName }; metadata.push(existing); }
+                            if (!existing['Type']) { existing['Type'] = 'dropdown'; existing['Dropdown Options'] = options.join(','); }
+                          }
+                        } catch {}
+                      });
+                    }
+                  }
+                });
+              }
+            } catch {}
 
             excelMutation.mutate({ name: file.name.replace(/\.[^/.]+$/, ''), data: rows, metadata }, {
               onSuccess: (newReg) => { toast.success('Imported!', { id: toastId }); navigate(`/register/${newReg.id}`); },
@@ -264,7 +307,7 @@ export default function HomePage() {
         } : null);
 
         try {
-          await excelMutation.mutateAsync({ name: file.name, data: file.data });
+          await excelMutation.mutateAsync({ name: file.name, data: file.data, metadata: file.metadata });
           setImportSession(prev => prev ? {
             ...prev, files: prev.files.map((f, idx) => idx === i ? { ...f, status: 'success' } : f)
           } : null);
