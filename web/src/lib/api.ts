@@ -288,6 +288,22 @@ function populateAutoIncrement(reg: RegisterDetail, columnId: number) {
   });
 }
 
+/**
+ * Updates the column name to include or remove currency symbols based on the type.
+ * Ensures the header visually matches the column format.
+ */
+function updateColumnSymbol(col: Column, newType: string) {
+  // Remove existing symbols or bracketed currency indicators (e.g. "Price (Rs)" -> "Price")
+  let cleanName = col.name.replace(/\s*\([₹$]\)$|\s*\(Rs\)$|\s*\(₹\)$/i, '').trim();
+  
+  if (newType === 'currency') {
+    col.name = `${cleanName} (₹)`;
+  } else {
+    // For all other types, revert to the clean name without symbols
+    col.name = cleanName;
+  }
+}
+
 async function getRegDoc(registerId: number): Promise<RegisterDetail> {
   // Return a shallow-safe clone from cache — avoids a Firestore round-trip on every mutation
   if (firestoreRegisterCache.has(registerId)) {
@@ -1266,6 +1282,7 @@ export async function renameColumn(registerId: number, columnId: number, newName
     const col = reg.columns.find((c) => c.id.toString() === columnId.toString());
     if (!col) throw new Error('Column not found');
     col.name = newName;
+    updateColumnSymbol(col, col.type);
     await saveRegDocImmediate(reg);
     return reg;
   });
@@ -1382,7 +1399,9 @@ export async function changeColumnType(
     
     const oldType = col.type;
     col.type = newType;
+    updateColumnSymbol(col, newType);
     
+    // Reset specific fields when changing type
     if (newType === 'formula') {
       col.formula = options?.formula;
     } else {
@@ -1393,6 +1412,23 @@ export async function changeColumnType(
       col.dropdownOptions = options?.dropdownOptions;
     } else {
       col.dropdownOptions = undefined;
+    }
+
+    // Dynamic Column Formatting Logic: Clean data when switching to currency
+    if (newType === 'currency') {
+      const colIdStr = columnId.toString();
+      reg.entries.forEach(entry => {
+        const val = entry.cells?.[colIdStr];
+        if (val) {
+          // Strip common currency symbols and commas to keep it numeric
+          const cleaned = val.replace(/[₹$,]/g, '').trim();
+          // If it looks like a valid number after cleaning, save it cleaned
+          if (/^-?\d+(\.\d+)?$/.test(cleaned)) {
+            if (!entry.cells) entry.cells = {};
+            entry.cells[colIdStr] = cleaned;
+          }
+        }
+      });
     }
 
     // Auto-populate existing rows if switching TO auto_increment
@@ -1434,6 +1470,7 @@ export async function insertColumn(registerId: number, data: { name: string; typ
       id: colId, registerId, name: data.name, type: data.type,
       position, dropdownOptions: data.dropdownOptions, formula: data.formula,
     };
+    updateColumnSymbol(col, data.type);
     reg.columns.splice(position, 0, col);
     reg.columns.forEach((c, i) => c.position = i);
     if (data.type === 'auto_increment') {

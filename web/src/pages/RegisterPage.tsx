@@ -2726,9 +2726,6 @@ export default function RegisterPage() {
                   const col = visibleColumns[vc.index];
                   if (!col) return null;
                   const IconComponent = (() => {
-                    const nameL = (col.name || '').toLowerCase();
-                    const isPayment = nameL.includes('amount') || nameL.includes('fee') || nameL.includes('payment') || nameL.includes('balance') || nameL.includes('price');
-                    if (isPayment && col.type !== 'currency') return <IndianRupee size={12} />;
                     switch (col.type) {
                       case 'number':         return <Hash size={12} />;
                       case 'auto_increment': return <ListOrdered size={12} />;

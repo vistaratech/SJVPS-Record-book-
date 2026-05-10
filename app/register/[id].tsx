@@ -62,6 +62,7 @@ import {
   type ColumnStats,
   type SharedUser,
 } from '../../lib/api';
+import { formatCurrency } from '../../lib/formatters';
 import { Colors, Spacing, BorderRadius, FontSize, FontWeight, Shadows } from '../../constants/theme';
 
 const COL_WIDTH = 150;
@@ -1160,7 +1161,6 @@ export default function RegisterScreen() {
                     <Text style={styles.serialHeaderText}>S.NO.</Text>
                   </View>
                   {visibleColumns.map((col) => {
-                    const isPayment = col.name.toLowerCase().includes('amount') || col.name.toLowerCase().includes('fee') || col.name.toLowerCase().includes('payment') || col.name.toLowerCase().includes('balance');
                     return (
                     <TouchableOpacity
                       key={col.id}
@@ -1172,7 +1172,7 @@ export default function RegisterScreen() {
                         <View style={styles.colTypeChip}>
                           <Ionicons
                             name={
-                              col.type === 'currency' || isPayment ? 'cash' :
+                              col.type === 'currency' ? 'cash' :
                               col.type === 'number' ? 'calculator' :
                               col.type === 'date' ? 'calendar' :
                               col.type === 'dropdown' ? 'chevron-down' :
@@ -1312,26 +1312,29 @@ export default function RegisterScreen() {
                             );
                           }
 
-                          // Formula column → read-only calculated value
-                          if (col.type === 'formula') {
-                            const formulaResult = col.formula
-                              ? evaluateFormula(col.formula, entry, columns)
-                              : '';
+                           // Currency column → formatted currency display
+                          if (col.type === 'currency') {
                             return (
-                              <View key={col.id} style={styles.dataCell}>
-                                <View style={styles.formulaCellInner}>
-                                  <Text
-                                    style={[
-                                      styles.formulaCellText,
-                                      formulaResult === 'ERR' && styles.formulaCellError,
-                                      !formulaResult && styles.formulaCellPlaceholder,
-                                    ]}
-                                    numberOfLines={1}
-                                  >
-                                    {formulaResult || 'fx'}
-                                  </Text>
-                                </View>
-                              </View>
+                              <TouchableOpacity
+                                key={col.id}
+                                style={styles.dataCell}
+                                onPress={() => {
+                                  // For mobile, we can use the same input logic or a specific modal
+                                  // but let's stick to the inline TextInput for simplicity or a custom one
+                                }}
+                              >
+                                <TextInput
+                                  style={[styles.cellInput, { color: Colors.navy, fontWeight: '600' }]}
+                                  defaultValue={value}
+                                  onEndEditing={(e) =>
+                                    handleCellChange(entry.id, col.id.toString(), e.nativeEvent.text, value)
+                                  }
+                                  placeholder="₹ 0.00"
+                                  placeholderTextColor="rgba(0,0,0,0.15)"
+                                  keyboardType="numeric"
+                                  value={value ? formatCurrency(value) : ""}
+                                />
+                              </TouchableOpacity>
                             );
                           }
 
@@ -1394,7 +1397,11 @@ export default function RegisterScreen() {
                             <Ionicons name="chevron-down" size={11} color="#94a3b8" />
                             <View style={{ alignItems: 'flex-end' }}>
                               <Text style={styles.calcLabel}>{calcType.toUpperCase()}</Text>
-                              <Text style={styles.calcValue}>{typeof displayVal === 'number' ? (Number.isInteger(displayVal) ? displayVal : displayVal.toFixed(2)) : displayVal}</Text>
+                              <Text style={styles.calcValue}>
+                                {col.type === 'currency' && (calcType === 'sum' || calcType === 'average' || calcType === 'min' || calcType === 'max')
+                                  ? formatCurrency(displayVal)
+                                  : (typeof displayVal === 'number' ? (Number.isInteger(displayVal) ? displayVal : displayVal.toFixed(2)) : displayVal)}
+                              </Text>
                             </View>
                           </View>
                         ) : (
@@ -1434,7 +1441,7 @@ export default function RegisterScreen() {
 
             <Text style={styles.modalLabel}>Column Type</Text>
             <View style={styles.typeRow}>
-              {(['text', 'number', 'date', 'dropdown', 'formula'] as const).map((type) => (
+              {(['text', 'number', 'currency', 'date', 'dropdown', 'formula'] as const).map((type) => (
                 <TouchableOpacity
                   key={type}
                   style={[styles.typeChip, newColumnType === type && styles.typeChipActive]}
@@ -1442,6 +1449,7 @@ export default function RegisterScreen() {
                 >
                   <Ionicons
                     name={
+                      type === 'currency' ? 'cash' :
                       type === 'number' ? 'calculator' :
                       type === 'date' ? 'calendar' :
                       type === 'dropdown' ? 'chevron-down-circle' :
@@ -1664,6 +1672,7 @@ export default function RegisterScreen() {
               {[
                 { val: 'text', icon: 'text', label: 'Text' },
                 { val: 'number', icon: 'calculator', label: 'Number' },
+                { val: 'currency', icon: 'cash', label: 'Currency' },
                 { val: 'date', icon: 'calendar', label: 'Date' },
                 { val: 'dropdown', icon: 'list', label: 'Dropdown' },
                 { val: 'formula', icon: 'flask', label: 'Formula' },
@@ -1711,6 +1720,7 @@ export default function RegisterScreen() {
               {[
                 { val: 'text', icon: 'text', label: 'Text' },
                 { val: 'number', icon: 'calculator', label: 'Number' },
+                { val: 'currency', icon: 'cash', label: 'Currency' },
                 { val: 'date', icon: 'calendar', label: 'Date' },
                 { val: 'dropdown', icon: 'list', label: 'Dropdown' },
                 { val: 'formula', icon: 'flask', label: 'Formula' },

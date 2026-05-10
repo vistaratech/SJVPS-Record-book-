@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import { type Column } from '../../lib/api';
+import { formatCurrency } from '../../lib/formatters';
 
 interface RegisterSummaryRowProps {
   visibleColumns: Column[];
@@ -97,7 +98,11 @@ export const RegisterSummaryRow: React.FC<RegisterSummaryRowProps> = ({
                 {calcType === 'average' && 'μ '}
                 {calcType.toUpperCase()}:
               </span>
-              <span className="calc-value">{calcValue}</span>
+              <span className="calc-value">
+                {col.type === 'currency' && (calcType === 'sum' || calcType === 'average' || calcType === 'min' || calcType === 'max')
+                  ? formatCurrency(calcValue)
+                  : calcValue}
+              </span>
             </div>
           ) : (
             <div className="calc-cell-inner">

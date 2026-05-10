@@ -1,4 +1,5 @@
 import { evaluateFormula, type Entry, type Column } from '../../lib/api';
+import { formatCurrency } from '../../lib/formatters';
 import { Calendar, ChevronDown, Image as ImageIcon, Mail, Phone, Globe, ListOrdered, IndianRupee, Maximize2 } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
 
@@ -18,26 +19,7 @@ const HighlightedText = React.memo(function HighlightedText({ text, searchTerm }
   );
 });
 
-// Format number with Indian currency style: ₹1,23,456.00
-function formatCurrency(val: string): string {
-  const n = parseFloat(val);
-  if (isNaN(n)) return val || '';
-  const [intPart, decPart] = Math.abs(n).toFixed(2).split('.');
-  // Indian grouping: last 3 digits, then every 2 digits
-  let formatted = '';
-  if (intPart.length <= 3) {
-    formatted = intPart;
-  } else {
-    formatted = intPart.slice(-3);
-    let remaining = intPart.slice(0, -3);
-    while (remaining.length > 2) {
-      formatted = remaining.slice(-2) + ',' + formatted;
-      remaining = remaining.slice(0, -2);
-    }
-    if (remaining) formatted = remaining + ',' + formatted;
-  }
-  return `${n < 0 ? '-' : ''}₹${formatted}.${decPart}`;
-}
+
 
 // Isolated memo component so formula evaluation only runs when its inputs change
 const FormulaCell = React.memo(({ idx, col, entry, registerColumns, onKeyDown }: {
