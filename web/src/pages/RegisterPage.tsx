@@ -223,11 +223,11 @@ export default function RegisterPage() {
   const [dropdownConfigOptions, setDropdownConfigOptions] = useState('');
 
   // Filter
-  const [filters, setFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>(() => {
+  const [filters, setFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string; values?: string[] }>>(() => {
     const saved = localStorage.getItem(`rb_filters_${registerId}`);
     return saved ? JSON.parse(saved) : [];
   });
-  const [activeFilters, setActiveFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string }>>(() => {
+  const [activeFilters, setActiveFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string; values?: string[] }>>(() => {
     const saved = localStorage.getItem(`rb_active_filters_${registerId}`);
     return saved ? JSON.parse(saved) : [];
   });
@@ -828,6 +828,7 @@ export default function RegisterPage() {
       nValue2: parseFloat(f.value2 || '0'),
       dValue: f.value, // Date filters use YYYY-MM-DD string
       dValue2: f.value2 || '',
+      values: f.values || [],
     }));
 
     const filterLen = preparedFilters.length;
@@ -907,6 +908,14 @@ export default function RegisterPage() {
               }
               case 'empty': condition = !val; break;
               case 'not_empty': condition = !!val; break;
+              case 'multi_select': {
+                if (!val) {
+                  condition = f.values.includes('(Blanks)');
+                } else {
+                  condition = f.values.includes(val);
+                }
+                break;
+              }
             }
             if (!condition) {
               passFilters = false;
@@ -2742,6 +2751,7 @@ export default function RegisterPage() {
           redo={redo}
           undoStackCount={undoStack.current.length}
           redoStackCount={redoStack.current.length}
+          entries={localEntries}
         />
       </div>
 
@@ -2848,25 +2858,25 @@ export default function RegisterPage() {
                       : { width: colW, minWidth: colW, maxWidth: colW }
                     }
                   >
-                    <div className="col-header-inner">
+                    <div 
+                      className="col-header-inner"
+                      title="Click for options, Drag to reorder"
+                      onMouseDown={(e) => handleColDragMouseDown(e, col.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (colMenuId === col.id) {
+                          setColMenuId(null);
+                          setColMenuRect(null);
+                        } else {
+                          const th = (e.currentTarget as HTMLElement).closest('th');
+                          if (th) setColMenuRect(th.getBoundingClientRect());
+                          setColMenuId(col.id);
+                        }
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    >
                       {IconComponent}
-                      <span
-                        className="col-header-name"
-                        title="Click for options, Drag to reorder"
-                        onMouseDown={(e) => handleColDragMouseDown(e, col.id)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (colMenuId === col.id) {
-                            setColMenuId(null);
-                            setColMenuRect(null);
-                          } else {
-                            const th = (e.currentTarget as HTMLElement).closest('th');
-                            if (th) setColMenuRect(th.getBoundingClientRect());
-                            setColMenuId(col.id);
-                          }
-                        }}
-                        style={{ cursor: 'default' }}
-                      >
+                      <span className="col-header-name">
                         {col.name}
                         {(col as any).mandatory && (
                           <span title="Mandatory field" style={{ color: 'var(--primary)', fontWeight: 900, marginLeft: 2, fontSize: '13px' }}>*</span>
@@ -2889,7 +2899,10 @@ export default function RegisterPage() {
                       {frozenColumns.has(col.id) && <Pin size={10} color="var(--muted)" className="frozen-pin" />}
                       <div
                         className="col-resize-handle"
-                        onMouseDown={(e) => handleColResizeMouseDown(e, col.id)}
+                        onMouseDown={(e) => {
+                          e.stopPropagation(); // Prevent triggering column options/drag when resizing
+                          handleColResizeMouseDown(e, col.id);
+                        }}
                       />
                     </div>
                   </th>

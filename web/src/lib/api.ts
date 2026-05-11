@@ -306,6 +306,20 @@ function updateColumnSymbol(col: Column, newType: string) {
   }
 }
 
+/**
+ * Re-calculates rowNumber for all entries in a register based on their order in the array.
+ * rowNumber is page-local (starts from 1 for each pageIndex).
+ */
+function renumberRows(reg: RegisterDetail) {
+  const pageCounters = new Map<number, number>();
+  reg.entries.forEach((e) => {
+    const pIdx = e.pageIndex || 0;
+    const current = (pageCounters.get(pIdx) || 0) + 1;
+    e.rowNumber = current;
+    pageCounters.set(pIdx, current);
+  });
+}
+
 async function getRegDoc(registerId: number): Promise<RegisterDetail> {
   // Return a shallow-safe clone from cache — avoids a Firestore round-trip on every mutation
   if (firestoreRegisterCache.has(registerId)) {
@@ -1568,6 +1582,7 @@ export async function addEntry(registerId: number, cells: Record<string, string>
       cells, createdAt: new Date().toISOString(), pageIndex,
     };
     reg.entries.push(entry);
+    renumberRows(reg); // Ensure sequence is correct
     reg.entryCount = reg.entries.length;
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
@@ -1641,6 +1656,7 @@ export async function insertEntry(registerId: number, cells: Record<string, stri
     };
     
     reg.entries.splice(atIndex, 0, entry);
+    renumberRows(reg); // Ensure sequence is correct
     reg.entryCount = reg.entries.length;
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
@@ -1771,6 +1787,7 @@ export async function updateEntriesOrder(registerId: number, sortedEntries: Entr
     const reg = await getRegDoc(registerId);
     // Overwrite the entire entries array with the new sorted array
     reg.entries = sortedEntries;
+    renumberRows(reg); // Update row numbers to match the new order
     reg.updatedAt = new Date().toISOString();
     await saveRegDocImmediate(reg);
   });
@@ -1796,6 +1813,7 @@ export async function deleteEntry(registerId: number, entryId: number): Promise<
     });
     
     reg.entries = reg.entries.filter((e) => e.id !== entryId);
+    renumberRows(reg);
     reg.entryCount = reg.entries.length;
     await saveRegDocImmediate(reg);
     await logAction(reg.businessId, 'Delete Row', `Deleted row #${entry.rowNumber} from "${reg.name}"`, { registerId, registerName: reg.name });
@@ -1882,6 +1900,7 @@ export async function bulkDeleteEntries(registerId: number, entryIds: number[]):
     });
     
     reg.entries = reg.entries.filter((e) => !idsSet.has(e.id));
+    renumberRows(reg); // Fix sequence after bulk delete
     reg.entryCount = reg.entries.length;
     await saveRegDocImmediate(reg);
     await logAction(reg.businessId, 'Delete Rows', `Moved ${entryIds.length} rows to bin from "${reg.name}"`, { registerId, registerName: reg.name });
@@ -1971,8 +1990,8 @@ export function generateCSV(register: RegisterDetail, pageIndex: number = 0): st
   const entries = register.entries.filter((e) => (e.pageIndex || 0) === pageIndex);
   const headers = ['S.No.', ...cols.map((c) => c.name)];
   const headerRow = headers.map((h) => `"${h.replace(/"/g, '""')}"`).join(',');
-  const dataRows = entries.map((entry, idx) => {
-    const row = [(idx + 1).toString(), ...cols.map((col) => {
+  const dataRows = entries.map((entry) => {
+    const row = [entry.rowNumber.toString(), ...cols.map((col) => {
       const val = entry.cells?.[col.id.toString()] || '';
       return `"${val.replace(/"/g, '""')}"`;
     })];

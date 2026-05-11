@@ -129,8 +129,8 @@ export function useExport({
 
     dataAOA.push(headerRow);
 
-    entriesToExport.forEach((entry, idx) => {
-      const rowData: any[] = [(idx + 1).toString()];
+    entriesToExport.forEach((entry) => {
+      const rowData: any[] = [entry.rowNumber.toString()];
       visibleColumns.forEach(c => {
         const val = c.type === 'formula'
           ? evaluateFormula(c.formula || '', entry, columns)
@@ -274,9 +274,9 @@ export function useExport({
     const { default: jsPDF } = await import('jspdf');
     const { default: autoTable } = await import('jspdf-autotable');
 
-    const bodyRows = entriesToExport.map((entry, idx) => {
+    const bodyRows = entriesToExport.map((entry) => {
       return [
-        (idx + 1).toString(),
+        entry.rowNumber.toString(),
         ...visibleCols.map(c => {
           const cellValue = c.type === 'formula'
             ? evaluateFormula(c.formula || '', entry, columns)
@@ -387,7 +387,7 @@ export function useExport({
     const entry = localEntries.find(e => e.id === entryId);
     if (!entry) return;
     const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
-    const rowIdx = localEntries.indexOf(entry) + 1;
+    const rowIdx = entry.rowNumber;
 
     const { default: jsPDF } = await import('jspdf');
     const { default: autoTable } = await import('jspdf-autotable');
@@ -440,13 +440,13 @@ export function useExport({
     const entry = localEntries.find(e => e.id === entryId);
     if (!entry) return;
     const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
-    const rowIdx = localEntries.indexOf(entry) + 1;
+    const rowIdx = entry.rowNumber;
 
     const XLSX = await import('xlsx');
 
     try {
       const headerRow = ['S.No.', ...visibleCols.map(c => c.name)];
-      const dataRow = [(localEntries.indexOf(entry) + 1).toString(), ...visibleCols.map(c => {
+      const dataRow = [entry.rowNumber.toString(), ...visibleCols.map(c => {
         const val = c.type === 'formula'
           ? evaluateFormula(c.formula || '', entry, columns)
           : (entry.cells?.[c.id.toString()] || '');

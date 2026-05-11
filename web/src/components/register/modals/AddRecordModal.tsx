@@ -57,18 +57,34 @@ export function AddRecordModal({
     }
   }, [open, columns]);
 
-  // Build fast lookup: colId → Set<lowercase value> from all existing entries
-  const existingValueMap = useMemo(() => {
-    const map: Record<string, Set<string>> = {};
+  // Build fast lookup: colId → Set<lowercase value> for duplicate checks
+  // AND colId → Array of unique original values for dropdown suggestions
+  const { duplicateMap, dropdownMap } = useMemo(() => {
+    const dupMap: Record<string, Set<string>> = {};
+    const dropMap: Record<string, string[]> = {};
+    const seenMap: Record<string, Set<string>> = {};
+
     existingEntries.forEach(entry => {
       if (!entry.cells) return;
       Object.entries(entry.cells).forEach(([colId, val]) => {
         if (!val || !val.trim()) return;
-        if (!map[colId]) map[colId] = new Set();
-        map[colId].add(val.trim().toLowerCase());
+        const trimmed = val.trim();
+        const lower = trimmed.toLowerCase();
+
+        // For duplicate checking
+        if (!dupMap[colId]) dupMap[colId] = new Set();
+        dupMap[colId].add(lower);
+
+        // For dropdown options (preserving first casing seen)
+        if (!seenMap[colId]) seenMap[colId] = new Set();
+        if (!dropMap[colId]) dropMap[colId] = [];
+        if (!seenMap[colId].has(lower)) {
+          seenMap[colId].add(lower);
+          dropMap[colId].push(trimmed);
+        }
       });
     });
-    return map;
+    return { duplicateMap: dupMap, dropdownMap: dropMap };
   }, [existingEntries]);
 
   const handleChange = useCallback(
@@ -88,7 +104,7 @@ export function AddRecordModal({
         return;
       }
 
-      const isDuplicate = existingValueMap[colId]?.has(trimmed) ?? false;
+      const isDuplicate = duplicateMap[colId]?.has(trimmed) ?? false;
 
       setDuplicates(prev => {
         const n = new Set(prev);
@@ -120,7 +136,7 @@ export function AddRecordModal({
         toastedRef.current.delete(toastKey);
       }
     },
-    [existingValueMap]
+    [duplicateMap, columns]
   );
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -259,7 +275,7 @@ export function AddRecordModal({
                           />
                           <div className="autoincrement-hint" style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px' }}>Override or leave blank for next sequence</div>
                         </div>
-                      ) : col.type === 'dropdown' && col.dropdownOptions && col.dropdownOptions.length > 0 ? (
+                      ) : col.type === 'dropdown' ? (
                         <select
                           id={`ar-col-${col.id}`}
                           className={`${inputCls} cell-dropdown`}
@@ -269,9 +285,18 @@ export function AddRecordModal({
                           style={{ paddingRight: '30px' }}
                         >
                           <option value="">-- Select --</option>
-                          {col.dropdownOptions.map(opt => (
-                            <option key={opt} value={opt}>{opt}</option>
-                          ))}
+                          {(() => {
+                            // If predefined options exist, use only those.
+                            // If not, fall back to unique existing values in this column.
+                            const predefined = col.dropdownOptions || [];
+                            const combined = predefined.length > 0 
+                              ? predefined 
+                              : (dropdownMap[colIdStr] || []);
+                              
+                            return combined.map(opt => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ));
+                          })()}
                         </select>
                       ) : col.type === 'checkbox' ? (
                         <div className="add-record-checkbox-wrap" style={{ display: 'flex', alignItems: 'center', height: '44px' }}>

@@ -444,7 +444,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
             onClick={(e) => e.stopPropagation()}
             tabIndex={-1}
           />
-          <span className="serial-number" onClick={handleSerialClick} title="Click to view details">{idx + 1}</span>
+          <span className="serial-number" onClick={handleSerialClick} title="Click to view details">{entry.rowNumber}</span>
         </div>
       </td>
       {elements.map((el) => {
@@ -503,7 +503,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
               </button>
             </div>
           ) : col.type === 'dropdown' ? (
-            <div data-cell={`cell-${idx}-${col.id}`} tabIndex={0} className="cell-dropdown" onClick={(e) => openDropdown(entry.id, col.id, col.dropdownOptions || ['Option 1', 'Option 2', 'Option 3'], e.currentTarget.getBoundingClientRect())} onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); openDropdown(entry.id, col.id, col.dropdownOptions || ['Option 1', 'Option 2', 'Option 3'], e.currentTarget.getBoundingClientRect()); } else handleCellKeyDown(e, col.id, colIdx); }}>
+            <div data-cell={`cell-${idx}-${col.id}`} tabIndex={0} className="cell-dropdown" onClick={(e) => openDropdown(entry.id, col.id, col.dropdownOptions || [], e.currentTarget.getBoundingClientRect())} onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); openDropdown(entry.id, col.id, col.dropdownOptions || [], e.currentTarget.getBoundingClientRect()); } else handleCellKeyDown(e, col.id, colIdx); }}>
               {entry.cells?.[col.id.toString()] ? <HighlightedText text={entry.cells[col.id.toString()]} searchTerm={searchTerm} /> : <span className="cell-placeholder"><ChevronDown size={12} /> Select</span>}
             </div>
           ) : col.type === 'checkbox' ? (

@@ -29,6 +29,7 @@ interface RegisterToolbarProps {
   redo?: () => void;
   undoStackCount?: number;
   redoStackCount?: number;
+  entries: any[];
 }
 
 export const RegisterToolbar = memo(function RegisterToolbar({
@@ -36,7 +37,8 @@ export const RegisterToolbar = memo(function RegisterToolbar({
   hiddenColumns,
   selectedRows, rowCount, columns, bulkDeleteMutation,
   setManageColsMenu,
-  undo, redo, undoStackCount, redoStackCount
+  undo, redo, undoStackCount, redoStackCount,
+  entries
 }: RegisterToolbarProps) {
 
   return (
@@ -82,6 +84,7 @@ export const RegisterToolbar = memo(function RegisterToolbar({
           setFilters={setFilters}
           setActiveFilters={setActiveFilters}
           columns={columns}
+          entries={entries}
         />
       </div>
 

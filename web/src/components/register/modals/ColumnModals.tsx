@@ -1,4 +1,4 @@
-import { AlertCircle, X, Plus, AlertTriangle } from 'lucide-react';
+import { AlertCircle, X, Plus, AlertTriangle, Check } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { 
   Calculator, PlusCircle, MinusCircle, XCircle, DivideCircle, 
@@ -542,7 +542,7 @@ const presetBtnStyle = (active: boolean) => ({
   cursor: 'pointer', transition: 'all 0.2s'
 });
 
-function OptionsEditor({ value, onChange }: { value: string, onChange: (v: string) => void }) {
+function OptionsEditor({ value, onChange, columnData = [] }: { value: string, onChange: (v: string) => void, columnData?: string[] }) {
   const [opts, setOpts] = useState<string[]>(() => value ? value.split(',') : []);
   const lastSentValue = useRef(value);
   
@@ -562,39 +562,122 @@ function OptionsEditor({ value, onChange }: { value: string, onChange: (v: strin
 
   return (
     <div className="options-editor-container">
-      {opts.map((opt, i) => (
-        <div key={i} className="options-editor-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
-          <input 
-            className="modal-input" 
-            style={{ marginBottom: 0 }} 
-            value={opt} 
-            onChange={(e) => {
-              const newOpts = [...opts];
-              newOpts[i] = e.target.value;
-              updateOpts(newOpts);
-            }} 
-            placeholder="Option name" 
-          />
-          <button 
-            type="button" 
-            onClick={() => {
-              const newOpts = [...opts];
-              newOpts.splice(i, 1);
-              updateOpts(newOpts);
-            }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: '4px' }}
-          >
-            <X size={16} />
-          </button>
-        </div>
-      ))}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <label className="modal-label" style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
+          Predefined Options ({opts.length})
+        </label>
+        <button 
+          type="button" 
+          onClick={() => { if (confirm('Clear all options?')) updateOpts([]); }}
+          style={{ fontSize: '11px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+        >
+          Clear All
+        </button>
+      </div>
+
+      <div className="options-list-scroll" style={{ maxHeight: '200px', overflowY: 'auto', marginBottom: '12px', paddingRight: '4px' }}>
+        {opts.length === 0 ? (
+          <div style={{ padding: '20px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: '8px', color: 'var(--muted)', fontSize: '12px', background: 'var(--bg-light)' }}>
+            No predefined options yet. Add some below or pick from existing data.
+          </div>
+        ) : (
+          opts.map((opt, i) => (
+            <div key={i} className="options-editor-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', background: 'var(--bg-light)', color: 'var(--muted)', fontSize: '10px', fontWeight: 700 }}>
+                {i + 1}
+              </div>
+              <input 
+                className="modal-input" 
+                style={{ marginBottom: 0, flex: 1, height: '36px', fontSize: '13px' }} 
+                value={opt} 
+                onChange={(e) => {
+                  const newOpts = [...opts];
+                  newOpts[i] = e.target.value;
+                  updateOpts(newOpts);
+                }} 
+                placeholder="Option name" 
+              />
+              <button 
+                type="button" 
+                onClick={() => {
+                  const newOpts = [...opts];
+                  newOpts.splice(i, 1);
+                  updateOpts(newOpts);
+                }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: '6px', opacity: 0.6, transition: 'opacity 0.2s' }}
+                onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                onMouseLeave={(e) => e.currentTarget.style.opacity = '0.6'}
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
       <button 
         type="button" 
         onClick={() => updateOpts([...opts, `Option ${opts.length + 1}`])}
-        style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: '1px dashed var(--border)', borderRadius: '6px', padding: '8px 12px', cursor: 'pointer', color: 'var(--navy)', width: '100%', justifyContent: 'center', fontSize: '13px', fontWeight: 500 }}
+        style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-light)', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px 12px', cursor: 'pointer', color: 'var(--navy)', width: '100%', justifyContent: 'center', fontSize: '13px', fontWeight: 600, marginBottom: '20px', transition: 'all 0.2s' }}
+        onMouseEnter={(e) => e.currentTarget.style.background = 'white'}
+        onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-light)'}
       >
-        <Plus size={14} /> Add Option
+        <Plus size={16} /> Add New Option
       </button>
+
+      {columnData.length > 0 && (
+        <div className="suggestions-section" style={{ borderTop: '1px solid var(--border)', paddingTop: '16px', marginTop: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <label className="modal-label" style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
+              Suggestions from existing data
+            </label>
+            <button 
+              type="button" 
+              onClick={() => {
+                const newOnes = columnData.filter(d => !opts.some(o => o.toLowerCase() === d.toLowerCase()));
+                if (newOnes.length > 0) updateOpts([...opts, ...newOnes]);
+              }}
+              style={{ fontSize: '11px', color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+            >
+              Add All
+            </button>
+          </div>
+          <p style={{ fontSize: '11px', color: 'var(--muted)', marginBottom: '10px' }}>
+            These values are already present in this column. Click to add them as official options.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '120px', overflowY: 'auto', padding: '2px' }}>
+            {columnData.map((data, idx) => {
+              const isAlreadyOption = opts.some(o => o.toLowerCase() === data.toLowerCase());
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  disabled={isAlreadyOption}
+                  onClick={() => updateOpts([...opts, data])}
+                  style={{ 
+                    padding: '6px 12px', 
+                    fontSize: '12px', 
+                    borderRadius: '20px', 
+                    border: '1px solid var(--border)', 
+                    background: isAlreadyOption ? 'var(--bg-light)' : 'white',
+                    color: isAlreadyOption ? 'var(--muted)' : 'var(--navy)',
+                    cursor: isAlreadyOption ? 'default' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => { if (!isAlreadyOption) e.currentTarget.style.borderColor = 'var(--primary)'; }}
+                  onMouseLeave={(e) => { if (!isAlreadyOption) e.currentTarget.style.borderColor = 'var(--border)'; }}
+                >
+                  {isAlreadyOption ? <Check size={12} /> : <Plus size={12} />}
+                  {data}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -685,7 +768,11 @@ export function ColumnModals(props: ColumnModalsProps) {
             {newColType === 'dropdown' && (
               <>
                 <label className="modal-label" style={{ marginTop: '12px', display: 'block', marginBottom: '8px' }}>Options</label>
-                <OptionsEditor value={newColDropdownOpts} onChange={setNewColDropdownOpts} />
+                <OptionsEditor 
+                  value={newColDropdownOpts} 
+                  onChange={setNewColDropdownOpts} 
+                  columnData={[]} // No column data for new column
+                />
               </>
             )}
             {newColType === 'formula' && (
@@ -728,7 +815,24 @@ export function ColumnModals(props: ColumnModalsProps) {
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h3 className="modal-title">Edit Dropdown Options</h3>
             <label className="modal-label" style={{ marginBottom: '8px', display: 'block' }}>Options</label>
-            <OptionsEditor value={dropdownConfigOptions} onChange={setDropdownConfigOptions} />
+            <OptionsEditor 
+              value={dropdownConfigOptions} 
+              onChange={setDropdownConfigOptions} 
+              columnData={(() => {
+                if (activeModalColId == null || !entries) return [];
+                const colIdStr = activeModalColId.toString();
+                const seen = new Set<string>();
+                const unique: string[] = [];
+                entries.forEach(e => {
+                  const val = e.cells?.[colIdStr]?.trim();
+                  if (val && !seen.has(val.toLowerCase())) {
+                    seen.add(val.toLowerCase());
+                    unique.push(val);
+                  }
+                });
+                return unique;
+              })()}
+            />
             <div className="modal-actions">
               <button className="modal-cancel-btn" onClick={() => setDropdownConfigModal(false)}>Cancel</button>
               <button className="modal-confirm-btn" onClick={() => updateDropdownMutation.mutate()}>Save</button>
@@ -787,7 +891,24 @@ export function ColumnModals(props: ColumnModalsProps) {
             {newColType === 'dropdown' && (
               <>
                 <label className="modal-label" style={{ marginTop: '12px', display: 'block', marginBottom: '8px' }}>Options</label>
-                <OptionsEditor value={newColDropdownOpts} onChange={setNewColDropdownOpts} />
+                <OptionsEditor 
+                  value={newColDropdownOpts} 
+                  onChange={setNewColDropdownOpts} 
+                  columnData={(() => {
+                    if (activeModalColId == null || !entries) return [];
+                    const colIdStr = activeModalColId.toString();
+                    const seen = new Set<string>();
+                    const unique: string[] = [];
+                    entries.forEach(e => {
+                      const val = e.cells?.[colIdStr]?.trim();
+                      if (val && !seen.has(val.toLowerCase())) {
+                        seen.add(val.toLowerCase());
+                        unique.push(val);
+                      }
+                    });
+                    return unique;
+                  })()}
+                />
               </>
             )}
             {newColType === 'formula' && (
