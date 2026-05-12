@@ -481,6 +481,60 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
             onCellFormatClick(entry.id, col.id.toString(), (e.currentTarget as HTMLElement).getBoundingClientRect());
           }
         };
+
+        const colNameLower = col.name.toLowerCase();
+        let customTextStyle: React.CSSProperties = {};
+        
+        // Apply color based on column name as per design mockup
+        if (colNameLower.includes('parent name')) {
+          customTextStyle.color = '#7B1FA2'; // Purple
+          customTextStyle.fontWeight = '600';
+        } else if (
+          colNameLower.includes('student name') || 
+          colNameLower.includes('date') || 
+          colNameLower.includes('dob') || 
+          colNameLower.includes('stu id') ||
+          colNameLower.includes('rb no')
+        ) {
+          customTextStyle.color = '#1E88E5'; // Blue
+          customTextStyle.fontWeight = '600';
+        }
+
+        const rawValue = entry.cells?.[col.id.toString()] || '';
+
+        // Render ADM MODE badges
+        if (colNameLower === 'adm mode' && rawValue) {
+          const valUpper = rawValue.toUpperCase();
+          let badgeStyle: React.CSSProperties = {
+            padding: '4px 10px',
+            borderRadius: '6px',
+            fontSize: '11px',
+            fontWeight: '700',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: '80px'
+          };
+
+          if (valUpper === 'NEW ADM') {
+            badgeStyle.background = '#E6F4EA';
+            badgeStyle.color = '#1E7E34';
+          } else if (valUpper === 'FROM ENQ') {
+            badgeStyle.background = '#F3E5F5';
+            badgeStyle.color = '#7B1FA2';
+          } else {
+            badgeStyle.background = '#FEF2F2';
+            badgeStyle.color = '#991B1B';
+          }
+
+          return (
+            <td key={col.id} className={isFrozen ? 'frozen-col' : ''} style={cellStyle} onContextMenu={handleContextMenu}>
+              <div className="cell-inner-wrapper" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                <span style={badgeStyle}>{valUpper}</span>
+              </div>
+            </td>
+          );
+        }
         
         return (
         <td key={col.id} className={isFrozen ? 'frozen-col' : ''} style={cellStyle} onContextMenu={handleContextMenu}>
@@ -488,14 +542,14 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
           {col.type === 'formula' ? (
             <FormulaCell idx={idx} col={col} entry={entry} registerColumns={registerColumns} onKeyDown={(e) => handleCellKeyDown(e, col.id, colIdx)} />
           ) : col.type === 'date' ? (
-            <div className="cell-url-wrap">
+            <div className="cell-url-wrap" style={customTextStyle}>
               <SpreadsheetTextInput 
                 idx={idx} col={col} entry={entry} visibleColumns={visibleColumns} colIdx={colIdx} totalRows={totalRows} handleCellChange={handleCellChange}
                 placeholder="DD-MM-YYYY" searchTerm={searchTerm}
               />
               <button 
                 className="cell-url-link" 
-                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', ...customTextStyle }}
                 onClick={(e) => openDatePicker(entry.id, col.id, entry.cells?.[col.id.toString()] || '', e.currentTarget.getBoundingClientRect())}
                 tabIndex={-1}
               >
@@ -503,7 +557,7 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
               </button>
             </div>
           ) : col.type === 'dropdown' ? (
-            <div data-cell={`cell-${idx}-${col.id}`} tabIndex={0} className="cell-dropdown" onClick={(e) => openDropdown(entry.id, col.id, col.dropdownOptions || [], e.currentTarget.getBoundingClientRect())} onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); openDropdown(entry.id, col.id, col.dropdownOptions || [], e.currentTarget.getBoundingClientRect()); } else handleCellKeyDown(e, col.id, colIdx); }}>
+            <div data-cell={`cell-${idx}-${col.id}`} tabIndex={0} className="cell-dropdown" style={customTextStyle} onClick={(e) => openDropdown(entry.id, col.id, col.dropdownOptions || [], e.currentTarget.getBoundingClientRect())} onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); openDropdown(entry.id, col.id, col.dropdownOptions || [], e.currentTarget.getBoundingClientRect()); } else handleCellKeyDown(e, col.id, colIdx); }}>
               {entry.cells?.[col.id.toString()] ? <HighlightedText text={entry.cells[col.id.toString()]} searchTerm={searchTerm} /> : <span className="cell-placeholder"><ChevronDown size={12} /> Select</span>}
             </div>
           ) : col.type === 'checkbox' ? (
@@ -594,16 +648,18 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
           ) : col.type === 'currency' ? (
             <CurrencyCell idx={idx} col={col} entry={entry} colIdx={colIdx} handleCellChange={handleCellChange} visibleColumns={visibleColumns} totalRows={totalRows} />
           ) : (
-            <SpreadsheetTextInput 
-              idx={idx}
-              col={col}
-              entry={entry}
-              visibleColumns={visibleColumns}
-              colIdx={colIdx}
-              totalRows={totalRows}
-              handleCellChange={handleCellChange}
-              searchTerm={searchTerm}
-            />
+            <div style={{ ...customTextStyle, width: '100%', height: '100%' }}>
+              <SpreadsheetTextInput 
+                idx={idx}
+                col={col}
+                entry={entry}
+                visibleColumns={visibleColumns}
+                colIdx={colIdx}
+                totalRows={totalRows}
+                handleCellChange={handleCellChange}
+                searchTerm={searchTerm}
+              />
+            </div>
           )}
           {col.type !== 'formula' && col.type !== 'auto_increment' && (
             <div 

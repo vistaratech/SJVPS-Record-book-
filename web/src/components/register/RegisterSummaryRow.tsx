@@ -76,9 +76,12 @@ export const RegisterSummaryRow: React.FC<RegisterSummaryRowProps> = ({
       const leftOffset = isFrozen ? (frozenLeftOffsets[col.id] || 0) : 0;
       const colW = colWidths[col.id] || defaultColWidth;
 
+      const pastelColors = ['#EBF2FA', '#E6F4EA', '#FEF9E7', '#FDF2E9', '#F3E5F5', '#FEF2F2', '#E0F2F1'];
+      const bgColor = pastelColors[vc.index % pastelColors.length];
+
       const cellStyle: React.CSSProperties = isFrozen 
-        ? { position: 'sticky', left: leftOffset, zIndex: 11, background: 'var(--table-bg)', width: colW, minWidth: colW, maxWidth: colW }
-        : { width: colW, minWidth: colW, maxWidth: colW };
+        ? { position: 'sticky', left: leftOffset, zIndex: 11, background: bgColor, width: colW, minWidth: colW, maxWidth: colW }
+        : { width: colW, minWidth: colW, maxWidth: colW, background: bgColor };
 
       return (
         <td

@@ -2020,9 +2020,18 @@ a {
   color: var(--foreground);
 }
 
+.spreadsheet thead th, 
+.spreadsheet thead td.serial,
+.spreadsheet thead td.serial-header-checkbox {
+  background: #EBF2FA !important; /* Light blue header background */
+  color: #002D5D !important; /* Dark navy text */
+  font-weight: 700;
+  border-bottom: 1px solid #D8DEE6;
+}
+
 .spreadsheet td.serial {
   text-align: center;
-  color: var(--muted-light);
+  color: var(--navy);
   font-size: 12px;
   font-family: 'Inter', sans-serif;
   background: var(--surface);
@@ -2050,7 +2059,16 @@ a {
 }
 
 .spreadsheet tr:hover td {
-  background: #F8F8F5;
+  background: #F0F4F8;
+}
+
+.spreadsheet tr:nth-child(even) td {
+  background: #F8FBFF; /* Very light blue for alternate rows */
+}
+
+.spreadsheet tr:nth-child(even) td.serial,
+.spreadsheet tr:nth-child(even) td.frozen-col {
+  background: #F8FBFF !important;
 }
 
 .spreadsheet tr.mock td {
