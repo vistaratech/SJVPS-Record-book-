@@ -7,6 +7,7 @@
 import { useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { evaluateFormula, type Entry, type Column } from '../lib/api';
+import { formatCurrency } from '../lib/formatters';
 import type { ExportOptions } from '../components/register/modals/ExportModal';
 
 type CalcType = 'sum' | 'average' | 'count' | 'min' | 'max' | 'filled' | 'empty' | 'distinct' | 'none';
@@ -137,9 +138,16 @@ export function useExport({
           : (entry.cells?.[c.id.toString()] || '');
 
         if (c.type === 'number' || c.type === 'currency' || c.type === 'formula') {
-          const cleaned = val.toString().replace(/[^\d.-]/g, '');
-          const n = parseFloat(cleaned);
-          rowData.push(isNaN(n) ? val : n);
+          const original = val.toString();
+          if (c.type === 'currency') {
+            rowData.push(formatCurrency(original));
+          } else if (original.toLowerCase().includes('x')) {
+            rowData.push(original);
+          } else {
+            const cleaned = original.replace(/[^\d.-]/g, '');
+            const n = parseFloat(cleaned);
+            rowData.push(isNaN(n) ? original : n);
+          }
         } else if (c.type === 'date' && val) {
           const parts = val.split(/[-/]/);
           if (parts.length === 3) {
@@ -281,6 +289,8 @@ export function useExport({
           const cellValue = c.type === 'formula'
             ? evaluateFormula(c.formula || '', entry, columns)
             : (entry.cells?.[c.id.toString()] || '');
+          
+          if (c.type === 'currency') return formatCurrency(cellValue);
           return cellValue;
         })
       ];
@@ -410,7 +420,9 @@ export function useExport({
           const val = c.type === 'formula'
             ? evaluateFormula(c.formula || '', entry, columns)
             : (entry.cells?.[c.id.toString()] || '');
-          return [c.name, val];
+          
+          const displayVal = c.type === 'currency' ? formatCurrency(val) : val;
+          return [c.name, displayVal];
         })
       ];
 
@@ -452,9 +464,16 @@ export function useExport({
           : (entry.cells?.[c.id.toString()] || '');
 
         if (c.type === 'number' || c.type === 'currency') {
-          const cleaned = val.toString().replace(/[^\d.-]/g, '');
+          const original = val.toString();
+          if (c.type === 'currency') {
+            return formatCurrency(original);
+          }
+          if (original.toLowerCase().includes('x')) {
+            return original;
+          }
+          const cleaned = original.replace(/[^\d.-]/g, '');
           const n = parseFloat(cleaned);
-          return isNaN(n) ? val : n;
+          return isNaN(n) ? original : n;
         }
         return val;
       })];
@@ -480,7 +499,9 @@ export function useExport({
       const val = c.type === 'formula'
         ? evaluateFormula(c.formula || '', entry, columns)
         : (entry.cells?.[c.id.toString()] || '—');
-      return `${c.name}: ${val}`;
+      
+      const displayVal = c.type === 'currency' ? formatCurrency(val) : val;
+      return `${c.name}: ${displayVal}`;
     });
 
     const text = `${register.name}\n${'─'.repeat(30)}\n${lines.join('\n')}`;

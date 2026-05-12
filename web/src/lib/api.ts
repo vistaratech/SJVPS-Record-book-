@@ -1168,7 +1168,7 @@ export function evaluateFormula(formula: string, entry: Entry, columns: Column[]
       } else {
         // Strip currency symbols and commas first
         const cleaned = rawVal.replace(/[₹$,]/g, '').trim();
-        // Only parse if the cleaned value is purely numeric — ignore values with suffixes like "x", "INT"
+        // Ignore values with suffixes like "x" in calculations
         if (/^-?\d+(\.\d+)?$/.test(cleaned)) {
           numStr = parseFloat(cleaned).toString();
         } else {
@@ -2004,7 +2004,11 @@ export interface ColumnStats { sum: number; average: number; count: number; min:
 
 export function calculateColumnStats(entries: Entry[], columnId: string): ColumnStats {
   const values = entries.map((e) => e.cells?.[columnId]).filter((v) => v !== undefined && v !== null && v !== '');
-  const numbers = values.map((v) => parseFloat(v!)).filter((n) => !isNaN(n));
+  // Ignore values with "x" in column stats
+  const numbers = values
+    .filter(v => !String(v).toLowerCase().includes('x'))
+    .map((v) => parseFloat(v!.replace(/[₹$,]/g, '')))
+    .filter((n) => !isNaN(n));
   return {
     sum: numbers.reduce((a, b) => a + b, 0),
     average: numbers.length > 0 ? numbers.reduce((a, b) => a + b, 0) / numbers.length : 0,
