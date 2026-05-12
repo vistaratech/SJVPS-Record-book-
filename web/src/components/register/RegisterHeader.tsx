@@ -1,4 +1,4 @@
-import { Bookmark, Download, Share2, X } from 'lucide-react';
+import { Bookmark, Download, Share2, X, MoreHorizontal } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 
@@ -17,8 +17,10 @@ interface RegisterHeaderProps {
 
 export function RegisterHeader({ register, setShareModal, handleOpenExport }: RegisterHeaderProps) {
   const [saveTemplateModal, setSaveTemplateModal] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const templateInputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // Focus template name input when modal opens
   useEffect(() => {
@@ -26,6 +28,19 @@ export function RegisterHeader({ register, setShareModal, handleOpenExport }: Re
       setTimeout(() => templateInputRef.current?.focus(), 80);
     }
   }, [saveTemplateModal]);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMoreMenu(false);
+      }
+    };
+    if (showMoreMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showMoreMenu]);
 
 
   const handleSaveTemplate = () => {
@@ -61,22 +76,35 @@ export function RegisterHeader({ register, setShareModal, handleOpenExport }: Re
     toast.success(`Template "${name}" saved!`);
     setSaveTemplateModal(false);
     setTemplateName('');
+    setShowMoreMenu(false);
   };
 
   return (
-    <div className="register-header-actions">
+    <div className="register-header-actions" ref={menuRef}>
+      <button 
+        className={`register-header-btn${showMoreMenu ? ' active' : ''}`} 
+        onClick={() => setShowMoreMenu(!showMoreMenu)}
+        title="More Actions"
+      >
+        <MoreHorizontal size={20} />
+      </button>
 
-      <button className="register-header-btn" onClick={() => setShareModal(true)} title="Share Register">
-        <Share2 size={18} />
-      </button>
-      <div className="export-dropdown-wrap">
-        <button className="register-header-btn" onClick={handleOpenExport} title="Download Options">
-          <Download size={18} />
-        </button>
-      </div>
-      <button className="register-header-btn outline" onClick={() => { setTemplateName(register?.name || ''); setSaveTemplateModal(true); }} title="Save as Template">
-        <Bookmark size={18} />
-      </button>
+      {showMoreMenu && (
+        <div className="header-more-menu">
+          <button className="more-menu-item" onClick={() => { setShareModal(true); setShowMoreMenu(false); }}>
+            <Share2 size={16} />
+            <span>Share Register</span>
+          </button>
+          <button className="more-menu-item" onClick={() => { handleOpenExport(); setShowMoreMenu(false); }}>
+            <Download size={16} />
+            <span>Download Options</span>
+          </button>
+          <button className="more-menu-item" onClick={() => { setTemplateName(register?.name || ''); setSaveTemplateModal(true); }}>
+            <Bookmark size={16} />
+            <span>Save as Template</span>
+          </button>
+        </div>
+      )}
 
       {/* Save Template Modal */}
       {saveTemplateModal && (
@@ -90,7 +118,7 @@ export function RegisterHeader({ register, setShareModal, handleOpenExport }: Re
               </button>
             </div>
             <p className="save-template-desc">
-              Save the current column structure as a reusable template. You can use it later when creating new registers.
+              Save the current column structure as a reusable template.
             </p>
             <div className="save-template-preview">
               <span className="save-template-preview-label">Columns to save:</span>
@@ -126,8 +154,7 @@ export function RegisterHeader({ register, setShareModal, handleOpenExport }: Re
           </div>
         </div>
       )}
-
-
     </div>
   );
 }
+

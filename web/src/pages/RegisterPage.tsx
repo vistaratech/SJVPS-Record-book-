@@ -2707,52 +2707,47 @@ export default function RegisterPage() {
             <ArrowLeft size={18} />
           </button>
           <h1 className="register-header-title">{register.name}</h1>
-        </div>
-        <RegisterHeader 
-          register={register} 
-          setShareModal={setShareModal} 
-          handleOpenExport={() => setShowExportModal(true)}
-        />
-      </div>
-
-      {/* ── Combined Pages + Actions Bar ── */}
-      <div className="pages-actions-bar">
-        {/* Left: Page tabs + Add Page + Add Column + Add Row */}
-        <div className="pages-actions-tabs">
-          {/* Page controls removed as requested - only Add Register remains */}
-          <button className="pab-tab-action-btn primary" onClick={() => setShowAddRecordModal(true)} style={{ marginLeft: 0 }}>
+          
+          <button className="pab-tab-action-btn primary header-add-btn" onClick={() => setShowAddRecordModal(true)}>
             <Plus size={12} /> Add Register
           </button>
         </div>
 
-        {/* Right: stats + search + filter + contextual */}
-        <RegisterToolbar
-          search={search}
-          setSearch={setSearch}
-          filters={filters}
-          activeFilters={activeFilters}
-          setFilters={setFilters}
-          setActiveFilters={setActiveFilters}
-          filterModal={filterModal}
-          setFilterModal={setFilterModal}
-          addEntryMutation={addEntryMutation}
-          setNewColName={setNewColName}
-          setNewColType={setNewColType}
-          setNewColDropdownOpts={setNewColDropdownOpts}
-          setNewColFormula={setNewColFormula}
-          setNewColumnModal={setNewColumnModal}
-          hiddenColumns={hiddenColumns}
-          selectedRows={selectedRows}
-          rowCount={displayEntries.length}
-          columns={columns}
-          bulkDeleteMutation={bulkDeleteMutation}
-          setManageColsMenu={setManageColsMenu}
-          undo={undo}
-          redo={redo}
-          undoStackCount={undoStack.current.length}
-          redoStackCount={redoStack.current.length}
-          entries={localEntries}
-        />
+        <div className="register-header-right">
+          <RegisterToolbar
+            search={search}
+            setSearch={setSearch}
+            filters={filters}
+            activeFilters={activeFilters}
+            setFilters={setFilters}
+            setActiveFilters={setActiveFilters}
+            filterModal={filterModal}
+            setFilterModal={setFilterModal}
+            addEntryMutation={addEntryMutation}
+            setNewColName={setNewColName}
+            setNewColType={setNewColType}
+            setNewColDropdownOpts={setNewColDropdownOpts}
+            setNewColFormula={setNewColFormula}
+            setNewColumnModal={setNewColumnModal}
+            hiddenColumns={hiddenColumns}
+            selectedRows={selectedRows}
+            rowCount={displayEntries.length}
+            columns={columns}
+            bulkDeleteMutation={bulkDeleteMutation}
+            setManageColsMenu={setManageColsMenu}
+            undo={undo}
+            redo={redo}
+            undoStackCount={undoStack.current.length}
+            redoStackCount={redoStack.current.length}
+            entries={localEntries}
+          />
+          
+          <RegisterHeader 
+            register={register} 
+            setShareModal={setShareModal} 
+            handleOpenExport={() => setShowExportModal(true)}
+          />
+        </div>
       </div>
 
 
