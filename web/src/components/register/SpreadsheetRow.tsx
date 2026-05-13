@@ -189,13 +189,10 @@ const SpreadsheetTextInput = React.memo(({ idx, col, entry, visibleColumns, colI
 
     if (e.key === 'Tab' || e.key === 'Enter') {
       e.preventDefault();
+      // Fire-and-forget save — focus moves INSTANTLY for smooth tabbing
       const prevVal = entry.cells?.[col.id.toString()] || '';
       if (val !== prevVal) {
-        const success = handleCellChange(entry.id, col.id.toString(), val);
-        if (success === false) {
-          setVal(prevVal);
-          return; // Stop focus change if validation failed
-        }
+        handleCellChange(entry.id, col.id.toString(), val);
       }
       if (e.shiftKey) {
         // Shift+Enter/Tab: Move left, wrap to previous row
@@ -537,16 +534,41 @@ export const SpreadsheetRow = React.memo(function SpreadsheetRow(props: Spreadsh
               title={entry.cells?.[col.id.toString()] ? "Click to view full image" : "No image"}
             >
               {entry.cells?.[col.id.toString()] ? (
-                <div className="cell-image-inner">
-                  <img 
-                    src={entry.cells[col.id.toString()]} 
-                    alt="img" 
-                    className="cell-image-thumb" 
-                  />
-                  <div className="cell-image-overlay">
-                    <Maximize2 size={12} />
-                  </div>
-                </div>
+                (() => {
+                  const val = entry.cells[col.id.toString()];
+                  const images = val.split('|||').filter(Boolean);
+                  const firstImage = images[0];
+                  const extraCount = images.length - 1;
+                  return (
+                    <div className="cell-image-inner" style={{ position: 'relative' }}>
+                      <img 
+                        src={firstImage} 
+                        alt="img" 
+                        className="cell-image-thumb" 
+                      />
+                      {extraCount > 0 && (
+                        <div className="cell-image-badge" style={{
+                          position: 'absolute',
+                          top: '-4px',
+                          right: '-4px',
+                          background: 'var(--navy)',
+                          color: 'white',
+                          fontSize: '10px',
+                          fontWeight: 'bold',
+                          padding: '2px 4px',
+                          borderRadius: '4px',
+                          zIndex: 2,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+                        }}>
+                          +{extraCount}
+                        </div>
+                      )}
+                      <div className="cell-image-overlay">
+                        <Maximize2 size={12} />
+                      </div>
+                    </div>
+                  );
+                })()
               ) : (
                 <label className="cell-image-upload" title="Upload image" onClick={(e) => e.stopPropagation()}>
                   <ImageIcon size={11} /> Add

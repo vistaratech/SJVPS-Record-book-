@@ -35,6 +35,7 @@ import { ShareModal } from '../components/register/modals/ShareModal';
 import { ColumnModals } from '../components/register/modals/ColumnModals';
 import { OtherModals } from '../components/register/modals/OtherModals';
 import { RegisterToolbar } from '../components/register/RegisterToolbar';
+import { type FilterRule } from '../components/register/modals/FilterModal';
 import { RegisterContextMenus } from '../components/register/menus/RegisterContextMenus';
 import { RegisterSummaryRow } from '../components/register/RegisterSummaryRow';
 import { AddRecordModal } from '../components/register/modals/AddRecordModal';
@@ -196,6 +197,7 @@ export default function RegisterPage() {
   }, [detailErrors]);
   const detailInputRefs = useRef<Map<number, HTMLElement>>(new Map());
   const [previewImage, setPreviewImage] = useState<{ url: string; entryId?: number; colId?: string } | null>(null);
+  const [previewImageIndex, setPreviewImageIndex] = useState(0);
   const [isImgZoomed, setIsImgZoomed] = useState(false);
 
   // Cell formatting toolbar
@@ -223,11 +225,11 @@ export default function RegisterPage() {
   const [dropdownConfigOptions, setDropdownConfigOptions] = useState('');
 
   // Filter
-  const [filters, setFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string; values?: string[] }>>(() => {
+  const [filters, setFilters] = useState<FilterRule[]>(() => {
     const saved = localStorage.getItem(`rb_filters_${registerId}`);
     return saved ? JSON.parse(saved) : [];
   });
-  const [activeFilters, setActiveFilters] = useState<Array<{ columnId: number; operator: string; value: string; value2?: string; values?: string[] }>>(() => {
+  const [activeFilters, setActiveFilters] = useState<FilterRule[]>(() => {
     const saved = localStorage.getItem(`rb_active_filters_${registerId}`);
     return saved ? JSON.parse(saved) : [];
   });
@@ -909,10 +911,13 @@ export default function RegisterPage() {
               case 'empty': condition = !val; break;
               case 'not_empty': condition = !!val; break;
               case 'multi_select': {
-                if (!val) {
+                const trimmedVal = val.trim();
+                if (!trimmedVal) {
                   condition = f.values.includes('(Blanks)');
                 } else {
-                  condition = f.values.includes(val);
+                  // Case-insensitive + trim-aware comparison to match how uniqueValues are extracted
+                  const lTrimmedVal = trimmedVal.toLowerCase();
+                  condition = f.values.some(v => v.toLowerCase() === lTrimmedVal);
                 }
                 break;
               }
@@ -2952,7 +2957,7 @@ export default function RegisterPage() {
                   toggleMenu={toggleMenu}
                   registerColumns={columns}
                   onRowDetail={setDetailViewEntry}
-                  onImagePreview={setPreviewImage}
+                  onImagePreview={(img) => { setPreviewImage(img); setPreviewImageIndex(0); }}
                   frozenColumns={frozenColumns}
                   frozenLeftOffsets={frozenLeftOffsets}
                   colWidths={colWidths}
@@ -3362,10 +3367,15 @@ export default function RegisterPage() {
                               <div className="row-detail-image-container">
                                 <div className="row-detail-img-wrapper" onClick={() => setPreviewImage({ url: val, entryId: detailViewEntry.id, colId: col.id.toString() })}>
                                   <img 
-                                    src={val} 
+                                    src={val.split('|||')[0]} 
                                     alt="preview" 
                                     className="row-detail-img-preview" 
                                   />
+                                  {val.split('|||').length > 1 && (
+                                    <div className="cell-image-count-badge" style={{ position: 'absolute', top: 5, right: 5, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '2px 6px', borderRadius: '10px', fontSize: '10px', zIndex: 2 }}>
+                                      +{val.split('|||').length - 1}
+                                    </div>
+                                  )}
                                   <div className="row-detail-img-overlay">
                                     <Maximize2 size={24} color="white" />
                                     <span>Quick Reveal</span>
@@ -3373,8 +3383,8 @@ export default function RegisterPage() {
                                 </div>
                                 <div className="row-detail-image-actions">
                                   <button className="row-detail-img-btn" onClick={() => setPreviewImage({ url: val, entryId: detailViewEntry.id, colId: col.id.toString() })}>View Large</button>
-                                  <button className="row-detail-img-btn" onClick={() => handleImageDownload(val)}>Download</button>
-                                  <button className="row-detail-img-btn danger" onClick={() => setDetailEdits(prev => ({ ...prev, [colKey]: '' }))}>Remove</button>
+                                  {val.split('|||').length === 1 && <button className="row-detail-img-btn" onClick={() => handleImageDownload(val.split('|||')[0])}>Download</button>}
+                                  <button className="row-detail-img-btn danger" onClick={() => setDetailEdits(prev => ({ ...prev, [colKey]: '' }))}>Remove All</button>
                                 </div>
                               </div>
                             ) : (
@@ -3630,14 +3640,17 @@ export default function RegisterPage() {
       )}
       
       {/* ── Image Preview Modal ── */}
-      {previewImage && previewImage.url && (
-        <div className="img-preview-overlay" onClick={() => { setPreviewImage(null); setIsImgZoomed(false); }}>
+      {previewImage && previewImage.url && (() => {
+        const urls = previewImage.url.includes('|||') ? previewImage.url.split('|||') : [previewImage.url];
+        const currentUrl = urls[previewImageIndex] || urls[0];
+        return (
+        <div className="img-preview-overlay" onClick={() => { setPreviewImage(null); setIsImgZoomed(false); setPreviewImageIndex(0); }}>
           <div className="img-preview-content" onClick={e => e.stopPropagation()}>
             <div className="img-preview-header">
-              <h3>Image Preview</h3>
+              <h3>Image Preview {urls.length > 1 ? `(${previewImageIndex + 1}/${urls.length})` : ''}</h3>
               <div className="img-preview-actions">
                 <button 
-                  onClick={() => handleImageDownload(previewImage.url)}
+                  onClick={() => handleImageDownload(currentUrl)}
                   className="img-download-btn"
                   title="Download Image"
                 >
@@ -3645,22 +3658,53 @@ export default function RegisterPage() {
                   Download
                 </button>
                 {previewImage.entryId !== undefined && previewImage.colId !== undefined && (
+                  <>
+                  <label className="img-preview-add" title="Add Image">
+                    <Plus size={18} /> Add
+                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => {
+                      const f = e.target.files?.[0]; 
+                      if (!f) return; 
+                      const r = new FileReader(); 
+                      r.onload = (ev) => {
+                        const newUrl = ev.target?.result as string;
+                        const currentVal = previewImage.url;
+                        const newVal = currentVal ? currentVal + '|||' + newUrl : newUrl;
+                        handleCellChange(previewImage.entryId!, previewImage.colId!, newVal);
+                        // If the row detail modal is currently open for this entry, we should also clear the detailEdits
+                        if (detailViewEntry?.id === previewImage.entryId) {
+                          setDetailEdits(prev => ({ ...prev, [previewImage.colId!]: newVal }));
+                        }
+                        setPreviewImage({ ...previewImage, url: newVal });
+                        setPreviewImageIndex(newVal.split('|||').length - 1);
+                      }; 
+                      r.readAsDataURL(f); 
+                    }} />
+                  </label>
                   <button 
                     className="img-preview-remove" 
                     onClick={() => {
-                      handleCellChange(previewImage.entryId!, previewImage.colId!, '');
-                      // If the row detail modal is currently open for this entry, we should also clear the detailEdits
+                      const updatedUrls = [...urls];
+                      updatedUrls.splice(previewImageIndex, 1);
+                      const newVal = updatedUrls.join('|||');
+                      handleCellChange(previewImage.entryId!, previewImage.colId!, newVal);
                       if (detailViewEntry?.id === previewImage.entryId) {
-                        setDetailEdits(prev => ({ ...prev, [previewImage.colId!]: '' }));
+                        setDetailEdits(prev => ({ ...prev, [previewImage.colId!]: newVal }));
                       }
-                      setPreviewImage(null);
-                      setIsImgZoomed(false);
+                      if (newVal) {
+                        setPreviewImage({ ...previewImage, url: newVal });
+                        setPreviewImageIndex(Math.max(0, previewImageIndex - 1));
+                      } else {
+                        setPreviewImage(null);
+                        setIsImgZoomed(false);
+                        setPreviewImageIndex(0);
+                      }
                     }}
                     title="Remove Image"
                   >
                     <Trash2 size={18} />
                     Remove
                   </button>
+                  </>
                 )}
                 <button 
                   className="img-preview-btn" 
@@ -3674,6 +3718,7 @@ export default function RegisterPage() {
                   onClick={() => {
                     setPreviewImage(null);
                     setIsImgZoomed(false);
+                    setPreviewImageIndex(0);
                   }}
                   title="Close Preview"
                 >
@@ -3683,14 +3728,26 @@ export default function RegisterPage() {
             </div>
             <div className="img-preview-body" onClick={() => setIsImgZoomed(!isImgZoomed)}>
               <img 
-                src={previewImage.url} 
+                src={currentUrl} 
                 alt="Large preview" 
                 className={isImgZoomed ? 'zoomed' : ''}
               />
+              {urls.length > 1 && !isImgZoomed && (
+                <div style={{ position: 'absolute', bottom: '20px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '10px', background: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '8px' }} onClick={e => e.stopPropagation()}>
+                  {urls.map((u, i) => (
+                    <div 
+                      key={i} 
+                      onClick={() => setPreviewImageIndex(i)}
+                      style={{ width: '40px', height: '40px', borderRadius: '4px', border: previewImageIndex === i ? '2px solid #fff' : '2px solid transparent', cursor: 'pointer', backgroundImage: `url(${u})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Reminder Modal */}
       {reminderModal && (

@@ -151,11 +151,11 @@ export function useExport({
         } else if (c.type === 'date' && val) {
           const parts = val.split(/[-/]/);
           if (parts.length === 3) {
-            const d = parseInt(parts[0]);
-            const m = parseInt(parts[1]) - 1;
-            const y = parseInt(parts[2]);
+            const d = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10) - 1;
+            const y = parseInt(parts[2], 10);
             const dt = new Date(y, m, d);
-            rowData.push(isNaN(dt.getTime()) ? val : dt);
+            rowData.push(isNaN(dt.getTime()) ? val : { t: 'd', v: dt, z: 'dd-mm-yyyy' });
           } else {
             rowData.push(val);
           }
@@ -474,6 +474,16 @@ export function useExport({
           const cleaned = original.replace(/[^\d.-]/g, '');
           const n = parseFloat(cleaned);
           return isNaN(n) ? original : n;
+        }
+        if (c.type === 'date' && val) {
+          const parts = val.toString().split(/[-/]/);
+          if (parts.length === 3) {
+            const d = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10) - 1;
+            const y = parseInt(parts[2], 10);
+            const dt = new Date(y, m, d);
+            return isNaN(dt.getTime()) ? val : { t: 'd', v: dt, z: 'dd-mm-yyyy' };
+          }
         }
         return val;
       })];
