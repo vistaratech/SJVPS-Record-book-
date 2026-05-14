@@ -1,8 +1,19 @@
 // Format number with Indian currency style: ₹1,23,456.00
-// Note: This version is compatible with React Native
 export function formatCurrency(val: string | number): string {
-  const n = typeof val === 'string' ? parseFloat(val) : val;
-  if (isNaN(n)) return String(val) || '';
+  const str = String(val).trim();
+  if (!str) return '';
+
+  // Extract leading number part (including sign, decimals, and thousands separators)
+  // and trailing suffix (like "x", " units", etc.)
+  const match = str.match(/^([+-]?[\d,]+(?:\.\d+)?)(.*)$/);
+  
+  if (!match) return str;
+
+  const numStr = match[1].replace(/,/g, '');
+  const suffix = match[2];
+  const n = parseFloat(numStr);
+  
+  if (isNaN(n)) return str;
   
   const [intPart, decPart] = Math.abs(n).toFixed(2).split('.');
   
@@ -20,5 +31,6 @@ export function formatCurrency(val: string | number): string {
     if (remaining) formatted = remaining + ',' + formatted;
   }
   
-  return `${n < 0 ? '-' : ''}₹${formatted}.${decPart}`;
+  const decimalDisplay = decPart === '00' ? '' : `.${decPart}`;
+  return `${n < 0 ? '-' : ''}₹${formatted}${decimalDisplay}${suffix}`;
 }

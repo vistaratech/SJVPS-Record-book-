@@ -4,22 +4,34 @@ export const Colors = {
   navy: '#1E2D78',       // Deep navy blue (AG Trust brand)
   navyLight: '#2B3D9A',  // Lighter navy
   navyDark: '#141E55',   // Darkest navy
+  navyGlass: 'rgba(30, 45, 120, 0.8)',
 
   // Accent colors — from logo figures
   green: '#4CAF1A',      // Bright green (left figure/leaf)
+  greenLight: '#81C784',
   greenDark: '#3A8A12',  // Darker green
   red: '#E63012',        // Warm red (right figure/leaf)
+  redLight: '#EF5350',
   redDark: '#C0250E',    // Darker red
+  
+  // Secondary / UI
+  blue: '#3B82F6',
+  blueLight: '#DBEAFE',
+  amber: '#F59E0B',
+  amberLight: '#FEF3C7',
 
   // Semantic
-  destructive: '#E63012',
-  destructiveBg: '#FEF2F2',
+  success: '#4CAF1A',
+  error: '#E63012',
   warning: '#F59E0B',
+  info: '#3B82F6',
 
   // Backgrounds — clean white
   background: '#F8F9FF', // Soft blue-tinted white
   white: '#FFFFFF',
   cardBg: '#FFFFFF',
+  surface: '#F4F6FF',
+  surfaceHover: '#E8ECF8',
 
   // Borders
   border: '#E2E5F0',
@@ -31,17 +43,13 @@ export const Colors = {
   mutedLight: '#9CA3AF',
   placeholder: '#A5B0C3',
 
-  // Sidebar / Surface
-  surface: '#F4F6FF',
-  surfaceHover: '#E8ECF8',
-  sidebarBg: '#FFFFFF',
-
-  // Charts (themed to AG Trust logo elements)
-  chart1: '#1E2D78', // Navy Blue
-  chart2: '#E63012', // Red
-  chart3: '#4CAF1A', // Green
-  chart4: '#5DB8F5', // Globe Light Blue
-  chart5: '#2B3D9A', // Navy Light
+  // Gradients
+  gradients: {
+    primary: ['#1E2D78', '#2B3D9A'],
+    success: ['#4CAF1A', '#81C784'],
+    danger: ['#E63012', '#EF5350'],
+    surface: ['#FFFFFF', '#F8F9FF'],
+  }
 };
 
 export const Spacing = {
@@ -56,11 +64,12 @@ export const Spacing = {
 };
 
 export const BorderRadius = {
-  sm: 6,
-  md: 8,
-  lg: 12,
-  xl: 16,
-  xxl: 20,
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
   full: 9999,
 };
 
@@ -84,25 +93,46 @@ export const FontWeight = {
 };
 
 export const Shadows = {
-  card: {
+  sm: {
     shadowColor: '#1E2D78',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  elevated: {
+  md: {
     shadowColor: '#1E2D78',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  lg: {
+    shadowColor: '#1E2D78',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
     shadowRadius: 16,
-    elevation: 5,
+    elevation: 8,
+  },
+  premium: {
+    shadowColor: '#1E2D78',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.2,
+    shadowRadius: 24,
+    elevation: 12,
   },
   button: {
     shadowColor: '#1E2D78',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 4,
   },
+  elevated: {
+    shadowColor: '#1E2D78',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  }
 };

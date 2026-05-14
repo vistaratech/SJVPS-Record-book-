@@ -8,17 +8,25 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Animated,
   Dimensions,
   Alert,
   Image,
 } from 'react-native';
 import { router } from 'expo-router';
+import Animated, { 
+  FadeIn, 
+  FadeInDown, 
+  FadeInUp,
+  Layout,
+  useAnimatedStyle,
+  withSpring,
+  useSharedValue,
+} from 'react-native-reanimated';
 import { useAuth } from '../lib/auth';
 import { sendOtp, verifyOtp } from '../lib/api';
 import { Colors, Spacing, BorderRadius, FontSize, FontWeight, Shadows } from '../constants/theme';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 export default function AuthScreen() {
   const { user, isLoading, login } = useAuth();
@@ -29,34 +37,15 @@ export default function AuthScreen() {
   const [isVerifying, setIsVerifying] = useState(false);
 
   const otpRefs = useRef<(TextInput | null)[]>([]);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
-  const logoScale = useRef(new Animated.Value(0.8)).current;
+  const logoScale = useSharedValue(0.8);
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        tension: 40,
-        friction: 8,
-        useNativeDriver: true,
-      }),
-      Animated.spring(logoScale, {
-        toValue: 1,
-        tension: 50,
-        friction: 6,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    logoScale.value = withSpring(1, { damping: 10, stiffness: 80 });
   }, []);
 
-  // Auto-redirect removed by user request
-  // Users will always land on sign-in and must manually sign in
+  const logoAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: logoScale.value }],
+  }));
 
   if (isLoading) {
     return (
@@ -69,16 +58,16 @@ export default function AuthScreen() {
   if (user) return null;
 
   const handleSendOtp = async () => {
+    if (phone.length < 10) {
+      Alert.alert('Error', 'Please enter a valid phone number');
+      return;
+    }
     setIsSending(true);
-    
-    // Artificial delay for "premium" feel
-    await new Promise(resolve => setTimeout(resolve, 800));
-
     try {
       await sendOtp(phone);
       setStep('otp');
     } catch (err: any) {
-      Alert.alert('Error', 'Login failed');
+      Alert.alert('Error', 'Failed to send OTP. Please try again.');
     } finally {
       setIsSending(false);
     }
@@ -109,7 +98,6 @@ export default function AuthScreen() {
       otpRefs.current[index + 1]?.focus();
     }
 
-    // Auto-verify when all filled
     if (index === 5 && text) {
       const fullOtp = newOtp.join('');
       if (fullOtp.length === 6) {
@@ -126,67 +114,63 @@ export default function AuthScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Background gradient effect */}
-      <View style={styles.bgTop} />
-      <View style={styles.bgBottom} />
-
+      {/* Premium Background Elements */}
+      <View style={styles.bgCircle1} />
+      <View style={styles.bgCircle2} />
+      
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        <Animated.View
-          style={[
-            styles.content,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          {/* Logo */}
-          <Animated.View
-            style={[styles.logoContainer, { transform: [{ scale: logoScale }] }]}
+        <View style={styles.content}>
+          {/* Logo Section */}
+          <Animated.View 
+            entering={FadeInUp.delay(200).duration(800)}
+            style={[styles.logoContainer, logoAnimatedStyle]}
           >
-            <Image
-              source={require('../assets/images/logo-transparent.png')}
-              style={styles.logoCircle}
-              resizeMode="contain"
-            />
+            <View style={styles.logoRing}>
+              <Image
+                source={require('../assets/images/logo-transparent.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
+            </View>
             <Text style={styles.appName}>AG Trust</Text>
-            <Text style={styles.tagline}>
-              Your Digital Register, Simplified
-            </Text>
+            <Text style={styles.tagline}>Precision in Every Entry</Text>
           </Animated.View>
 
-          {/* Card */}
-          <View style={styles.card}>
+          {/* Form Card */}
+          <Animated.View 
+            entering={FadeInDown.delay(400).duration(800)}
+            style={styles.card}
+            layout={Layout.springify()}
+          >
             {step === 'phone' ? (
-              <>
-                <Text style={styles.cardTitle}>Welcome Back</Text>
+              <View key="phone-step">
+                <Text style={styles.cardTitle}>Sign In</Text>
                 <Text style={styles.cardSubtitle}>
-                  Sign in to manage your registers
+                  Enter your phone number to continue
                 </Text>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Phone Number</Text>
-                  <View style={styles.phoneInputRow}>
-                    <View style={styles.countryCode}>
-                      <Text style={styles.countryCodeText}>+91</Text>
+                <View style={styles.inputContainer}>
+                  <View style={styles.inputWrapper}>
+                    <View style={styles.countryBadge}>
+                      <Text style={styles.countryText}>+91</Text>
                     </View>
                     <TextInput
                       style={styles.phoneInput}
-                      placeholder="Enter your phone number"
+                      placeholder="98765 43210"
                       placeholderTextColor={Colors.placeholder}
                       keyboardType="phone-pad"
                       value={phone}
                       onChangeText={setPhone}
-                      maxLength={15}
+                      maxLength={10}
                     />
                   </View>
                 </View>
 
                 <TouchableOpacity
-                  style={[styles.button, isSending && styles.buttonDisabled]}
+                  style={[styles.mainButton, isSending && styles.buttonDisabled]}
                   onPress={handleSendOtp}
                   disabled={isSending}
                   activeOpacity={0.8}
@@ -194,15 +178,15 @@ export default function AuthScreen() {
                   {isSending ? (
                     <ActivityIndicator color={Colors.white} size="small" />
                   ) : (
-                    <Text style={styles.buttonText}>Login</Text>
+                    <Text style={styles.buttonText}>Send OTP</Text>
                   )}
                 </TouchableOpacity>
-              </>
+              </View>
             ) : (
-              <>
-                <Text style={styles.cardTitle}>Verify OTP</Text>
+              <View key="otp-step">
+                <Text style={styles.cardTitle}>Verify Code</Text>
                 <Text style={styles.cardSubtitle}>
-                  Enter the 6-digit code sent to {phone}
+                  Code sent to <Text style={styles.boldText}>+91 {phone}</Text>
                 </Text>
 
                 <View style={styles.otpRow}>
@@ -227,7 +211,7 @@ export default function AuthScreen() {
                 </View>
 
                 <TouchableOpacity
-                  style={[styles.button, isVerifying && styles.buttonDisabled]}
+                  style={[styles.mainButton, isVerifying && styles.buttonDisabled]}
                   onPress={() => handleVerifyOtp()}
                   disabled={isVerifying || otp.join('').length !== 6}
                   activeOpacity={0.8}
@@ -235,22 +219,28 @@ export default function AuthScreen() {
                   {isVerifying ? (
                     <ActivityIndicator color={Colors.white} size="small" />
                   ) : (
-                    <Text style={styles.buttonText}>Verify & Login</Text>
+                    <Text style={styles.buttonText}>Verify & Continue</Text>
                   )}
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   onPress={() => setStep('phone')}
-                  style={styles.changePhone}
+                  style={styles.backButton}
                 >
-                  <Text style={styles.changePhoneText}>
-                    Change phone number
-                  </Text>
+                  <Text style={styles.backButtonText}>Use a different number</Text>
                 </TouchableOpacity>
-              </>
+              </View>
             )}
-          </View>
-        </Animated.View>
+          </Animated.View>
+
+          {/* Footer Info */}
+          <Animated.View 
+            entering={FadeIn.delay(800).duration(1000)}
+            style={styles.footer}
+          >
+            <Text style={styles.footerText}>Secure • Reliable • Enterprise Grade</Text>
+          </Animated.View>
+        </View>
       </KeyboardAvoidingView>
     </View>
   );
@@ -261,23 +251,25 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.navy,
   },
-  bgTop: {
+  bgCircle1: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '55%',
-    backgroundColor: Colors.navy,
+    top: -100,
+    right: -100,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: Colors.navyLight,
+    opacity: 0.3,
   },
-  bgBottom: {
+  bgCircle2: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: '50%',
-    backgroundColor: Colors.background,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    bottom: -50,
+    left: -50,
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: Colors.navyDark,
+    opacity: 0.5,
   },
   loadingContainer: {
     flex: 1,
@@ -291,138 +283,153 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: Spacing.xxl,
+    paddingHorizontal: Spacing.xl,
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: Spacing.xxxl,
+    marginBottom: Spacing.huge,
   },
-  logoCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    marginBottom: Spacing.lg,
+  logoRing: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     backgroundColor: Colors.white,
-    ...Shadows.card,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+    ...Shadows.premium,
+    borderWidth: 4,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
-  logoText: {
-    fontSize: 32,
-    fontWeight: FontWeight.bold,
-    color: Colors.white,
+  logoImage: {
+    width: 70,
+    height: 70,
   },
   appName: {
-    fontSize: FontSize.xxxl,
+    fontSize: 40,
     fontWeight: FontWeight.extrabold,
     color: Colors.white,
-    letterSpacing: -0.5,
+    letterSpacing: -1,
   },
   tagline: {
     fontSize: FontSize.md,
-    color: 'rgba(255,255,255,0.7)',
-    marginTop: Spacing.sm,
+    color: 'rgba(255,255,255,0.6)',
+    marginTop: Spacing.xs,
+    fontWeight: FontWeight.medium,
   },
   card: {
     backgroundColor: Colors.white,
     borderRadius: BorderRadius.xl,
     padding: Spacing.xxl,
-    ...Shadows.elevated,
+    ...Shadows.lg,
   },
   cardTitle: {
-    fontSize: FontSize.xl,
+    fontSize: FontSize.xxl,
     fontWeight: FontWeight.bold,
     color: Colors.foreground,
-    textAlign: 'center',
+    textAlign: 'left',
+    marginBottom: Spacing.xs,
   },
   cardSubtitle: {
-    fontSize: FontSize.sm,
-    color: Colors.muted,
-    textAlign: 'center',
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.xxl,
-  },
-  inputGroup: {
-    marginBottom: Spacing.xl,
-  },
-  inputLabel: {
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.semibold,
-    color: Colors.foreground,
-    marginBottom: Spacing.sm,
-  },
-  phoneInputRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  countryCode: {
-    backgroundColor: Colors.surface,
-    paddingHorizontal: Spacing.lg,
-    borderRadius: BorderRadius.md,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  countryCodeText: {
     fontSize: FontSize.md,
     color: Colors.muted,
-    fontWeight: FontWeight.medium,
+    textAlign: 'left',
+    marginBottom: Spacing.xxl,
+  },
+  boldText: {
+    color: Colors.navy,
+    fontWeight: FontWeight.bold,
+  },
+  inputContainer: {
+    marginBottom: Spacing.xl,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    height: 60,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+  },
+  countryBadge: {
+    width: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.borderLight,
+    borderRightWidth: 1,
+    borderRightColor: Colors.border,
+  },
+  countryText: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+    color: Colors.foreground,
   },
   phoneInput: {
     flex: 1,
-    height: 48,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.lg,
-    fontSize: FontSize.md,
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.semibold,
     color: Colors.foreground,
-    backgroundColor: Colors.white,
   },
   otpRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    marginBottom: Spacing.xxl,
+    justifyContent: 'space-between',
+    marginBottom: Spacing.xxxl,
   },
   otpInput: {
-    width: 46,
-    height: 54,
+    width: (width - (Spacing.xl * 2) - (Spacing.xxl * 2) - (Spacing.sm * 5)) / 6,
+    height: 56,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
     borderWidth: 2,
     borderColor: Colors.border,
-    borderRadius: BorderRadius.md,
     textAlign: 'center',
     fontSize: FontSize.xl,
     fontWeight: FontWeight.bold,
     color: Colors.foreground,
-    backgroundColor: Colors.surface,
   },
   otpInputFilled: {
     borderColor: Colors.navy,
     backgroundColor: Colors.white,
+    ...Shadows.sm,
   },
-  button: {
+  mainButton: {
     backgroundColor: Colors.navy,
-    height: 50,
+    height: 60,
     borderRadius: BorderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
-    ...Shadows.button,
+    ...Shadows.md,
   },
   buttonDisabled: {
-    opacity: 0.7,
+    backgroundColor: Colors.mutedLight,
   },
   buttonText: {
     color: Colors.white,
-    fontSize: FontSize.md,
+    fontSize: FontSize.lg,
     fontWeight: FontWeight.bold,
+    letterSpacing: 0.5,
   },
-  changePhone: {
-    marginTop: Spacing.lg,
+  backButton: {
+    marginTop: Spacing.xl,
     alignItems: 'center',
+    paddingVertical: Spacing.sm,
   },
-  changePhoneText: {
+  backButtonText: {
     color: Colors.navy,
     fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+  },
+  footer: {
+    marginTop: Spacing.huge,
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: FontSize.xs,
+    color: 'rgba(255,255,255,0.4)',
     fontWeight: FontWeight.medium,
+    textTransform: 'uppercase',
+    letterSpacing: 2,
   },
 });

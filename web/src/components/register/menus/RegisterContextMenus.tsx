@@ -1,7 +1,15 @@
-import { Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, SortAsc, SortDesc, Pencil, ArrowLeftRight, Copy, ArrowRight, ChevronsLeftRight, Pin, Eye, EyeOff, Eraser, Trash2, FileText, FileSpreadsheet, Share2, ArrowLeft, Link as LinkIcon, Plus } from 'lucide-react';
+import { 
+  SortAsc, SortDesc, Pencil, ArrowLeftRight, Copy, ArrowRight, 
+  ChevronsLeftRight, Pin, Eye, EyeOff, Eraser, Trash2, FileText, 
+  FileSpreadsheet, Share2, ArrowLeft, Link as LinkIcon, Plus,
+  ChevronDown
+} from 'lucide-react';
 import { type Column } from '../../../lib/api';
+import { ColumnIcon } from '../ColumnIcon';
+
 
 interface RegisterContextMenusProps {
+
   // Column Menu
   colMenuId: number | null;
   colMenuRect: DOMRect | null;
@@ -82,18 +90,15 @@ export function RegisterContextMenus(props: RegisterContextMenusProps) {
             <div className="context-title">
               {(() => {
                 const col = columns.find((c) => c.id === colMenuId);
-                const Icon = col?.type === 'number' ? Hash :
-                            col?.type === 'date' ? Calendar :
-                            col?.type === 'dropdown' ? ChevronDown :
-                            col?.type === 'formula' ? FlaskConical : TypeIcon;
                 return (
                   <>
-                    <Icon size={14} /> {col?.name || 'Column'}
+                    <ColumnIcon type={col?.type} size={14} /> {col?.name || 'Column'}
                     <span className="context-type-badge">{col?.type}</span>
                   </>
                 );
               })()}
             </div>
+
 
             <div className="context-section-label">Sort</div>
             <button className="context-item" onClick={() => { handleSort(colMenuId!, 'asc'); setColMenuId(null); }}>

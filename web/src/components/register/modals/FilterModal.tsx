@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Search, X, Hash, Calendar, ChevronDown, FlaskConical, Type as TypeIcon, ChevronRight, Filter, Plus } from 'lucide-react';
+import { Search, X, ChevronRight, Filter, Plus, ChevronDown } from 'lucide-react';
 import { type Column } from '../../../lib/api';
+import { getColumnIcon } from '../ColumnIcon';
+
 
 export interface FilterRule {
   columnId: number;
@@ -62,15 +64,7 @@ function getOpsForType(type: string) {
   }
 }
 
-function getColumnIcon(type: string) {
-  switch (type) {
-    case 'number': return Hash;
-    case 'date': return Calendar;
-    case 'dropdown': return ChevronDown;
-    case 'formula': return FlaskConical;
-    default: return TypeIcon;
-  }
-}
+
 
 const NO_VALUE_OPS = ['empty', 'not_empty'];
 const BETWEEN_OPS = ['between', 'not_between', 'date_between', 'date_not_between'];

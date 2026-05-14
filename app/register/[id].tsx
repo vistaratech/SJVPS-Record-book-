@@ -50,6 +50,9 @@ import {
   addPage,
   renamePage,
   deletePage,
+  deleteRegister,
+  duplicateRegister,
+  renameRegister,
   generateShareLink,
   addSharedUser,
   removeSharedUser,
@@ -64,6 +67,12 @@ import {
 } from '../../lib/api';
 import { formatCurrency } from '../../lib/formatters';
 import { Colors, Spacing, BorderRadius, FontSize, FontWeight, Shadows } from '../../constants/theme';
+import { RegisterHeader } from '../../components/register/RegisterHeader';
+import { RegisterToolbar } from '../../components/register/RegisterToolbar';
+import { CalculationBar } from '../../components/register/CalculationBar';
+import { RegisterRow } from '../../components/register/RegisterRow';
+import { FilterWizard } from '../../components/register/FilterWizard';
+import { ExportService } from '../../lib/export';
 
 const COL_WIDTH = 150;
 const SERIAL_COL_WIDTH = 50;
@@ -187,32 +196,47 @@ export default function RegisterScreen() {
   const [filterModal, setFilterModal] = useState(false);
   const [filters, setFilters] = useState<FilterCondition[]>([]);
   const [activeFilters, setActiveFilters] = useState<FilterCondition[]>([]);
-  const [tempFilterCol, setTempFilterCol] = useState('');
-  const [tempFilterOp, setTempFilterOp] = useState<FilterCondition['operator']>('contains');
-  const [tempFilterValue, setTempFilterValue] = useState('');
-
-  // Calculation bar
+  
   const [calcModal, setCalcModal] = useState(false);
   const [calcColumnId, setCalcColumnId] = useState<string | null>(null);
   const [selectedCalcType, setSelectedCalcType] = useState<Record<string, CalcType>>({});
+  const [showStats, setShowStats] = useState(false);
 
   // Bulk selection
-  const [bulkMode, setBulkMode] = useState(false);
-  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
 
-  // Share modal
+  const toggleBulkMode = () => {
+    setIsBulkMode(!isBulkMode);
+    setSelectedRows(new Set());
+  };
+
+  const handleSelectRow = (id: string) => {
+    const newSelected = new Set(selectedRows);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedRows(newSelected);
+    if (newSelected.size === 0) setIsBulkMode(false);
+  };
+
+  const handleLongPressRow = (id: string) => {
+    setIsBulkMode(true);
+    handleSelectRow(id);
+  };
+
   const [shareModal, setShareModal] = useState(false);
   const [shareLink, setShareLink] = useState('');
   const [sharePhone, setSharePhone] = useState('');
   const [sharePermission, setSharePermission] = useState<'view' | 'edit'>('view');
 
-  // Dropdown cell editor
   const [dropdownModal, setDropdownModal] = useState(false);
   const [dropdownEntryId, setDropdownEntryId] = useState<number | null>(null);
   const [dropdownColumnId, setDropdownColumnId] = useState<string | null>(null);
   const [dropdownOptions, setDropdownOptions] = useState<string[]>([]);
 
-  // Date picker state
   const [dateModal, setDateModal] = useState(false);
   const [dateEntryId, setDateEntryId] = useState<number | null>(null);
   const [dateColumnId, setDateColumnId] = useState<string | null>(null);
@@ -220,7 +244,6 @@ export default function RegisterScreen() {
   const [dateMonth, setDateMonth] = useState('');
   const [dateDay, setDateDay] = useState('');
 
-  // Page management
   const [pageMenuVisible, setPageMenuVisible] = useState(false);
   const [renamePageModal, setRenamePageModal] = useState(false);
   const [renamePageId, setRenamePageId] = useState<number | null>(null);
@@ -230,29 +253,16 @@ export default function RegisterScreen() {
   const [dropdownConfigColumnId, setDropdownConfigColumnId] = useState<number | null>(null);
   const [dropdownConfigOptions, setDropdownConfigOptions] = useState('');
 
-  // Download / export menu
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [registerMenu, setRegisterMenu] = useState(false);
 
-  // Horizontal scroll ref for frozen serial column effect
   const horizontalScrollRef = useRef<ScrollView>(null);
 
-  // ─── Undo / Redo ────────────────────────────────────────────
-  type HistoryAction =
-    | { type: 'CELL_EDIT'; entryId: number; columnId: string; oldValue: string; newValue: string }
-    | { type: 'ADD_ENTRY'; entryId: number; pageIndex: number }
-    | { type: 'DELETE_ENTRY'; entry: Entry; originalIndex: number }
-    | { type: 'DELETE_COLUMN'; column: Column; cellData: Record<string, string> }
-    | { type: 'BULK_DELETE_ENTRIES'; entries: { entry: Entry; originalIndex: number }[] };
-  const undoStack = useRef<HistoryAction[]>([]);
-  const redoStack = useRef<HistoryAction[]>([]);
+  const undoStack = useRef<any[]>([]);
+  const redoStack = useRef<any[]>([]);
   const [, forceRender] = useState(0);
-  const pushToUndoStack = useCallback((action: HistoryAction) => {
-    undoStack.current.push(action);
-    redoStack.current = [];
-    forceRender(n => n + 1);
-  }, []);
 
-  // Sync server → local entries
   useEffect(() => {
     if (register?.entries) {
       setLocalEntries(register.entries);
@@ -262,275 +272,153 @@ export default function RegisterScreen() {
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ['register', registerId] });
 
-  // ─── Mutations ────────────────────────────────────────────
-  const addColumnMutation = useMutation({
-    mutationFn: () =>
-      addColumn(registerId, {
-        name: newColumnName,
-        type: newColumnType,
-        dropdownOptions: newColumnType === 'dropdown' ? newColumnDropdownOptions.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
-        formula: newColumnType === 'formula' ? newColumnFormula : undefined,
-      }),
-    onSuccess: () => {
-      invalidate();
-      setNewColumnModal(false);
-      setNewColumnName('');
-      setNewColumnType('text');
-      setNewColumnDropdownOptions('');
-      setNewColumnFormula('');
-    },
-    onError: (err: any) => Alert.alert('Error', err.message),
+  const addEntryMutation = useMutation({
+    mutationFn: () => addEntry(registerId, {}, activePageIndex),
+    onSuccess: () => invalidate(),
   });
 
-  const deleteColumnMutation = useMutation({
-    mutationFn: (colId: number) => {
-      // Capture for undo before deleting
-      const col = register?.columns?.find(c => c.id === colId);
-      if (col) {
-        const cellData: Record<string, string> = {};
-        localEntries.forEach(e => {
-          const v = e.cells?.[colId.toString()];
-          if (v !== undefined) cellData[e.id.toString()] = v;
-        });
-        pushToUndoStack({ type: 'DELETE_COLUMN', column: JSON.parse(JSON.stringify(col)), cellData });
-      }
-      return deleteColumn(registerId, colId);
-    },
-    onSuccess: () => {
-      invalidate();
-      setColumnMenuId(null);
-    },
+  const addColumnMutation = useMutation({
+    mutationFn: (data: { name: string; type: any; options?: string[] }) => 
+      addColumn(registerId, data.name, data.type, data.options),
+    onSuccess: () => invalidate(),
   });
 
   const renameColumnMutation = useMutation({
-    mutationFn: () => renameColumn(registerId, renameColumnId!, renameColumnValue),
-    onSuccess: () => {
-      invalidate();
-      setRenameColumnModal(false);
-      setRenameColumnId(null);
-      setRenameColumnValue('');
-    },
-    onError: (err: any) => Alert.alert('Error', err.message),
-  });
-
-  const updateDropdownOptionsMutation = useMutation({
-    mutationFn: () =>
-      updateColumnDropdownOptions(
-        registerId,
-        dropdownConfigColumnId!,
-        dropdownConfigOptions.split(',').map((s) => s.trim()).filter(Boolean)
-      ),
-    onSuccess: () => {
-      invalidate();
-      setDropdownConfigModal(false);
-      setDropdownConfigColumnId(null);
-      setDropdownConfigOptions('');
-    },
+    mutationFn: (data: { columnId: string; newName: string }) => 
+      renameColumn(registerId, data.columnId, data.newName),
+    onSuccess: () => invalidate(),
   });
 
   const duplicateColumnMutation = useMutation({
-    mutationFn: (colId: number) => duplicateColumn(registerId, colId),
-    onSuccess: () => { invalidate(); setColumnMenuId(null); },
+    mutationFn: (columnId: string) => duplicateColumn(registerId, columnId),
+    onSuccess: () => invalidate(),
+  });
+
+  const deleteColumnMutation = useMutation({
+    mutationFn: (columnId: string) => deleteColumn(registerId, columnId),
+    onSuccess: () => invalidate(),
   });
 
   const moveColumnMutation = useMutation({
-    mutationFn: ({ colId, dir }: { colId: number; dir: 'left' | 'right' }) => moveColumn(registerId, colId, dir),
-    onSuccess: () => { invalidate(); setColumnMenuId(null); },
-  });
-
-  const changeColumnTypeMutation = useMutation({
-    mutationFn: () => changeColumnType(registerId, columnMenuId!, changeTypeValue),
-    onSuccess: () => { invalidate(); setChangeTypeModal(false); setColumnMenuId(null); },
+    mutationFn: (data: { columnId: string; direction: 'left' | 'right' }) => 
+      moveColumn(registerId, data.columnId, data.direction),
+    onSuccess: () => invalidate(),
   });
 
   const clearColumnDataMutation = useMutation({
-    mutationFn: (colId: number) => clearColumnData(registerId, colId),
-    onSuccess: () => { invalidate(); setColumnMenuId(null); },
+    mutationFn: (columnId: string) => clearColumnData(registerId, columnId),
+    onSuccess: () => invalidate(),
   });
 
-  const insertColumnMutation = useMutation({
-    mutationFn: () => {
-      const col = register?.columns?.find((c) => c.id === columnMenuId);
-      const pos = col ? (insertColModal === 'left' ? col.position : col.position + 1) : (register?.columns?.length || 0);
-      return insertColumn(registerId, {
-        name: newColumnName, type: newColumnType,
-        dropdownOptions: newColumnType === 'dropdown' ? newColumnDropdownOptions.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
-        formula: newColumnType === 'formula' ? newColumnFormula : undefined,
-      }, pos);
-    },
-    onSuccess: () => {
-      invalidate();
-      setInsertColModal(null); setNewColumnName(''); setNewColumnType('text'); setNewColumnDropdownOptions(''); setNewColumnFormula('');
-      setColumnMenuId(null);
-    },
-    onError: (err: any) => Alert.alert('Error', err.message),
-  });
-
-  const addEntryMutation = useMutation({
-    mutationFn: () => addEntry(registerId, {}, activePageIndex),
-    onSuccess: (newEntry) => {
-      pushToUndoStack({ type: 'ADD_ENTRY', entryId: newEntry.id, pageIndex: activePageIndex });
-      invalidate();
-    },
-  });
-
-  const updateEntryMutation = useMutation({
-    mutationFn: ({ entryId, cells }: { entryId: number; cells: Record<string, string> }) =>
-      updateEntry(registerId, entryId, cells),
-    onError: () => {
-      invalidate();
-      Alert.alert('Error', 'Failed to save cell');
-    },
-  });
-
-  const deleteEntryMutation = useMutation({
-    mutationFn: (entryId: number) => {
-      const idx = localEntries.findIndex(e => e.id === entryId);
-      const entry = localEntries.find(e => e.id === entryId);
-      if (entry) pushToUndoStack({ type: 'DELETE_ENTRY', entry: JSON.parse(JSON.stringify(entry)), originalIndex: idx });
-      setLocalEntries(prev => prev.filter(e => e.id !== entryId));
-      return deleteEntry(registerId, entryId);
-    },
-    onSuccess: () => {
-      invalidate();
-      setRowMenuId(null);
-    },
+  const updateDropdownOptionsMutation = useMutation({
+    mutationFn: (data: { columnId: string; options: string[] }) => 
+      updateColumnDropdownOptions(registerId, data.columnId, data.options),
+    onSuccess: () => invalidate(),
   });
 
   const duplicateEntryMutation = useMutation({
     mutationFn: (entryId: number) => duplicateEntry(registerId, entryId),
-    onSuccess: () => {
-      invalidate();
-      setRowMenuId(null);
-    },
+    onSuccess: () => invalidate(),
   });
 
-  const bulkDeleteMutation = useMutation({
-    mutationFn: () => {
-      const ids = Array.from(selectedRows);
-      const captured = ids.map(id => {
-        const idx = localEntries.findIndex(e => e.id === id);
-        const entry = localEntries.find(e => e.id === id);
-        return { entry: JSON.parse(JSON.stringify(entry)), originalIndex: idx };
-      }).filter(x => x.entry);
-      pushToUndoStack({ type: 'BULK_DELETE_ENTRIES', entries: captured });
-      setLocalEntries(prev => prev.filter(e => !ids.includes(e.id)));
-      return bulkDeleteEntries(registerId, ids);
-    },
-    onSuccess: () => {
-      invalidate();
-      setSelectedRows(new Set());
-      setBulkMode(false);
-    },
+  const deleteEntryMutation = useMutation({
+    mutationFn: (entryId: number) => deleteEntry(registerId, entryId),
+    onSuccess: () => invalidate(),
   });
 
   const addPageMutation = useMutation({
-    mutationFn: () => addPage(registerId),
-    onSuccess: (newPage) => {
-      invalidate();
-      setActivePageIndex(newPage.index);
-    },
+    mutationFn: (name: string) => addPage(registerId, name),
+    onSuccess: () => invalidate(),
   });
 
   const renamePageMutation = useMutation({
-    mutationFn: () => renamePage(registerId, renamePageId!, renamePageValue),
-    onSuccess: () => {
-      invalidate();
-      setRenamePageModal(false);
-    },
+    mutationFn: (data: { pageId: number; newName: string }) => 
+      renamePage(registerId, data.pageId, data.newName),
+    onSuccess: () => invalidate(),
   });
 
   const deletePageMutation = useMutation({
     mutationFn: (pageId: number) => deletePage(registerId, pageId),
-    onSuccess: () => {
-      invalidate();
-      setActivePageIndex(0);
-    },
+    onSuccess: () => invalidate(),
   });
 
-  // ─── Undo / Redo Logic ─────────────────────────────────────
-  const undo = useCallback(async () => {
-    const action = undoStack.current.pop();
-    if (!action) return;
-    forceRender(n => n + 1);
-    try {
-      switch (action.type) {
-        case 'CELL_EDIT':
-          setLocalEntries(prev => prev.map(e => e.id === action.entryId ? { ...e, cells: { ...e.cells, [action.columnId]: action.oldValue } } : e));
-          await updateEntry(registerId, action.entryId, { [action.columnId]: action.oldValue });
-          redoStack.current.push(action);
-          break;
-        case 'ADD_ENTRY':
-          setLocalEntries(prev => prev.filter(e => e.id !== action.entryId));
-          await deleteEntry(registerId, action.entryId);
-          redoStack.current.push(action);
-          break;
-        case 'DELETE_ENTRY':
-          setLocalEntries(prev => { const n = [...prev]; n.splice(Math.min(action.originalIndex, n.length), 0, action.entry); return n; });
-          await restoreEntry(registerId, action.entry, action.originalIndex);
-          redoStack.current.push(action);
-          break;
-        case 'DELETE_COLUMN':
-          await restoreColumn(registerId, action.column, action.cellData);
-          invalidate();
-          redoStack.current.push(action);
-          break;
-        case 'BULK_DELETE_ENTRIES':
-          const sorted = [...action.entries].sort((a, b) => a.originalIndex - b.originalIndex);
-          setLocalEntries(prev => { const n = [...prev]; sorted.forEach(({ entry, originalIndex }) => n.splice(Math.min(originalIndex, n.length), 0, entry)); return n; });
-          await bulkRestoreEntries(registerId, action.entries.map(e => ({ entry: e.entry, index: e.originalIndex })));
-          redoStack.current.push(action);
-          break;
-      }
-    } catch { invalidate(); }
-    forceRender(n => n + 1);
-  }, [registerId]);
+  const renameRegisterMutation = useMutation({
+    mutationFn: (newName: string) => renameRegister(registerId, newName),
+    onSuccess: () => invalidate(),
+  });
 
-  const redo = useCallback(async () => {
-    const action = redoStack.current.pop();
-    if (!action) return;
-    forceRender(n => n + 1);
-    try {
-      switch (action.type) {
-        case 'CELL_EDIT':
-          setLocalEntries(prev => prev.map(e => e.id === action.entryId ? { ...e, cells: { ...e.cells, [action.columnId]: action.newValue } } : e));
-          await updateEntry(registerId, action.entryId, { [action.columnId]: action.newValue });
-          undoStack.current.push(action);
-          break;
-        case 'ADD_ENTRY':
-          const newEntry = await addEntry(registerId, {}, action.pageIndex);
-          action.entryId = newEntry.id;
-          undoStack.current.push(action);
-          invalidate();
-          break;
-        case 'DELETE_ENTRY':
-          setLocalEntries(prev => prev.filter(e => e.id !== action.entry.id));
-          await deleteEntry(registerId, action.entry.id);
-          undoStack.current.push(action);
-          break;
-        case 'DELETE_COLUMN':
-          await deleteColumn(registerId, action.column.id);
-          invalidate();
-          undoStack.current.push(action);
-          break;
-        case 'BULK_DELETE_ENTRIES':
-          const ids = action.entries.map(e => e.entry.id);
-          setLocalEntries(prev => prev.filter(e => !ids.includes(e.id)));
-          await bulkDeleteEntries(registerId, ids);
-          undoStack.current.push(action);
-          break;
-      }
-    } catch { invalidate(); }
-    forceRender(n => n + 1);
-  }, [registerId]);
+  const handleBulkDelete = async () => {
+    if (selectedRows.size === 0) return;
+    
+    Alert.alert(
+      "Confirm Delete",
+      `Are you sure you want to delete ${selectedRows.size} entries?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Delete", 
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const idsToDelete = Array.from(selectedRows).map(id => parseInt(id));
+              await bulkDeleteEntries(registerId, idsToDelete);
+              setLocalEntries(prev => prev.filter(e => !selectedRows.has(e.id.toString())));
+              setSelectedRows(new Set());
+              setIsBulkMode(false);
+              setIsSyncing(true);
+              invalidate();
+              setTimeout(() => setIsSyncing(false), 1000);
+            } catch (error) {
+              Alert.alert("Error", "Failed to delete entries");
+            }
+          }
+        }
+      ]
+    );
+  };
 
-  // ─── Cell Edit ────────────────────────────────────────────
+  const handleExportCSV = async () => {
+    if (!register) return;
+    try {
+      setIsSyncing(true);
+      await ExportService.exportToCSV(register, filteredEntries);
+    } catch (error) {
+      Alert.alert('Export Error', 'Failed to export CSV');
+    } finally {
+      setIsSyncing(false);
+      setRegisterMenu(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    if (!register) return;
+    try {
+      setIsSyncing(true);
+      await ExportService.exportToExcel(register, filteredEntries);
+    } catch (error) {
+      Alert.alert('Export Error', 'Failed to export Excel');
+    } finally {
+      setIsSyncing(false);
+      setRegisterMenu(false);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    if (!register) return;
+    try {
+      setIsSyncing(true);
+      await ExportService.exportToPDF(register, filteredEntries);
+    } catch (error) {
+      Alert.alert('Export Error', 'Failed to export PDF');
+    } finally {
+      setIsSyncing(false);
+      setRegisterMenu(false);
+    }
+  };
+
   const handleCellChange = useCallback(
     (entryId: number, columnId: string, newValue: string, oldValue: string) => {
       if (newValue === oldValue) return;
-      // Track for undo
-      pushToUndoStack({ type: 'CELL_EDIT', entryId, columnId, oldValue, newValue });
-      // Optimistic update
       setLocalEntries((prev) =>
         prev.map((entry) =>
           entry.id === entryId
@@ -538,26 +426,19 @@ export default function RegisterScreen() {
             : entry
         )
       );
-      updateEntryMutation.mutate({ entryId, cells: { [columnId]: newValue } });
+      updateEntry(registerId, entryId, { [columnId]: newValue });
     },
-    [updateEntryMutation, pushToUndoStack]
+    [registerId]
   );
 
-  // ─── Sort handler ─────────────────────────────────────────
-  const handleSort = (colId: number) => {
-    if (sortColumnId === colId) {
-      if (sortDirection === 'asc') setSortDirection('desc');
-      else if (sortDirection === 'desc') {
-        setSortColumnId(null);
-        setSortDirection(null);
-      }
-    } else {
-      setSortColumnId(colId);
-      setSortDirection('asc');
+  const handleDateSelect = () => {
+    if (dateEntryId && dateColumnId) {
+      const formattedDate = `${dateYear}-${dateMonth.padStart(2, '0')}-${dateDay.padStart(2, '0')}`;
+      handleCellChange(dateEntryId, dateColumnId, formattedDate, '');
+      setDateModal(false);
     }
   };
 
-  // ─── Share handlers ───────────────────────────────────────
   const handleGenerateShareLink = async () => {
     try {
       const link = await generateShareLink(registerId);
@@ -568,287 +449,17 @@ export default function RegisterScreen() {
   };
 
   const handleNativeShare = async () => {
-    if (!register) return;
+    if (!shareLink) return;
     try {
-      const csv = generateCSV(register, activePageIndex);
       await Share.share({
-        title: register.name,
-        message: `${register.name}\n\nShared from AG Trust\n\n${shareLink || 'Open AG Trust to view'}`,
+        message: `Check out this record book: ${shareLink}`,
+        url: shareLink,
       });
-    } catch (err) {
-      // User cancelled
+    } catch (error) {
+      Alert.alert('Error', 'Failed to share');
     }
   };
 
-  const handleDownloadExcel = async () => {
-    if (!register) return;
-
-    const visibleCols = columns.filter((col) => !hiddenColumns.has(col.id));
-    const headerRow = visibleCols.map(c => c.name);
-
-    if (headerRow.length === 0) return;
-    
-    // Build rows from entries
-    const rows = displayEntries.map(entry => {
-      const rowObj: any = {};
-      visibleCols.forEach(c => {
-         const cellValue = c.type === 'formula' ? evaluateFormula(c.formula || '', entry as any, columns) : (entry.cells?.[c.id.toString()] || '');
-         rowObj[c.name] = cellValue;
-      });
-      return rowObj;
-    });
-
-    try {
-      const ws = XLSX.utils.json_to_sheet(rows, { header: headerRow });
-      
-      const getColLetter = (n: number) => {
-        let s = '';
-        while (n >= 0) {
-          s = String.fromCharCode(n % 26 + 65) + s;
-          n = Math.floor(n / 26) - 1;
-        }
-        return s;
-      };
-
-      ws['!dataValidation'] = [];
-
-      visibleCols.forEach((c, cIdx) => {
-        const colLetter = getColLetter(cIdx);
-
-        if (c.type === 'dropdown' && c.dropdownOptions && c.dropdownOptions.length > 0) {
-          ws['!dataValidation'].push({
-            sqref: `${colLetter}2:${colLetter}1000`,
-            type: 'list',
-            allowBlank: true,
-            showDropDown: true,
-            formula1: `"${c.dropdownOptions.join(',')}"`
-          });
-        }
-
-        if (c.type === 'formula' && c.formula) {
-          rows.forEach((row, rIdx) => {
-            let excelF = c.formula || '';
-            visibleCols.forEach((col, refIdx) => {
-              const refLetter = getColLetter(refIdx);
-              excelF = excelF.replace(new RegExp(`\\{${col.name}\\}`, 'g'), `${refLetter}${rIdx + 2}`);
-            });
-            const cellRef = `${colLetter}${rIdx + 2}`;
-            ws[cellRef] = { t: 'n', f: excelF, v: row[c.name] === 'ERR' ? '' : row[c.name] };
-          });
-        }
-      });
-
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
-      
-      const fileName = `${register.name.replace(/\s+/g, '_')}.xlsx`;
-
-      if (Platform.OS === 'web') {
-        XLSX.writeFile(wb, fileName);
-      } else {
-        const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-        const filePath = `${(FileSystem as any).cacheDirectory || 'file:///tmp/'}${fileName}`;
-        await FileSystem.writeAsStringAsync(filePath, base64, { encoding: 'base64' as any });
-        
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable) {
-          await Sharing.shareAsync(filePath, { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Export Excel' });
-        } else {
-          Alert.alert('Sharing Unavailable', 'Sharing is not available on this device');
-        }
-      }
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Export Error', 'Failed to export Excel file.');
-    }
-  };
-
-  // ─── CSV Export ─────────────────────────────────────────────
-  const handleDownloadCSV = async () => {
-    if (!register) return;
-    try {
-      const csv = generateCSV(register, activePageIndex);
-      const fileName = `${register.name.replace(/\s+/g, '_')}.csv`;
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = fileName; a.click();
-        URL.revokeObjectURL(url);
-      } else {
-        const filePath = `${(FileSystem as any).cacheDirectory || 'file:///tmp/'}${fileName}`;
-        await FileSystem.writeAsStringAsync(filePath, csv, { encoding: 'utf8' as any });
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable) {
-          await Sharing.shareAsync(filePath, { mimeType: 'text/csv', dialogTitle: 'Export CSV' });
-        }
-      }
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Export Error', 'Failed to export CSV file.');
-    }
-  };
-
-  // ─── PDF Export ─────────────────────────────────────────────
-  const handleDownloadPDF = async () => {
-    if (!register) return;
-    try {
-      const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
-      const headerRow = ['S.No.', ...visibleCols.map(c => c.name)];
-      const bodyRows = displayEntries.map((entry, idx) => {
-        return [
-          (idx + 1).toString(),
-          ...visibleCols.map(c => {
-            if (c.type === 'formula') return evaluateFormula(c.formula || '', entry as any, columns);
-            return entry.cells?.[c.id.toString()] || '';
-          }),
-        ];
-      });
-
-      const html = `
-        <html><head><style>
-          body { font-family: Helvetica, Arial, sans-serif; padding: 20px; }
-          h1 { font-size: 18px; color: #1a237e; margin-bottom: 4px; }
-          p { font-size: 11px; color: #666; margin-bottom: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 11px; }
-          th { background: #1a237e; color: white; padding: 8px 6px; text-align: left; }
-          td { border: 1px solid #ddd; padding: 6px; }
-          tr:nth-child(even) { background: #f8f9fa; }
-        </style></head><body>
-          <h1>${register.name}</h1>
-          <p>Page ${activePageIndex + 1} • Exported ${new Date().toLocaleDateString()}</p>
-          <table>
-            <thead><tr>${headerRow.map(h => `<th>${h}</th>`).join('')}</tr></thead>
-            <tbody>${bodyRows.map(row => `<tr>${row.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>
-          </table>
-        </body></html>`;
-
-      if (Platform.OS === 'web') {
-        const w = window.open();
-        if (w) { w.document.write(html); w.print(); }
-      } else {
-        const { uri } = await Print.printToFileAsync({ html });
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable) {
-          await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Export PDF' });
-        }
-      }
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Export Error', 'Failed to export PDF.');
-    }
-  };
-
-  // ─── Row-level Export: PDF ──────────────────────────────────
-  const handleRowDownloadPDF = async (entryId: number) => {
-    if (!register) return;
-    try {
-      const entry = displayEntries.find(e => e.id === entryId);
-      if (!entry) return;
-      const visibleCols = columns.filter(col => !hiddenColumns.has(col.id) && col.type !== 'image');
-      const html = `
-        <html><head><style>
-          body { font-family: Helvetica, Arial, sans-serif; padding: 20px; }
-          h1 { font-size: 18px; color: #1a237e; margin-bottom: 4px; }
-          table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 16px; }
-          th { background: #f1f5f9; padding: 8px 12px; text-align: left; font-weight: 600; }
-          td { border: 1px solid #e2e8f0; padding: 8px 12px; }
-        </style></head><body>
-          <h1>${register.name} — Row Detail</h1>
-          <table>
-            ${visibleCols.map(c => {
-              const val = c.type === 'formula' ? evaluateFormula(c.formula || '', entry as any, columns) : (entry.cells?.[c.id.toString()] || '');
-              return `<tr><th>${c.name}</th><td>${val}</td></tr>`;
-            }).join('')}
-          </table>
-        </body></html>`;
-      if (Platform.OS === 'web') {
-        const w = window.open(); if (w) { w.document.write(html); w.print(); }
-      } else {
-        const { uri } = await Print.printToFileAsync({ html });
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable) await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Row PDF' });
-      }
-    } catch (err) { console.error(err); Alert.alert('Export Error', 'Failed to export row PDF.'); }
-  };
-
-  // ─── Row-level Export: Excel ─────────────────────────────────
-  const handleRowDownloadExcel = async (entryId: number) => {
-    if (!register) return;
-    try {
-      const entry = displayEntries.find(e => e.id === entryId);
-      if (!entry) return;
-      const visibleCols = columns.filter(col => !hiddenColumns.has(col.id));
-      const rowObj: any = {};
-      visibleCols.forEach(c => {
-        rowObj[c.name] = c.type === 'formula' ? evaluateFormula(c.formula || '', entry as any, columns) : (entry.cells?.[c.id.toString()] || '');
-      });
-      const ws = XLSX.utils.json_to_sheet([rowObj]);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Row');
-      const fileName = `${register.name.replace(/\s+/g, '_')}_row.xlsx`;
-      if (Platform.OS === 'web') {
-        XLSX.writeFile(wb, fileName);
-      } else {
-        const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-        const filePath = `${(FileSystem as any).cacheDirectory || 'file:///tmp/'}${fileName}`;
-        await FileSystem.writeAsStringAsync(filePath, base64, { encoding: 'base64' as any });
-        const isAvailable = await Sharing.isAvailableAsync();
-        if (isAvailable) await Sharing.shareAsync(filePath, { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: 'Row Excel' });
-      }
-    } catch (err) { console.error(err); Alert.alert('Export Error', 'Failed to export row Excel.'); }
-  };
-
-  // ─── Row-level Share as Text ─────────────────────────────────
-  const handleRowShareText = async (entryId: number) => {
-    if (!register) return;
-    const entry = displayEntries.find(e => e.id === entryId);
-    if (!entry) return;
-    const visibleCols = columns.filter(col => !hiddenColumns.has(col.id));
-    const lines = visibleCols.map(c => {
-      const val = c.type === 'formula' ? evaluateFormula(c.formula || '', entry as any, columns) : (entry.cells?.[c.id.toString()] || '');
-      return `${c.name}: ${val}`;
-    });
-    const text = `${register.name}\n${'─'.repeat(30)}\n${lines.join('\n')}`;
-    try {
-      await Share.share({ title: register.name, message: text });
-    } catch {}
-  };
-
-  // ─── Save as Template ────────────────────────────────────────
-  const handleSaveAsTemplate = () => {
-    if (!register) return;
-    Alert.prompt ? Alert.prompt(
-      'Save as Template',
-      'Enter a name for this template:',
-      (name: string) => {
-        if (!name?.trim()) return;
-        // Save to AsyncStorage (or local mock)
-        const template = {
-          id: Date.now().toString(),
-          name: name.trim(),
-          columns: columns.map(c => ({ name: c.name, type: c.type, dropdownOptions: c.dropdownOptions, formula: c.formula })),
-          createdAt: new Date().toISOString(),
-        };
-        // For now, show confirmation
-        Alert.alert('Template Saved', `"${name.trim()}" has been saved as a template.`);
-      },
-      'plain-text',
-      register.name
-    ) : Alert.alert('Save as Template', `Template "${register.name}" saved with ${columns.length} columns.`);
-  };
-  // ─── Date handler ─────────────────────────────────────────
-  const handleDateSelect = () => {
-    if (dateEntryId && dateColumnId) {
-      const dateStr = `${dateYear}-${dateMonth.padStart(2, '0')}-${dateDay.padStart(2, '0')}`;
-      handleCellChange(dateEntryId, dateColumnId, dateStr, '');
-      setDateModal(false);
-      setDateEntryId(null);
-      setDateColumnId(null);
-    }
-  };
-
-  // ─── Loading ──────────────────────────────────────────────
   if (isLoading) {
     return <RegisterSkeleton />;
   }
@@ -864,82 +475,77 @@ export default function RegisterScreen() {
 
   const columns = register.columns || [];
   const pages = register.pages || [{ id: 1, name: 'Page 1', index: 0 }];
+  const currentPage = pages[activePageIndex];
 
-  // ─── Memoised Filter & Sort entries (page-scoped) ─────────
-  const displayEntries = useMemo(() => {
-    let entries = localEntries.filter((e) => (e.pageIndex || 0) === activePageIndex);
+  // ─── Filter & Sort Logic ─────────────────────────────────────
+  const filteredEntries = useMemo(() => {
+    let result = localEntries.filter(e => (e.pageIndex || 0) === activePageIndex);
 
-    // Apply search filter
     if (search.trim()) {
-      const searchLower = search.toLowerCase();
-      entries = entries.filter((entry) =>
-        columns.some((col) => {
-          const val = entry.cells?.[col.id.toString()] || '';
-          return val.toLowerCase().includes(searchLower);
-        })
+      const q = search.toLowerCase();
+      result = result.filter(entry => 
+        columns.some(col => (entry.cells?.[col.id] || '').toLowerCase().includes(q))
       );
     }
 
-    // Apply active filters
     if (activeFilters.length > 0) {
-      entries = entries.filter((entry) =>
-        activeFilters.every((filter) => {
-          const val = entry.cells?.[filter.columnId] || '';
-          const numVal = parseFloat(val);
-          const filterNum = parseFloat(filter.value);
-          switch (filter.operator) {
-            case 'contains': return val.toLowerCase().includes(filter.value.toLowerCase());
-            case 'equals': return val.toLowerCase() === filter.value.toLowerCase();
-            case 'gt': return !isNaN(numVal) && !isNaN(filterNum) && numVal > filterNum;
-            case 'lt': return !isNaN(numVal) && !isNaN(filterNum) && numVal < filterNum;
-            case 'gte': return !isNaN(numVal) && !isNaN(filterNum) && numVal >= filterNum;
-            case 'lte': return !isNaN(numVal) && !isNaN(filterNum) && numVal <= filterNum;
-            case 'empty': return !val || val.trim() === '';
-            case 'not_empty': return val && val.trim() !== '';
-            default: return true;
+      result = result.filter(entry =>
+        activeFilters.every(f => {
+          const rawVal = entry.cells?.[f.columnId] || '';
+          const val = rawVal.toString().toLowerCase();
+          const filterVal = f.value.toLowerCase();
+          
+          switch (f.operator) {
+            case 'contains':
+              return val.includes(filterVal);
+            case 'equals':
+              return val === filterVal;
+            case 'gt':
+              return !isNaN(parseFloat(val)) && parseFloat(val) > parseFloat(filterVal);
+            case 'lt':
+              return !isNaN(parseFloat(val)) && parseFloat(val) < parseFloat(filterVal);
+            case 'gte':
+              return !isNaN(parseFloat(val)) && parseFloat(val) >= parseFloat(filterVal);
+            case 'lte':
+              return !isNaN(parseFloat(val)) && parseFloat(val) <= parseFloat(filterVal);
+            case 'empty':
+              return val.trim() === '';
+            case 'not_empty':
+              return val.trim() !== '';
+            default:
+              return true;
           }
         })
       );
     }
 
-    // Apply sort
-    if (sortColumnId !== null && sortDirection) {
-      const colIdStr = sortColumnId.toString();
-      const col = columns.find((c) => c.id === sortColumnId);
-      entries = [...entries].sort((a, b) => {
-        const aVal = a.cells?.[colIdStr] || '';
-        const bVal = b.cells?.[colIdStr] || '';
-        if (col?.type === 'number') {
-          return sortDirection === 'asc'
-            ? (parseFloat(aVal) || 0) - (parseFloat(bVal) || 0)
-            : (parseFloat(bVal) || 0) - (parseFloat(aVal) || 0);
-        }
-        return sortDirection === 'asc'
-          ? aVal.localeCompare(bVal)
-          : bVal.localeCompare(aVal);
+    if (sortColumnId && sortDirection) {
+      result = [...result].sort((a, b) => {
+        const aVal = a.cells?.[sortColumnId] || '';
+        const bVal = b.cells?.[sortColumnId] || '';
+        return sortDirection === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
       });
     }
 
-    // Fill minimum rows (mock rows are tappable — they auto-create real entries)
-    const result = [...entries];
-    while (result.length < MIN_MOCK_ROWS) {
-      result.push({ _mock: true, id: `mock-${result.length}`, cells: {} } as any);
-    }
     return result;
   }, [localEntries, activePageIndex, search, activeFilters, sortColumnId, sortDirection, columns]);
 
-  // Memoised page-scoped counts
-  const pageEntries = useMemo(() =>
-    localEntries.filter((e) => (e.pageIndex || 0) === activePageIndex),
-    [localEntries, activePageIndex]
-  );
-  const totalEntries = pageEntries.length;
-  const hasNoEntries = totalEntries === 0;
+  // ─── Stats Logic ──────────────────────────────────────────────
+  const summaryStats = useMemo(() => {
+    return columns
+      .filter(col => col.type === 'number' || col.type === 'currency')
+      .map(col => {
+        const stats = calculateColumnStats(filteredEntries, col.id.toString());
+        return {
+          label: col.name,
+          value: col.type === 'currency' ? formatCurrency(stats.sum) : stats.sum.toFixed(2),
+        };
+      });
+  }, [filteredEntries, columns]);
 
-  const visibleColumns = useMemo(() =>
-    columns.filter((col) => !hiddenColumns.has(col.id)),
-    [columns, hiddenColumns]
-  );
+  const handleAddRow = () => {
+    addEntryMutation.mutate();
+  };
 
   // ════════════════════════════════════════════════════════════
   return (
@@ -951,177 +557,56 @@ export default function RegisterScreen() {
         }}
       />
 
+      <RegisterHeader
+        title={register.name}
+        isSyncing={isSyncing}
+        onBack={() => router.back()}
+        onTitlePress={() => {
+          setRenamePageValue(register.name);
+          setRenamePageId(-1); // Use -1 to indicate Register Rename
+          setRenamePageModal(true);
+        }}
+        onSharePress={() => {
+          setShareModal(true);
+          handleGenerateShareLink();
+        }}
+        onMenuPress={() => setRegisterMenu(true)}
+      />
+
+      <FilterWizard
+        visible={filterModal}
+        onClose={() => setFilterModal(false)}
+        onApply={(newFilters) => {
+          setFilters(newFilters);
+          setActiveFilters(newFilters);
+        }}
+        columns={columns}
+        initialFilters={filters}
+      />
+
+      <RegisterToolbar
+        searchQuery={search}
+        onSearchChange={setSearch}
+        onFilterPress={() => setFilterModal(true)}
+        onStatsPress={() => setShowStats(!showStats)}
+        onAddRow={handleAddRow}
+        activeFiltersCount={activeFilters.length}
+        showStats={showStats}
+        bulkMode={isBulkMode}
+        onBulkDelete={handleBulkDelete}
+        onSelectAll={() => {
+          const allIds = filteredEntries.map(e => e.id.toString());
+          setSelectedRows(new Set(allIds));
+        }}
+        onCancelBulk={() => setIsBulkMode(false)}
+        selectedCount={selectedRows.size}
+      />
+
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        {/* ── Header ── */}
-        <View style={styles.registerHeader}>
-          <TouchableOpacity onPress={() => require('expo-router').router.back()} style={styles.registerHeaderBtn}>
-            <Ionicons name="arrow-back" size={14} color="#64748b" />
-          </TouchableOpacity>
-          <Text style={styles.registerHeaderTitle}>{register.name}</Text>
-          <View style={{ flex: 1 }} />
-          <TouchableOpacity style={styles.registerHeaderBtn} onPress={() => { setShareModal(true); handleGenerateShareLink(); }}>
-            <Ionicons name="share-social-outline" size={14} color="#64748b" />
-            <Text style={styles.registerHeaderBtnText}>Share</Text>
-          </TouchableOpacity>
-          <View style={{ position: 'relative', zIndex: 100 }}>
-            <TouchableOpacity style={styles.registerHeaderBtn} onPress={() => setDownloadMenuOpen(!downloadMenuOpen)}>
-              <Ionicons name="download-outline" size={14} color="#64748b" />
-              <Text style={styles.registerHeaderBtnText}>Download</Text>
-              <Ionicons name="chevron-down" size={12} color="#64748b" />
-            </TouchableOpacity>
-            {downloadMenuOpen && (
-              <View style={styles.downloadDropdown}>
-                <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleDownloadExcel(); }}>
-                  <Ionicons name="document-outline" size={16} color={Colors.navy} />
-                  <View style={styles.downloadDropdownItemInfo}>
-                    <Text style={styles.downloadDropdownText}>Excel (.xlsx)</Text>
-                    <Text style={styles.downloadDropdownSubtext}>Spreadsheet with formulas & dropdowns</Text>
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleDownloadPDF(); }}>
-                  <Ionicons name="document-text-outline" size={16} color={Colors.navy} />
-                  <View style={styles.downloadDropdownItemInfo}>
-                    <Text style={styles.downloadDropdownText}>PDF (.pdf)</Text>
-                    <Text style={styles.downloadDropdownSubtext}>Formatted table ready to print</Text>
-                  </View>
-                </TouchableOpacity>
-                <View style={{ height: 1, backgroundColor: Colors.border, marginVertical: 4 }} />
-                <TouchableOpacity style={styles.downloadDropdownItem} onPress={() => { setDownloadMenuOpen(false); handleSaveAsTemplate(); }}>
-                  <Ionicons name="bookmark-outline" size={16} color={Colors.navy} />
-                  <View style={styles.downloadDropdownItemInfo}>
-                    <Text style={styles.downloadDropdownText}>Save as Template</Text>
-                    <Text style={styles.downloadDropdownSubtext}>Save column layout for reuse</Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* ── Combined Pages + Actions Bar ── */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, backgroundColor: '#f8fafc', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' }} contentContainerStyle={{ flexGrow: 1 }}>
-          <View style={styles.pagesActionsBar}>
-            {/* Left: Page tabs + Add Page + Add Column + Add Row */}
-            <View style={styles.pagesActionsTabs}>
-              {pages.map((page, idx) => (
-                <TouchableOpacity
-                  key={page.id}
-                  style={[styles.pageTab, idx === activePageIndex && styles.pageTabActive]}
-                  onPress={() => setActivePageIndex(idx)}
-                  onLongPress={() => {
-                    setRenamePageId(page.id);
-                    setRenamePageValue(page.name);
-                    setRenamePageModal(true);
-                  }}
-                >
-                  <Ionicons name="document-text" size={11} color={idx === activePageIndex ? Colors.white : "#64748b"} />
-                  <Text style={[styles.pageTabText, idx === activePageIndex && styles.pageTabTextActive]}>{page.name}</Text>
-                  {pages.length > 1 && (
-                    <TouchableOpacity
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        Alert.alert('Delete Page', `Delete "${page.name}" and all its rows?`, [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Delete', style: 'destructive', onPress: () => deletePageMutation.mutate(page.id) }
-                        ]);
-                      }}
-                      style={{ marginLeft: 6, opacity: 0.7 }}
-                    >
-                      <Ionicons name="close" size={11} color={idx === activePageIndex ? Colors.white : "#64748b"} />
-                    </TouchableOpacity>
-                  )}
-                </TouchableOpacity>
-              ))}
-              <TouchableOpacity style={styles.pageAddBtn} onPress={() => addPageMutation.mutate()}>
-                <Ionicons name="add" size={14} color="#64748b" />
-              </TouchableOpacity>
-              
-              <View style={styles.pabDivider} />
-
-              <TouchableOpacity style={styles.pabTabActionBtn} onPress={() => setNewColumnModal(true)}>
-                <Ionicons name="add" size={12} color={Colors.navy} />
-                <Text style={styles.pabTabActionBtnText}>Add Column</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={[styles.pabTabActionBtn, styles.pabTabActionBtnPrimary]} onPress={() => addEntryMutation.mutate()}>
-                <Ionicons name="add" size={12} color={Colors.white} />
-                <Text style={styles.pabTabActionBtnTextPrimary}>Add Row</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Right: stats + search + filter + contextual */}
-            <View style={styles.pagesActionsRight}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Text style={styles.pabStat}># {displayEntries.length} rows</Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons name="document-text-outline" size={11} color="#94a3b8" />
-                <Text style={styles.pabStat}>{columns.length} cols</Text>
-              </View>
-
-              <View style={styles.pabDivider} />
-
-              <View style={styles.pabSearchWrap}>
-                <Ionicons name="search" size={14} color="#94a3b8" />
-                <TextInput
-                  style={styles.pabSearchInput}
-                  placeholder="Search rows..."
-                  placeholderTextColor="#94a3b8"
-                  value={search}
-                  onChangeText={setSearch}
-                />
-              </View>
-
-              <TouchableOpacity style={[styles.pabIconBtn, activeFilters.length > 0 && styles.pabIconBtnActive]} onPress={() => setFilterModal(true)}>
-                <Ionicons name="funnel" size={14} color={activeFilters.length > 0 ? Colors.navy : "#64748b"} />
-                {activeFilters.length > 0 && <View style={styles.toolbarBadge}><Text style={styles.toolbarBadgeText}>{activeFilters.length}</Text></View>}
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.pabIconBtn} onPress={undo} disabled={undoStack.current.length === 0}>
-                <Ionicons name="arrow-undo" size={14} color={undoStack.current.length > 0 ? "#64748b" : "#cbd5e1"} />
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.pabIconBtn} onPress={redo} disabled={redoStack.current.length === 0}>
-                <Ionicons name="arrow-redo" size={14} color={redoStack.current.length > 0 ? "#64748b" : "#cbd5e1"} />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </ScrollView>
-
-        {/* ─── Bulk Actions Bar ──────────────────────────── */}
-        {bulkMode && selectedRows.size > 0 && (
-          <View style={styles.bulkBar}>
-            <Text style={styles.bulkBarText}>{selectedRows.size} selected</Text>
-            <TouchableOpacity
-              style={styles.bulkBarBtn}
-              onPress={() => {
-                Alert.alert(
-                  'Delete Selected',
-                  `Delete ${selectedRows.size} rows? This cannot be undone.`,
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Delete All', style: 'destructive', onPress: () => bulkDeleteMutation.mutate() },
-                  ]
-                );
-              }}
-            >
-              <Ionicons name="trash-outline" size={16} color={Colors.white} />
-              <Text style={styles.bulkBarBtnText}>Delete All</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.bulkBarCancelBtn}
-              onPress={() => { setBulkMode(false); setSelectedRows(new Set()); }}
-            >
-              <Text style={styles.bulkBarCancelText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* ─── Spreadsheet ────────────────────────────────── */}
         {columns.length === 0 ? (
           <View style={styles.emptyColumns}>
             <Ionicons name="bar-chart" size={48} color={Colors.navy} style={{ marginBottom: Spacing.md }} />
@@ -1134,286 +619,39 @@ export default function RegisterScreen() {
           </View>
         ) : (
           <View style={{ flex: 1 }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} ref={horizontalScrollRef}>
-              <View>
-                {/* Column Headers */}
-                <View style={styles.headerRow}>
-                  {bulkMode && (
-                    <TouchableOpacity
-                      style={styles.checkboxHeader}
-                      onPress={() => {
-                        const realEntries = pageEntries.filter((e) => !(e as any)._mock);
-                        if (selectedRows.size === realEntries.length) {
-                          setSelectedRows(new Set());
-                        } else {
-                          setSelectedRows(new Set(realEntries.map((e) => e.id)));
-                        }
-                      }}
-                    >
-                      <Ionicons
-                        name={selectedRows.size > 0 ? 'checkbox' : 'square-outline'}
-                        size={18}
-                        color={Colors.navy}
-                      />
-                    </TouchableOpacity>
-                  )}
-                  <View style={styles.serialHeader}>
-                    <Text style={styles.serialHeaderText}>S.NO.</Text>
-                  </View>
-                  {visibleColumns.map((col) => {
-                    return (
-                    <TouchableOpacity
-                      key={col.id}
-                      style={styles.colHeader}
-                      onPress={() => handleSort(col.id)}
-                      onLongPress={() => setColumnMenuId(col.id)}
-                    >
-                      <View style={styles.colHeaderInner}>
-                        <View style={styles.colTypeChip}>
-                          <Ionicons
-                            name={
-                              col.type === 'currency' ? 'cash' :
-                              col.type === 'number' ? 'calculator' :
-                              col.type === 'date' ? 'calendar' :
-                              col.type === 'dropdown' ? 'chevron-down' :
-                              col.type === 'formula' ? 'flask' :
-                              'text'
-                            }
-                            size={12}
-                            color={Colors.navy}
-                          />
-                        </View>
-                        <Text style={styles.colHeaderText} numberOfLines={1}>{col.name}</Text>
-                        {col.type === 'formula' && (
-                          <View style={{ backgroundColor: 'rgba(26, 35, 126, 0.1)', paddingHorizontal: 4, borderRadius: 4, marginLeft: 'auto' }}>
-                            <Text style={{ fontSize: 9, fontWeight: '800', color: Colors.navy }}>Fx</Text>
-                          </View>
-                        )}
-                        {sortColumnId === col.id && sortDirection && (
-                          <Text style={{ color: Colors.navy, fontSize: 10 }}>
-                            {sortDirection === 'asc' ? '▲' : '▼'}
-                          </Text>
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  )})}
-                  <TouchableOpacity style={styles.addColBtn} onPress={() => setNewColumnModal(true)}>
-                    <Ionicons name="add" size={20} color={Colors.muted} />
-                  </TouchableOpacity>
-                </View>
-
-                <FlatList
-                  data={displayEntries}
-                  keyExtractor={(item: any, idx) => (item.id ? item.id.toString() : `mock-${idx}`)}
-                  showsVerticalScrollIndicator={false}
-                  initialNumToRender={15}
-                  maxToRenderPerBatch={10}
-                  windowSize={5}
-                  updateCellsBatchingPeriod={50}
-                  removeClippedSubviews={Platform.OS === 'android'}
-                  contentContainerStyle={{ paddingBottom: 140 }}
-                  renderItem={({ item: entry, index }: { item: any; index: number }) => {
-                    const isMock = !!(entry as any)._mock;
-                    const isSelected = selectedRows.has(entry.id);
-                    return (
-                      <View style={[styles.dataRow, !isMock && styles.dataRowReal, isSelected && styles.dataRowSelected]}>
-                        {bulkMode && (
-                          <TouchableOpacity
-                            style={styles.checkboxCell}
-                            onPress={() => {
-                              if (isMock) return;
-                              const newSet = new Set(selectedRows);
-                              if (isSelected) newSet.delete(entry.id);
-                              else newSet.add(entry.id);
-                              setSelectedRows(newSet);
-                            }}
-                          >
-                            {!isMock && (
-                              <Ionicons
-                                name={isSelected ? 'checkbox' : 'square-outline'}
-                                size={18}
-                                color={isSelected ? Colors.navy : Colors.mutedLight}
-                              />
-                            )}
-                          </TouchableOpacity>
-                        )}
-                        <View style={styles.serialCell}>
-                          <Text style={styles.serialText}>{index + 1}</Text>
-                        </View>
-                        {visibleColumns.map((col) => {
-                          if (isMock) {
-                            // Mock rows: tapping auto-creates a real entry
-                            return (
-                              <TouchableOpacity
-                                key={col.id}
-                                style={styles.dataCell}
-                                onPress={() => addEntryMutation.mutate()}
-                                activeOpacity={0.6}
-                              >
-                                <View style={styles.mockCellInner}>
-                                  <Text style={styles.mockCellText}>
-                                    {col.type === 'date' ? '📅' : col.type === 'dropdown' ? '▾' : col.type === 'formula' ? 'fx' : '—'}
-                                  </Text>
-                                </View>
-                              </TouchableOpacity>
-                            );
-                          }
-                          const value = entry.cells?.[col.id.toString()] || '';
-
-                          // Date column → tappable date display
-                          if (col.type === 'date') {
-                            return (
-                              <TouchableOpacity
-                                key={col.id}
-                                style={styles.dataCell}
-                                onPress={() => {
-                                  setDateEntryId(entry.id);
-                                  setDateColumnId(col.id.toString());
-                                  const parts = (value || '').split('-');
-                                  setDateYear(parts[0] || new Date().getFullYear().toString());
-                                  setDateMonth(parts[1] || (new Date().getMonth() + 1).toString());
-                                  setDateDay(parts[2] || new Date().getDate().toString());
-                                  setDateModal(true);
-                                }}
-                              >
-                                <View style={styles.dateCellInner}>
-                                  <Ionicons name="calendar-outline" size={14} color={value ? Colors.navy : Colors.mutedLight} />
-                                  <Text style={[styles.dateCellText, !value && styles.dateCellPlaceholder]}>
-                                    {value || 'Select date'}
-                                  </Text>
-                                </View>
-                              </TouchableOpacity>
-                            );
-                          }
-
-                          // Dropdown column → tappable dropdown
-                          if (col.type === 'dropdown') {
-                            return (
-                              <TouchableOpacity
-                                key={col.id}
-                                style={styles.dataCell}
-                                onPress={() => {
-                                  setDropdownEntryId(entry.id);
-                                  setDropdownColumnId(col.id.toString());
-                                  setDropdownOptions(col.dropdownOptions || ['Active', 'Inactive', 'Pending']);
-                                  setDropdownModal(true);
-                                }}
-                              >
-                                <View style={styles.dropdownCellInner}>
-                                  <Text
-                                    style={[styles.dropdownCellText, !value && styles.dropdownCellPlaceholder]}
-                                    numberOfLines={1}
-                                  >
-                                    {value || 'Select...'}
-                                  </Text>
-                                  <Ionicons name="chevron-down" size={14} color={Colors.mutedLight} />
-                                </View>
-                              </TouchableOpacity>
-                            );
-                          }
-
-                           // Currency column → formatted currency display
-                          if (col.type === 'currency') {
-                            return (
-                              <TouchableOpacity
-                                key={col.id}
-                                style={styles.dataCell}
-                                onPress={() => {
-                                  // For mobile, we can use the same input logic or a specific modal
-                                  // but let's stick to the inline TextInput for simplicity or a custom one
-                                }}
-                              >
-                                <TextInput
-                                  style={[styles.cellInput, { color: Colors.navy, fontWeight: '600' }]}
-                                  defaultValue={value}
-                                  onEndEditing={(e) =>
-                                    handleCellChange(entry.id, col.id.toString(), e.nativeEvent.text, value)
-                                  }
-                                  placeholder="₹ 0.00"
-                                  placeholderTextColor="rgba(0,0,0,0.15)"
-                                  keyboardType="numeric"
-                                  value={value ? formatCurrency(value) : ""}
-                                />
-                              </TouchableOpacity>
-                            );
-                          }
-
-                          // Text/Number column → editable text input
-                          return (
-                            <View key={col.id} style={styles.dataCell}>
-                              <TextInput
-                                style={styles.cellInput}
-                                defaultValue={value}
-                                onEndEditing={(e) =>
-                                  handleCellChange(entry.id, col.id.toString(), e.nativeEvent.text, value)
-                                }
-                                placeholder="—"
-                                placeholderTextColor="rgba(0,0,0,0.15)"
-                                keyboardType={col.type === 'number' ? 'numeric' : 'default'}
-                              />
-                            </View>
-                          );
-                        })}
-                        {!isMock ? (
-                          <TouchableOpacity style={styles.rowActionCell} onPress={() => setRowMenuId(entry.id)}>
-                            <Ionicons name="ellipsis-vertical" size={14} color={Colors.mutedLight} />
-                          </TouchableOpacity>
-                        ) : (
-                          <View style={styles.rowActionCell} />
-                        )}
-                      </View>
-                    );
+            <FlatList
+              data={filteredEntries}
+              keyExtractor={(item) => item.id.toString()}
+              removeClippedSubviews={true}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              contentContainerStyle={styles.listContent}
+              renderItem={({ item }) => (
+                <RegisterRow
+                  entry={item}
+                  columns={columns}
+                  isSelected={selectedRows.has(item.id.toString())}
+                  isBulkMode={isBulkMode}
+                  onToggleSelect={(id) => handleSelectRow(id.toString())}
+                  onLongPress={(id) => handleLongPressRow(id.toString())}
+                  onCellChange={handleCellChange}
+                  onDatePress={(entryId, colId, value) => {
+                    setDateEntryId(entryId);
+                    setDateColumnId(colId);
+                    setDateModal(true);
+                  }}
+                  onDropdownPress={(entryId, colId, options) => {
+                    setDropdownEntryId(entryId);
+                    setDropdownColumnId(colId);
+                    setDropdownOptions(options);
+                    setDropdownModal(true);
                   }}
                 />
-
-                {/* Calculation Bar */}
-                <View style={styles.calcBar}>
-                  <View style={[styles.calcSerial, bulkMode && { marginLeft: CHECKBOX_COL_WIDTH }]}>
-                    <Text style={styles.calcSerialText}>Σ</Text>
-                  </View>
-                  {visibleColumns.map((col) => {
-                    const colIdStr = col.id.toString();
-                    const calcType = selectedCalcType[colIdStr] || (col.type === 'number' ? 'sum' : 'count');
-                    const realEntries = pageEntries.filter((e) => !(e as any)._mock);
-                    const stats = calculateColumnStats(realEntries, colIdStr);
-                    const displayVal =
-                      calcType === 'sum' ? stats.sum :
-                      calcType === 'average' ? stats.average :
-                      calcType === 'count' ? stats.count :
-                      calcType === 'min' ? stats.min :
-                      calcType === 'max' ? stats.max : 0;
-
-                    return (
-                      <TouchableOpacity
-                        key={col.id}
-                        style={styles.calcCell}
-                        onPress={() => {
-                          setCalcColumnId(colIdStr);
-                          setCalcModal(true);
-                        }}
-                      >
-                        {realEntries.length > 0 ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 }}>
-                            <Ionicons name="chevron-down" size={11} color="#94a3b8" />
-                            <View style={{ alignItems: 'flex-end' }}>
-                              <Text style={styles.calcLabel}>{calcType.toUpperCase()}</Text>
-                              <Text style={styles.calcValue}>
-                                {col.type === 'currency' && (calcType === 'sum' || calcType === 'average' || calcType === 'min' || calcType === 'max')
-                                  ? formatCurrency(displayVal)
-                                  : (typeof displayVal === 'number' ? (Number.isInteger(displayVal) ? displayVal : displayVal.toFixed(2)) : displayVal)}
-                              </Text>
-                            </View>
-                          </View>
-                        ) : (
-                          <Text style={styles.calcPlaceholder}>-</Text>
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                  <View style={{ width: 44 }} />
-                </View>
-              </View>
-            </ScrollView>
+              )}
+            />
+            {showStats && (
+              <CalculationBar stats={summaryStats} />
+            )}
           </View>
         )}
       </KeyboardAvoidingView>
@@ -1893,117 +1131,95 @@ export default function RegisterScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ─── Filter Modal ────────────────────────────────── */}
-      <Modal visible={filterModal} transparent animationType="slide" onRequestClose={() => setFilterModal(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setFilterModal(false)}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'padding'} style={{ width: '100%', alignItems: 'center' }}>
-            <TouchableOpacity activeOpacity={1} style={[styles.modalContent, { maxHeight: '80%' }]}>
-            <View style={styles.filterModalHeader}>
-              <Text style={styles.modalTitle}>Filter Data</Text>
-              {filters.length > 0 && (
-                <TouchableOpacity onPress={() => setFilters([])}>
-                  <Text style={{ color: Colors.destructive, fontSize: FontSize.sm, fontWeight: FontWeight.semibold }}>Clear All</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-              {/* Existing filters */}
-              {filters.map((filter, idx) => {
-                const col = columns.find((c) => c.id.toString() === filter.columnId);
-                return (
-                  <View key={idx} style={styles.filterRow}>
-                    <View style={styles.filterRowContent}>
-                      <Text style={styles.filterRowLabel}>{col?.name || 'Unknown'}</Text>
-                      <Text style={styles.filterRowOp}>{filter.operator}</Text>
-                      <Text style={styles.filterRowVal}>"{filter.value}"</Text>
-                    </View>
-                    <TouchableOpacity onPress={() => setFilters(filters.filter((_, i) => i !== idx))}>
-                      <Ionicons name="close-circle" size={20} color={Colors.destructive} />
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
-
-              {/* Add new filter */}
-              <View style={styles.filterAddSection}>
-                <Text style={[styles.modalLabel, { marginTop: Spacing.md }]}>Add Filter</Text>
-
-                <Text style={styles.filterLabel}>Column</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterChipScroll}>
-                  {columns.map((col) => (
-                    <TouchableOpacity
-                      key={col.id}
-                      style={[styles.filterChip, tempFilterCol === col.id.toString() && styles.filterChipActive]}
-                      onPress={() => setTempFilterCol(col.id.toString())}
-                    >
-                      <Text style={[styles.filterChipText, tempFilterCol === col.id.toString() && styles.filterChipTextActive]}>
-                        {col.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-
-                <Text style={styles.filterLabel}>Condition</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterChipScroll}>
-                  {(['contains', 'equals', 'gt', 'lt', 'empty', 'not_empty'] as const).map((op) => (
-                    <TouchableOpacity
-                      key={op}
-                      style={[styles.filterChip, tempFilterOp === op && styles.filterChipActive]}
-                      onPress={() => setTempFilterOp(op)}
-                    >
-                      <Text style={[styles.filterChipText, tempFilterOp === op && styles.filterChipTextActive]}>
-                        {op === 'contains' ? 'Contains' : op === 'equals' ? 'Equals' : op === 'gt' ? '>' : op === 'lt' ? '<' : op === 'empty' ? 'Empty' : 'Not Empty'}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-
-                {tempFilterOp !== 'empty' && tempFilterOp !== 'not_empty' && (
-                  <>
-                    <Text style={styles.filterLabel}>Value</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      value={tempFilterValue}
-                      onChangeText={setTempFilterValue}
-                      placeholder="Filter value..."
-                      placeholderTextColor={Colors.placeholder}
-                    />
-                  </>
-                )}
-
-                <TouchableOpacity
-                  style={[styles.filterAddBtn, (!tempFilterCol) && { opacity: 0.5 }]}
-                  onPress={() => {
-                    if (!tempFilterCol) return;
-                    setFilters([...filters, { columnId: tempFilterCol, operator: tempFilterOp, value: tempFilterValue }]);
-                    setTempFilterCol('');
-                    setTempFilterValue('');
-                  }}
-                  disabled={!tempFilterCol}
-                >
-                  <Ionicons name="add" size={16} color={Colors.white} />
-                  <Text style={styles.filterAddBtnText}>Add Filter</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setFilterModal(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalConfirmBtn}
-                onPress={() => {
-                  setActiveFilters(filters);
-                  setFilterModal(false);
-                }}
-              >
-                <Text style={styles.modalConfirmText}>Apply Filters</Text>
-              </TouchableOpacity>
-            </View>
+      {/* ─── Register Action Menu ────────────────────────── */}
+      <Modal visible={registerMenu} transparent animationType="fade" onRequestClose={() => setRegisterMenu(false)}>
+        <TouchableOpacity style={styles.contextOverlay} onPress={() => setRegisterMenu(false)} activeOpacity={1}>
+          <View style={styles.contextMenu}>
+            <Text style={styles.contextTitle}>Register Actions</Text>
+            
+            <Text style={styles.contextSectionLabel}>Export & Share</Text>
+            <TouchableOpacity style={styles.contextItem} onPress={handleExportCSV}>
+              <Ionicons name="document-text-outline" size={18} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Export to CSV</Text>
             </TouchableOpacity>
-          </KeyboardAvoidingView>
+            
+            <TouchableOpacity style={styles.contextItem} onPress={handleExportExcel}>
+              <Ionicons name="grid-outline" size={18} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Export to Excel</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.contextItem} onPress={handleExportPDF}>
+              <Ionicons name="document-outline" size={18} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Export to PDF</Text>
+            </TouchableOpacity>
+
+            <View style={styles.contextDivider} />
+            
+            <Text style={styles.contextSectionLabel}>Template</Text>
+            <TouchableOpacity style={styles.contextItem} onPress={() => Alert.alert('Coming Soon', 'Save as Template will be available in the next update.')}>
+              <Ionicons name="copy-outline" size={18} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Save as Template</Text>
+            </TouchableOpacity>
+
+            <View style={styles.contextDivider} />
+
+            <Text style={styles.contextSectionLabel}>Danger Zone</Text>
+            <TouchableOpacity 
+              style={styles.contextItem} 
+              onPress={() => {
+                Alert.alert("Confirm Duplicate", "Do you want to create a copy of this register?", [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Duplicate", onPress: () => {
+                    setRegisterMenu(false);
+                    setIsSyncing(true);
+                    duplicateRegister(registerId, `${register.name} (Copy)`)
+                      .then(() => {
+                        Alert.alert("Success", "Register duplicated successfully");
+                        router.back();
+                      })
+                      .catch(() => Alert.alert("Error", "Failed to duplicate"))
+                      .finally(() => setIsSyncing(false));
+                  }}
+                ]);
+              }}
+            >
+              <Ionicons name="copy" size={18} color={Colors.navy} />
+              <Text style={styles.contextItemText}>Duplicate Register</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.contextItem} 
+              onPress={() => {
+                Alert.alert("Delete Register", "Are you sure? This cannot be undone.", [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Delete", style: "destructive", onPress: () => {
+                    setRegisterMenu(false);
+                    setIsSyncing(true);
+                    deleteRegister(registerId)
+                      .then(() => {
+                        Alert.alert("Success", "Register deleted");
+                        router.replace('/(tabs)/home');
+                      })
+                      .catch(() => Alert.alert("Error", "Failed to delete"))
+                      .finally(() => setIsSyncing(false));
+                  }}
+                ]);
+              }}
+            >
+              <Ionicons name="trash-outline" size={18} color={Colors.destructive} />
+              <Text style={[styles.contextItemText, { color: Colors.destructive }]}>Delete Register</Text>
+            </TouchableOpacity>
+
+            <View style={styles.contextDivider} />
+
+            <TouchableOpacity 
+              style={[styles.contextItem, { marginTop: Spacing.sm }]} 
+              onPress={() => setRegisterMenu(false)}
+            >
+              <Ionicons name="close" size={18} color={Colors.muted} />
+              <Text style={[styles.contextItemText, { color: Colors.muted }]}>Close Menu</Text>
+            </TouchableOpacity>
+          </View>
         </TouchableOpacity>
       </Modal>
 
@@ -2314,10 +1530,17 @@ export default function RegisterScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.modalConfirmBtn}
-                onPress={() => renamePageMutation.mutate()}
+                onPress={() => {
+                  if (renamePageId === -1) {
+                    renameRegisterMutation.mutate(renamePageValue);
+                  } else {
+                    renamePageMutation.mutate({ pageId: renamePageId!, newName: renamePageValue });
+                  }
+                  setRenamePageModal(false);
+                }}
                 disabled={!renamePageValue.trim()}
               >
-                <Text style={styles.modalConfirmText}>Rename</Text>
+                <Text style={styles.modalConfirmText}>{renamePageId === -1 ? 'Rename Register' : 'Rename Page'}</Text>
               </TouchableOpacity>
             </View>
             </TouchableOpacity>
@@ -2331,426 +1554,87 @@ export default function RegisterScreen() {
 // ═══════════════════════════════════════════════════════════════
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.white },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background },
   errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background, gap: Spacing.md },
   errorTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.foreground },
+  listContent: { paddingBottom: 100 },
 
-  // ── Register Header ──────────────────────────────────────
-  registerHeader: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 24, paddingVertical: 12,
-    backgroundColor: '#f8fafc',
-    borderBottomWidth: 1, borderBottomColor: '#e2e8f0',
-    gap: 16,
-    paddingTop: Platform.OS === 'ios' ? 48 : 12,
-  },
-  registerHeaderBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: '#e2e8f0',
-    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6,
-  },
-  registerHeaderBtnText: { color: '#64748b', fontSize: 13, fontWeight: '600' },
-  registerHeaderTitle: {
-    fontSize: 16, fontWeight: '700', color: '#1e293b',
-    backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: '#e2e8f0',
-    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6,
-    overflow: 'hidden'
-  },
-
-  // ── Download Dropdown ──────────────────────────────────
-  downloadDropdown: {
-    position: 'absolute', top: '100%', right: 0, marginTop: 4,
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    minWidth: 220, ...Shadows.elevated, zIndex: 100,
-    borderWidth: 1, borderColor: Colors.border,
-    padding: 6,
-  },
-  downloadDropdownItem: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 10, paddingVertical: 8,
-    borderRadius: BorderRadius.md,
-  },
-  downloadDropdownItemInfo: { flex: 1, flexDirection: 'column', gap: 1 },
-  downloadDropdownText: {
-    fontSize: 13, fontWeight: '600', color: Colors.foreground,
-  },
-  downloadDropdownSubtext: {
-    fontSize: 11, color: Colors.muted,
-  },
-
-  // ── Pages Actions Bar ─────────────────────────────────────
-  pagesActionsBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 24, paddingVertical: 8, minWidth: 800, flex: 1,
-  },
-  pagesActionsTabs: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  pageTab: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'transparent', paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 6,
-  },
-  pageTabActive: { backgroundColor: Colors.navy },
-  pageTabText: { fontSize: 13, fontWeight: '600', color: '#64748b' },
-  pageTabTextActive: { color: Colors.white },
-  pageAddBtn: {
-    paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6,
-  },
-  pabDivider: { width: 1, height: 20, backgroundColor: '#e2e8f0', marginHorizontal: 8 },
-  pabTabActionBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'transparent', borderWidth: 1, borderColor: '#cbd5e1',
-    borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6,
-  },
-  pabTabActionBtnText: { fontSize: 13, fontWeight: '600', color: Colors.navy },
-  pabTabActionBtnPrimary: { backgroundColor: Colors.navy, borderColor: Colors.navy },
-  pabTabActionBtnTextPrimary: { fontSize: 13, fontWeight: '600', color: Colors.white },
-  
-  pagesActionsRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  pabStat: { fontSize: 11, color: '#94a3b8', fontWeight: '500' },
-  pabSearchWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: Colors.white, borderWidth: 1, borderColor: '#e2e8f0',
-    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, width: 140,
-  },
-  pabSearchInput: { flex: 1, fontSize: 12, color: '#1e293b', padding: 0 },
-  pabIconBtn: {
-    width: 28, height: 28, borderRadius: 6,
-    backgroundColor: 'transparent', borderWidth: 1, borderColor: 'transparent',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  pabIconBtnActive: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' },
-  
-  toolbarBadge: {
-    position: 'absolute', top: -4, right: -4, minWidth: 14, height: 14, paddingHorizontal: 3,
-    backgroundColor: Colors.navy, borderRadius: 7,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  toolbarBadgeText: { color: Colors.white, fontSize: 9, fontWeight: '700' },
-
-  // ── Bulk Actions Bar ──────────────────────────────
-  bulkBar: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.navy,
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, gap: Spacing.md,
-  },
-  bulkBarText: { color: Colors.white, fontSize: FontSize.sm, fontWeight: FontWeight.bold, flex: 1 },
-  bulkBarBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: Colors.destructive, paddingHorizontal: Spacing.md, paddingVertical: 6,
-    borderRadius: BorderRadius.sm,
-  },
-  bulkBarBtnText: { color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold },
-  bulkBarCancelBtn: { paddingHorizontal: Spacing.md, paddingVertical: 6 },
-  bulkBarCancelText: { color: Colors.white, fontSize: 11, fontWeight: FontWeight.semibold },
-
-  // ── Spreadsheet ───────────────────────────────────
-  headerRow: {
-    flexDirection: 'row', backgroundColor: '#f8fafc',
-    borderBottomWidth: 2, borderBottomColor: '#e2e8f0',
-  },
-  checkboxHeader: {
-    width: CHECKBOX_COL_WIDTH, justifyContent: 'center', alignItems: 'center',
-    borderRightWidth: 1, borderRightColor: '#e2e8f0',
-  },
-  serialHeader: {
-    width: 50, paddingVertical: 12, justifyContent: 'center', alignItems: 'center',
-    borderRightWidth: 1, borderRightColor: '#e2e8f0', backgroundColor: '#f1f5f9',
-  },
-  serialHeaderText: { fontSize: 11.5, fontWeight: '700', color: '#1e293b' },
-  colHeader: {
-    width: COL_WIDTH, paddingVertical: 0, paddingHorizontal: 0,
-    borderRightWidth: 1, borderRightColor: '#e2e8f0', justifyContent: 'center',
-  },
-  colHeaderInner: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6, height: '100%' },
-  colTypeChip: {
-    justifyContent: 'center', alignItems: 'center', width: 14, height: 14,
-  },
-  colHeaderText: { fontSize: 11.5, fontWeight: '700', color: Colors.navy, flex: 1, textTransform: 'uppercase', letterSpacing: 0.35 },
-  addColBtn: { width: 44, justifyContent: 'center', alignItems: 'center' },
-
-  dataRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: Colors.border, minHeight: 44 },
-  dataRowReal: { backgroundColor: Colors.white },
-  dataRowSelected: { backgroundColor: 'rgba(20,83,45,0.06)' },
-  checkboxCell: {
-    width: CHECKBOX_COL_WIDTH, justifyContent: 'center', alignItems: 'center',
-    borderRightWidth: 1, borderRightColor: Colors.border,
-  },
-  serialCell: {
-    width: SERIAL_COL_WIDTH, justifyContent: 'center', alignItems: 'center',
-    borderRightWidth: 1, borderRightColor: Colors.border, backgroundColor: Colors.borderLight,
-  },
-  serialText: { fontSize: FontSize.xs, color: Colors.muted, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
-  dataCell: { width: COL_WIDTH, borderRightWidth: 1, borderRightColor: Colors.border },
-  cellInput: {
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.md,
-    fontSize: FontSize.sm, color: Colors.foreground, minHeight: 44,
-  },
-  rowActionCell: { width: 36, justifyContent: 'center', alignItems: 'center' },
-
-  // ── Mock/placeholder cell (tappable to create entry) ──
-  mockCellInner: {
-    justifyContent: 'center', alignItems: 'center', minHeight: 44,
-  },
-  mockCellText: {
-    fontSize: FontSize.xs, color: 'rgba(0,0,0,0.08)',
-  },
-
-  // ── First entry guidance banner ───────────────────
-  firstEntryBanner: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: Colors.navy, marginHorizontal: Spacing.md,
-    marginTop: Spacing.sm, marginBottom: Spacing.xs,
-    borderRadius: BorderRadius.lg, padding: Spacing.md, gap: Spacing.md,
-    ...Shadows.button,
-  },
-  firstEntryBannerIcon: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  firstEntryBannerText: { flex: 1 },
-  firstEntryTitle: {
-    fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.white,
-  },
-  firstEntrySub: {
-    fontSize: FontSize.xs, color: 'rgba(255,255,255,0.7)', marginTop: 1,
-  },
-  firstEntryBannerBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center', alignItems: 'center',
-  },
-
-  // ── Date cell ─────────────────────────────────────
-  dateCellInner: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.md, minHeight: 44,
-  },
-  dateCellText: { fontSize: FontSize.sm, color: Colors.foreground },
-  dateCellPlaceholder: { color: 'rgba(0,0,0,0.15)' },
-
-  // ── Dropdown cell ─────────────────────────────────
-  dropdownCellInner: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.md, minHeight: 44,
-  },
-  dropdownCellText: { fontSize: FontSize.sm, color: Colors.foreground, flex: 1 },
-  dropdownCellPlaceholder: { color: 'rgba(0,0,0,0.15)' },
-
-  // ── Calc Bar ──────────────────────────────────────
-  calcBar: {
-    flexDirection: 'row', backgroundColor: '#f8fafc',
-    borderTopWidth: 2, borderTopColor: '#e2e8f0', minHeight: 48,
-  },
-  calcSerial: {
-    width: 50, backgroundColor: '#f1f5f9', borderRightWidth: 1,
-    borderRightColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center',
-  },
-  calcSerialText: { fontSize: 14, fontWeight: '800', color: Colors.navy },
-  calcCell: {
-    width: COL_WIDTH, borderRightWidth: 1, borderRightColor: '#e2e8f0',
-    justifyContent: 'center', paddingHorizontal: 6,
-  },
-  calcLabel: { fontSize: 9, fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.3 },
-  calcValue: { fontSize: 13, fontWeight: '700', color: '#0f172a', marginTop: 1 },
-  calcPlaceholder: { fontSize: 12, color: '#94a3b8', fontStyle: 'italic' },
-
-  // ── Add Row Bar ───────────────────────────────────
-  addRowBar: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, height: 64,
-    backgroundColor: Colors.white, borderTopWidth: 1, borderTopColor: Colors.border,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  addRowFab: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: Colors.navy, justifyContent: 'center', alignItems: 'center',
-    ...Shadows.button,
-  },
-
-  // ── Empty columns ─────────────────────────────────
-  emptyColumns: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.xxxl },
-  emptyTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.bold, color: Colors.foreground },
-  emptySub: { fontSize: FontSize.sm, color: Colors.muted, marginTop: Spacing.xs, marginBottom: Spacing.xl },
+  // ── Guidance & Empty State ──
+  emptyColumns: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.huge },
+  emptyTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.foreground },
+  emptySub: { fontSize: FontSize.md, color: Colors.muted, marginTop: 4, marginBottom: Spacing.xxl, textAlign: 'center' },
   addFirstColBtn: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.navy,
-    paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: BorderRadius.md, gap: Spacing.xs,
+    paddingHorizontal: Spacing.xxl, paddingVertical: Spacing.md, borderRadius: BorderRadius.md, gap: Spacing.sm,
+    ...Shadows.button,
   },
-  addFirstColText: { color: Colors.white, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
+  addFirstColText: { color: Colors.white, fontSize: FontSize.md, fontWeight: FontWeight.bold },
 
-  // ── Modals ────────────────────────────────────────
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  // ── Modals ──
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(26, 31, 58, 0.6)', justifyContent: 'flex-end' },
   modalContent: {
     backgroundColor: Colors.white, borderTopLeftRadius: BorderRadius.xl,
-    borderTopRightRadius: BorderRadius.xl, padding: Spacing.xxl, paddingBottom: Spacing.huge,
+    borderTopRightRadius: BorderRadius.xl, padding: Spacing.xl, paddingBottom: 40,
+    ...Shadows.premium,
   },
-  modalTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.foreground, marginBottom: Spacing.xl },
-  modalSub: { fontSize: FontSize.sm, color: Colors.muted, marginBottom: Spacing.lg },
-  modalLabel: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold, color: Colors.foreground, marginBottom: Spacing.sm },
+  modalTitle: { fontSize: FontSize.xl, fontWeight: FontWeight.bold, color: Colors.foreground, marginBottom: Spacing.lg },
+  modalLabel: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.foreground, marginBottom: Spacing.xs, marginTop: Spacing.md },
   modalInput: {
     borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, fontSize: FontSize.md,
-    color: Colors.foreground, marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.lg, paddingVertical: 12, fontSize: FontSize.md,
+    color: Colors.foreground, backgroundColor: Colors.background,
   },
-  typeRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.xxl, flexWrap: 'wrap' },
+  typeRow: { flexDirection: 'row', gap: Spacing.sm, marginVertical: Spacing.md, flexWrap: 'wrap' },
   typeChip: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingVertical: Spacing.md, paddingHorizontal: Spacing.md, borderRadius: BorderRadius.md, borderWidth: 1,
-    borderColor: Colors.border,
+    paddingVertical: 10, paddingHorizontal: 12, borderRadius: BorderRadius.sm, borderWidth: 1,
+    borderColor: Colors.border, backgroundColor: Colors.white,
   },
   typeChipActive: { backgroundColor: Colors.navy, borderColor: Colors.navy },
-  typeChipText: { fontSize: FontSize.xs, fontWeight: FontWeight.semibold, color: Colors.foreground, textTransform: 'capitalize' },
+  typeChipText: { fontSize: FontSize.xs, fontWeight: FontWeight.bold, color: Colors.muted },
   typeChipTextActive: { color: Colors.white },
-  typeSelectorRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.xl, flexWrap: 'wrap', justifyContent: 'space-between' },
-  typeOption: {
-    width: '31%', paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md, borderWidth: 1, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center', gap: Spacing.xs,
-    marginBottom: Spacing.sm,
-  },
-  typeOptionSelected: { backgroundColor: 'rgba(20,83,45,0.06)', borderColor: Colors.navy },
-  typeOptionText: { fontSize: 11, fontWeight: FontWeight.semibold, color: Colors.muted },
-  typeOptionSelectedText: { color: Colors.navy },
-  modalActions: { flexDirection: 'row', gap: Spacing.md },
+  modalActions: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.xl },
   modalCancelBtn: {
-    flex: 1, paddingVertical: Spacing.md, borderRadius: BorderRadius.md, borderWidth: 1,
-    borderColor: Colors.border, alignItems: 'center',
+    flex: 1, paddingVertical: 14, borderRadius: BorderRadius.md,
+    alignItems: 'center',
   },
-  modalCancelText: { fontSize: FontSize.md, fontWeight: FontWeight.semibold, color: Colors.foreground },
+  modalCancelText: { fontSize: FontSize.md, fontWeight: FontWeight.semibold, color: Colors.muted },
   modalConfirmBtn: {
-    flex: 1, paddingVertical: Spacing.md, borderRadius: BorderRadius.md,
+    flex: 2, paddingVertical: 14, borderRadius: BorderRadius.md,
     backgroundColor: Colors.navy, alignItems: 'center', ...Shadows.button,
   },
   modalConfirmText: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.white },
 
-  // ── Context Menus ─────────────────────────────────
-  contextOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
+  // ── Context Menus ──
+  contextOverlay: { flex: 1, backgroundColor: 'rgba(26, 31, 58, 0.4)', justifyContent: 'center', alignItems: 'center' },
   contextMenu: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.lg,
-    width: 320, ...Shadows.elevated,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.md,
+    width: 300, ...Shadows.elevated,
   },
-  contextTitleContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.md },
-  contextTitleMain: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.foreground, flex: 1 },
-  contextTypeBadge: { backgroundColor: Colors.borderLight, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  contextTypeBadgeText: { fontSize: 10, fontWeight: FontWeight.bold, color: Colors.muted, letterSpacing: 0.5 },
-  contextTitle: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.foreground, marginBottom: Spacing.md },
-  contextSectionLabel: { fontSize: 10, fontWeight: FontWeight.bold, color: Colors.muted, letterSpacing: 0.5, marginTop: Spacing.md, marginBottom: Spacing.xs },
-  contextDivider: { height: 1, backgroundColor: Colors.border, marginVertical: Spacing.xs },
-  contextItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingVertical: Spacing.md },
-  contextItemSelected: { backgroundColor: Colors.surface, borderRadius: BorderRadius.sm, paddingHorizontal: Spacing.sm },
-  contextItemText: { fontSize: FontSize.md, fontWeight: FontWeight.medium, color: Colors.foreground },
-  contextItemDanger: { fontSize: FontSize.md, fontWeight: FontWeight.semibold, color: Colors.destructive },
-  contextItemSubtext: { fontSize: FontSize.xs, color: Colors.mutedLight, marginTop: 1 },
-
-  // ── Filter Modal ──────────────────────────────────
-  filterModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.lg },
-  filterRow: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md, padding: Spacing.md, marginBottom: Spacing.sm, gap: Spacing.sm,
-  },
-  filterRowContent: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexWrap: 'wrap' },
-  filterRowLabel: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.navy },
-  filterRowOp: { fontSize: FontSize.xs, color: Colors.muted, fontStyle: 'italic' },
-  filterRowVal: { fontSize: FontSize.sm, color: Colors.foreground },
-  filterAddSection: { borderTopWidth: 1, borderTopColor: Colors.border, paddingTop: Spacing.md },
-  filterLabel: { fontSize: 11, fontWeight: FontWeight.semibold, color: Colors.muted, marginTop: Spacing.md, marginBottom: Spacing.xs },
-  filterChipScroll: { marginBottom: Spacing.sm },
-  filterChip: {
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.full,
-    borderWidth: 1, borderColor: Colors.border, marginRight: Spacing.xs,
-  },
-  filterChipActive: { backgroundColor: Colors.navy, borderColor: Colors.navy },
-  filterChipText: { fontSize: 11, color: Colors.foreground, fontWeight: FontWeight.medium },
-  filterChipTextActive: { color: Colors.white },
-  filterAddBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs,
-    backgroundColor: Colors.navy, borderRadius: BorderRadius.md, paddingVertical: Spacing.md, ...Shadows.button,
-  },
-  filterAddBtnText: { color: Colors.white, fontSize: FontSize.sm, fontWeight: FontWeight.bold },
-
-  // ── Date Picker ───────────────────────────────────
-  datePickerRow: { flexDirection: 'row', gap: Spacing.md, marginBottom: Spacing.lg },
-  datePickerField: { flex: 1 },
-  datePickerInput: {
-    borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, fontSize: FontSize.xl,
-    color: Colors.foreground, textAlign: 'center', fontWeight: FontWeight.bold,
-  },
-  quickDateRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.xl },
-  quickDateBtn: {
-    flex: 1, paddingVertical: Spacing.sm, borderRadius: BorderRadius.md,
-    borderWidth: 1, borderColor: Colors.navy, alignItems: 'center',
-  },
-  quickDateBtnText: { fontSize: FontSize.xs, fontWeight: FontWeight.semibold, color: Colors.navy },
-
-  // ── Dropdown Options ──────────────────────────────
-  dropdownOption: {
+  contextTitleContainer: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: Spacing.md, paddingHorizontal: Spacing.lg, borderRadius: BorderRadius.md,
-    marginBottom: 2,
+    paddingBottom: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.borderLight,
+    marginBottom: Spacing.sm,
   },
-  dropdownOptionSelected: { backgroundColor: 'rgba(20,83,45,0.06)' },
-  dropdownOptionText: { fontSize: FontSize.md, color: Colors.foreground },
-  dropdownOptionTextSelected: { fontWeight: FontWeight.bold, color: Colors.navy },
-
-  // ── Share ─────────────────────────────────────────
-  shareLinkRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
-  shareLinkBox: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    backgroundColor: Colors.surface, borderRadius: BorderRadius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.md,
-    borderWidth: 1, borderColor: Colors.border,
+  contextTitleMain: { fontSize: FontSize.md, fontWeight: FontWeight.bold, color: Colors.foreground },
+  contextTypeBadge: { backgroundColor: Colors.surface, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
+  contextTypeBadgeText: { fontSize: 9, fontWeight: FontWeight.bold, color: Colors.navy, letterSpacing: 1 },
+  contextSectionLabel: {
+    fontSize: 9, fontWeight: FontWeight.bold, color: Colors.mutedLight,
+    textTransform: 'uppercase', letterSpacing: 1.5,
+    marginTop: Spacing.md, marginBottom: 4, paddingHorizontal: 4,
   },
-  shareLinkText: { fontSize: FontSize.xs, color: Colors.muted, flex: 1 },
-  shareCopyBtn: {
-    width: 40, height: 40, borderRadius: BorderRadius.md, backgroundColor: Colors.navy,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  shareAddRow: { gap: Spacing.sm },
-  sharePermRow: { flexDirection: 'row', gap: Spacing.xs, marginTop: Spacing.sm },
-  sharePermBtn: {
-    flex: 1, paddingVertical: Spacing.sm, borderRadius: BorderRadius.md,
-    borderWidth: 1, borderColor: Colors.border, alignItems: 'center',
-  },
-  sharePermBtnActive: { backgroundColor: Colors.navy, borderColor: Colors.navy },
-  sharePermText: { fontSize: FontSize.xs, fontWeight: FontWeight.semibold, color: Colors.foreground },
-  sharePermTextActive: { color: Colors.white },
-  sharedUserRow: {
+  contextItem: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    paddingVertical: Spacing.md, borderBottomWidth: 1, borderBottomColor: Colors.border,
+    paddingVertical: 12, paddingHorizontal: 8, borderRadius: BorderRadius.sm,
   },
-  sharedUserAvatar: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.navy,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  sharedUserAvatarText: { color: Colors.white, fontWeight: FontWeight.bold, fontSize: FontSize.sm },
-  sharedUserName: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold, color: Colors.foreground },
-  sharedUserPerm: { fontSize: FontSize.xs, color: Colors.muted, textTransform: 'capitalize' },
+  contextItemText: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold, color: Colors.foreground },
+  contextDivider: { height: 1, backgroundColor: Colors.borderLight, marginVertical: Spacing.xs },
 
-  // ── Formula Cell ──────────────────────────────────
-  formulaCellInner: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.md, minHeight: 44,
-    backgroundColor: 'rgba(20, 83, 45, 0.03)',
-  },
-  formulaCellText: {
-    fontSize: FontSize.sm, fontWeight: FontWeight.bold, color: Colors.navy,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  formulaCellError: { color: Colors.destructive },
-  formulaCellPlaceholder: { color: 'rgba(0,0,0,0.12)', fontWeight: FontWeight.regular },
-
-  // ── Formula Input ─────────────────────────────────
+  // ── Specific Inputs ──
   formulaInput: {
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: FontSize.sm,
-    backgroundColor: '#F8F9F3',
-    borderColor: Colors.navy,
+    fontSize: FontSize.sm, backgroundColor: '#F8F9FF', borderColor: Colors.navy,
   },
-  formulaHint: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.xs,
-    marginBottom: Spacing.lg, paddingHorizontal: Spacing.xs,
-  },
-  formulaHintText: {
-    fontSize: FontSize.xs, color: Colors.muted, flex: 1, lineHeight: 16,
-  },
+  formulaHint: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  formulaHintText: { fontSize: 10, color: Colors.muted, fontStyle: 'italic' },
 });

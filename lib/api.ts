@@ -2,7 +2,7 @@
 // Uses the SAME Firestore database as the web app for real-time sync
 import { db } from './firebase';
 import {
-  collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, where,
+  collection, doc, getDocs, getDoc, getDocsFromServer, setDoc, deleteDoc, query, where,
 } from 'firebase/firestore';
 import { TEMPLATES, type Template, type TemplateColumn } from './templates';
 
@@ -113,17 +113,27 @@ export async function renameFolder(folderId: number, newName: string): Promise<F
 export interface RegisterSummary {
   id: number; businessId: number; folderId?: number; name: string; icon: string; iconColor?: string;
   category: string; template: string; createdAt: string; updatedAt: string; entryCount: number;
-  lastActivity?: string;
+  lastActivity?: string; deletedAt?: string;
 }
 
 export interface Column {
   id: number; registerId: number; name: string; type: string; position: number;
-  dropdownOptions?: string[]; formula?: string; width?: number;
+  dropdownOptions?: string[]; formula?: string; width?: number; summary?: string;
+  linkedTo?: { registerId: number; columnId: number };
+  mandatory?: boolean;
+  unique?: boolean;
+}
+
+export interface CellStyle {
+  textColor?: string;
+  bgColor?: string;
+  textAlign?: 'left' | 'center' | 'right';
 }
 
 export interface Entry {
   id: number; registerId: number; rowNumber: number;
   cells: Record<string, string>; createdAt: string; pageIndex?: number;
+  cellStyles?: Record<string, CellStyle>;
 }
 
 export interface Page { id: number; name: string; index: number; }
@@ -131,10 +141,25 @@ export interface Page { id: number; name: string; index: number; }
 export interface RegisterDetail extends RegisterSummary {
   columns: Column[]; entries: Entry[]; pages: Page[];
   shareLink?: string; sharedWith?: SharedUser[];
+  deletedItems?: DeletedItem[];
 }
 
 export interface SharedUser {
   id: number; name: string; phone: string; permission: 'view' | 'edit'; addedAt: string;
+}
+
+export interface DeletedItem {
+  id: number;
+  type: 'row' | 'column';
+  deletedAt: string;
+  registerName: string;
+  registerId: number;
+  // For rows
+  entry?: Entry;
+  originalIndex?: number;
+  // For columns
+  column?: Column;
+  columnCellData?: Record<string, string>; // entryId -> cellValue
 }
 
 export interface HistoryEntry {
@@ -221,6 +246,24 @@ function populateAutoIncrement(reg: RegisterDetail, columnId: number) {
  * Updates the column name to include or remove currency symbols based on the type.
  * Ensures the header visually matches the column format.
  */
+/**
+ * Re-calculates rowNumber for all entries in a register based on their order in the array.
+ * rowNumber is page-local (starts from 1 for each pageIndex).
+ */
+function renumberRows(reg: RegisterDetail) {
+  const pageCounters = new Map<number, number>();
+  reg.entries.forEach((e) => {
+    const pIdx = e.pageIndex || 0;
+    const current = (pageCounters.get(pIdx) || 0) + 1;
+    e.rowNumber = current;
+    pageCounters.set(pIdx, current);
+  });
+}
+
+/**
+ * Updates the column name to include or remove currency symbols based on the type.
+ * Ensures the header visually matches the column format.
+ */
 function updateColumnSymbol(col: Column, newType: string) {
   // Remove existing symbols or bracketed currency indicators (e.g. "Price (Rs)" -> "Price")
   let cleanName = col.name.replace(/\s*\([₹$]\)$|\s*\(Rs\)$|\s*\(₹\)$/i, '').trim();
@@ -253,7 +296,8 @@ async function getRegDoc(registerId: number): Promise<RegisterDetail> {
   // If the main document has no inline entries, load from subcollection chunks.
   // Legacy registers that still have entries[] inline will use those directly.
   if (!data.entries || data.entries.length === 0) {
-    const chunkSnap = await getDocs(chunksCol(registerId));
+    // Use getDocsFromServer to always bypass Firestore SDK cache and get fresh chunk data
+    const chunkSnap = await getDocsFromServer(chunksCol(registerId));
     const allEntries: Entry[] = [];
     chunkSnap.docs.forEach(d => {
       const chunkData = d.data() as { entries: Entry[] };
@@ -291,7 +335,8 @@ async function saveRegDocImmediate(reg: RegisterDetail): Promise<void> {
 
   // ── Write entry chunks to subcollection ──
   // First, delete any existing chunks that are now beyond the new chunk count
-  const existingChunksSnap = await getDocs(chunksCol(reg.id));
+  // Use getDocsFromServer so we always see the true server state of existing chunks
+  const existingChunksSnap = await getDocsFromServer(chunksCol(reg.id));
   const newChunkCount = Math.ceil(entries.length / ENTRIES_PER_CHUNK) || 0;
 
   const deletePromises: Promise<void>[] = [];
@@ -340,17 +385,73 @@ export function bustRegisterCache(registerId: number): void {
 export async function listRegisters(businessId: number): Promise<RegisterSummary[]> {
   const q = query(registersCol(), where('businessId', '==', businessId));
   const snap = await getDocs(q);
-  return snap.docs.map(d => {
-    // Use stored scalar fields only — never iterate r.entries[] here so we don't
-    // deserialise thousands of cells just to count them (Fix #4)
-    const r = d.data() as RegisterDetail;
-    return {
-      id: r.id, businessId: r.businessId, folderId: r.folderId, name: r.name, icon: r.icon, iconColor: r.iconColor,
-      category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
-      entryCount: r.entryCount ?? (r.entries?.length ?? 0),
-      lastActivity: r.lastActivity ?? '',
-    };
-  });
+  const seenIds = new Set<number>();
+  
+  const results = snap.docs
+    .map(d => {
+      let r = d.data() as RegisterDetail;
+      if (firestoreRegisterCache.has(r.id)) {
+        r = firestoreRegisterCache.get(r.id)!;
+      }
+      seenIds.add(r.id);
+      return {
+        id: r.id, businessId: r.businessId, folderId: r.folderId, name: r.name, icon: r.icon, iconColor: r.iconColor,
+        category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
+        entryCount: r.entryCount ?? (r.entries?.length ?? 0),
+        lastActivity: r.lastActivity ?? '',
+        deletedAt: r.deletedAt,
+      };
+    });
+
+  for (const [id, r] of firestoreRegisterCache.entries()) {
+    if (!seenIds.has(id) && r.businessId === businessId) {
+      results.push({
+        id: r.id, businessId: r.businessId, folderId: r.folderId, name: r.name, icon: r.icon, iconColor: r.iconColor,
+        category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
+        entryCount: r.entryCount ?? (r.entries?.length ?? 0),
+        lastActivity: r.lastActivity ?? '',
+        deletedAt: r.deletedAt,
+      });
+    }
+  }
+
+  return results.filter(r => !r.deletedAt);
+}
+
+export async function listDeletedRegisters(businessId: number): Promise<RegisterSummary[]> {
+  const q = query(registersCol(), where('businessId', '==', businessId));
+  const snap = await getDocs(q);
+  const seenIds = new Set<number>();
+  
+  const results = snap.docs
+    .map(d => {
+      let r = d.data() as RegisterDetail;
+      if (firestoreRegisterCache.has(r.id)) {
+        r = firestoreRegisterCache.get(r.id)!;
+      }
+      seenIds.add(r.id);
+      return {
+        id: r.id, businessId: r.businessId, folderId: r.folderId, name: r.name, icon: r.icon, iconColor: r.iconColor,
+        category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
+        entryCount: r.entryCount ?? (r.entries?.length ?? 0),
+        lastActivity: r.lastActivity ?? '',
+        deletedAt: r.deletedAt,
+      };
+    });
+
+  for (const [id, r] of firestoreRegisterCache.entries()) {
+    if (!seenIds.has(id) && r.businessId === businessId) {
+      results.push({
+        id: r.id, businessId: r.businessId, folderId: r.folderId, name: r.name, icon: r.icon, iconColor: r.iconColor,
+        category: r.category, template: r.template, createdAt: r.createdAt, updatedAt: r.updatedAt,
+        entryCount: r.entryCount ?? (r.entries?.length ?? 0),
+        lastActivity: r.lastActivity ?? '',
+        deletedAt: r.deletedAt,
+      });
+    }
+  }
+
+  return results.filter(r => !!r.deletedAt);
 }
 
 export async function getRegister(registerId: number): Promise<RegisterDetail> {
@@ -394,6 +495,7 @@ export async function createRegister(data: {
       position: i, dropdownOptions: c.dropdownOptions, formula: c.formula,
     })),
     entries: [], pages: [{ id: 1, name: 'Page 1', index: 0 }], sharedWith: [],
+    deletedItems: { columns: [], entries: [], pages: [] }
   };
   if (newReg.columns.length > 0) {
     for (let i = 0; i < 10; i++) {
@@ -409,18 +511,30 @@ export async function createRegister(data: {
   await logAction(data.businessId, 'Create Register', `Created register: ${data.name}`, { registerId: newId, registerName: data.name });
   return newReg;
 }
-
 export async function deleteRegister(registerId: number): Promise<void> {
   const reg = await getRegDoc(registerId);
-  
+  reg.deletedAt = new Date().toISOString();
+  await saveRegDocImmediate(reg);
+  await logAction(reg.businessId, 'Trash Register', `Moved register to recycle bin: ${reg.name}`, { registerId, registerName: reg.name });
+}
+
+export async function permanentlyDeleteRegister(registerId: number): Promise<void> {
+  const reg = await getRegDoc(registerId);
   // Delete all entry chunks in subcollection first
-  const chunkSnap = await getDocs(chunksCol(registerId));
+  const chunkSnap = await getDocsFromServer(chunksCol(registerId));
   const chunkDeletes = chunkSnap.docs.map(d => deleteDoc(d.ref));
   await Promise.all(chunkDeletes);
-
+  // Then delete the main document
   await deleteDoc(regDoc(registerId));
   firestoreRegisterCache.delete(registerId);
-  await logAction(reg.businessId, 'Delete Register', `Deleted register: ${reg.name}`, { registerId, registerName: reg.name });
+  await logAction(reg.businessId, 'Delete Register', `Permanently deleted register: ${reg.name}`, { registerId, registerName: reg.name });
+}
+
+export async function restoreRegister(registerId: number): Promise<void> {
+  const reg = await getRegDoc(registerId);
+  delete reg.deletedAt;
+  await saveRegDocImmediate(reg);
+  await logAction(reg.businessId, 'Restore Register', `Restored register: ${reg.name}`, { registerId, registerName: reg.name });
 }
 
 export async function renameRegister(registerId: number, newName: string): Promise<RegisterDetail> {
@@ -435,19 +549,65 @@ export async function renameRegister(registerId: number, newName: string): Promi
   });
 }
 
-export async function duplicateRegister(registerId: number): Promise<RegisterSummary> {
+export async function duplicateRegister(registerId: number, newName?: string): Promise<RegisterSummary> {
   return runQueuedMutation(registerId, async () => {
     const reg = await getRegDoc(registerId);
     const newId = generateId();
+    
+    // Deep clone the register object
     const duplicated: RegisterDetail = {
-      ...JSON.parse(JSON.stringify(reg)), id: newId, name: `${reg.name} (Copy)`,
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), entryCount: reg.entries.length,
+      ...JSON.parse(JSON.stringify(reg)),
+      id: newId,
+      name: newName || `${reg.name} (Copy)`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      deletedAt: undefined,
+      deletedItems: { columns: [], entries: [], pages: [] },
+      sharedWith: [],
+      entryCount: reg.entries.length,
     };
-    duplicated.columns = duplicated.columns.map((c: Column, i: number) => ({ ...c, id: newId + i + 1, registerId: newId }));
-    duplicated.entries = duplicated.entries.map((e: Entry, i: number) => ({ ...e, id: newId + 1000 + i, registerId: newId }));
-    duplicated.pages = duplicated.pages.map((p: Page, i: number) => ({ ...p, id: newId + 2000 + i }));
+
+    // Update internal IDs to ensure uniqueness in the new register
+    duplicated.columns = duplicated.columns.map((c: Column, i: number) => ({
+      ...c,
+      id: newId + i + 1,
+      registerId: newId
+    }));
+
+    duplicated.entries = duplicated.entries.map((e: Entry, i: number) => ({
+      ...e,
+      id: newId + 1000 + i,
+      registerId: newId
+    }));
+
+    if (duplicated.pages) {
+      duplicated.pages = duplicated.pages.map((p: Page, i: number) => ({
+        ...p,
+        id: newId + 2000 + i
+      }));
+    }
+
     await saveRegDocImmediate(duplicated);
-    return duplicated;
+    await logAction(duplicated.businessId, 'Duplicate Register', `Duplicated register: ${reg.name}`, { 
+      originalId: registerId, 
+      newId: duplicated.id,
+      registerName: duplicated.name 
+    });
+
+    return {
+      id: duplicated.id,
+      businessId: duplicated.businessId,
+      folderId: duplicated.folderId,
+      name: duplicated.name,
+      icon: duplicated.icon,
+      iconColor: duplicated.iconColor,
+      category: duplicated.category,
+      template: duplicated.template,
+      createdAt: duplicated.createdAt,
+      updatedAt: duplicated.updatedAt,
+      entryCount: duplicated.entryCount,
+      lastActivity: '',
+    };
   });
 }
 
@@ -559,14 +719,87 @@ const COLUMN_SUBSTRING_HINTS: { pattern: string; hint: ColumnHint }[] = [
  * Excel serial: days since 1900-01-01 (with the Lotus 1-2-3 leap year bug).
  */
 function excelSerialToDateStr(serial: number): string {
-  // Excel epoch: Jan 0 1900 (i.e. Dec 31 1899). Also has a phantom Feb 29 1900.
-  const utcDays = serial - 25569; // offset from Unix epoch (Jan 1 1970)
+  // Excel epoch: Jan 0 1900 (i.e. Dec 31 1899).
+  // 25569 is the number of days between Jan 1 1900 and Jan 1 1970.
+  const utcDays = serial - 25569;
   const ms = utcDays * 86400 * 1000;
   const d = new Date(ms);
+  
+  // Use UTC methods to avoid timezone shifts
   const dd = String(d.getUTCDate()).padStart(2, '0');
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
   const yyyy = d.getUTCFullYear();
-  return `${dd}/${mm}/${yyyy}`;
+  
+  return `${dd}-${mm}-${yyyy}`;
+}
+
+/**
+ * Robustly convert any date-like value (string, number, Date) to DD-MM-YYYY.
+ * Enforces consistency across import, display, and storage.
+ */
+export function formatDateToDDMMYYYY(val: any): string {
+  if (val === null || val === undefined || val === '') return '';
+  
+  // 1. Handle Excel Serial Dates
+  if (typeof val === 'number' && looksLikeExcelSerial(val)) {
+    return excelSerialToDateStr(val);
+  }
+
+  // 2. Handle JS Date object
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '';
+    const d = String(val.getDate()).padStart(2, '0');
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const y = val.getFullYear();
+    return `${d}-${m}-${y}`;
+  }
+
+  // 3. Handle String input
+  let s = String(val).trim();
+  if (!s) return '';
+
+  // Standardize separators to -
+  s = s.replace(/[\/.]/g, '-');
+  
+  const parts = s.split('-');
+  if (parts.length === 3) {
+    let p1 = parts[0].padStart(2, '0');
+    let p2 = parts[1].padStart(2, '0');
+    let p3 = parts[2];
+
+    // Handle YYYY/MM/DD or YYYY-MM-DD
+    if (p1.length === 4) {
+      return `${p3.padStart(2, '0')}-${p2}-${p1}`;
+    }
+
+    // Handle 2-digit years
+    if (p3.length === 2) {
+      const year = parseInt(p3);
+      p3 = (year < 50 ? '20' : '19') + p3;
+    }
+
+    const n1 = parseInt(p1);
+    const n2 = parseInt(p2);
+
+    if (n1 <= 12 && n2 > 12) {
+      // Clearly MM/DD/YYYY (e.g. 05/15/2023) -> Swap to DD-MM-YYYY (15-05-2023)
+      return `${p2}-${p1}-${p3}`;
+    }
+
+    // Normal case or ambiguous: assume p1 is Day, p2 is Month.
+    return `${p1}-${p2}-${p3}`;
+  }
+
+  // Final fallback: try native Date parsing
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+     const dd = String(d.getDate()).padStart(2, '0');
+     const mm = String(d.getMonth() + 1).padStart(2, '0');
+     const yyyy = d.getFullYear();
+     return `${dd}-${mm}-${yyyy}`;
+  }
+
+  return s; 
 }
 
 /** Check if a value looks like an Excel serial date (number between ~1 and ~60000). */
@@ -647,7 +880,13 @@ function resolveColumnType(
   return { type: 'text' };
 }
 
-export const importExcelData = async (businessId: number, name: string, data: Record<string, string | number | boolean | null>[], folderId?: number): Promise<RegisterSummary> => {
+export const importExcelData = async (
+  businessId: number, 
+  name: string, 
+  data: Record<string, string | number | boolean | null>[], 
+  folderId?: number,
+  metadata?: any[]
+): Promise<RegisterSummary> => {
   if (!data || data.length === 0) throw new Error("No data found in the spreadsheet");
 
   const headers = Object.keys(data[0]);
@@ -681,44 +920,75 @@ export const importExcelData = async (businessId: number, name: string, data: Re
   }
 
   // ── Build column definitions ──
-  const columns = headers.map((h, i) => {
+  // Filter out 'S.No.' if it's the first column (likely from a previous export)
+  const filteredHeaders = headers.filter((h, i) => i > 0 || (h.toLowerCase() !== 's.no.' && h.toLowerCase() !== 's.no'));
+
+  const columns = filteredHeaders.map((h, i) => {
     // Collect sample values for this column from the data
     const sampleValues = data.slice(0, 30).map(row => row[h]);
-    const resolved = resolveColumnType(h, bestTemplate, sampleValues);
-
+    
+    let resolved: any;
+    if (metadata) {
+      const meta = metadata.find(m => m['Column Name'] === h);
+      if (meta) {
+        const parsedWidth = meta['Width'] ? parseInt(meta['Width']) : undefined;
+        resolved = {
+          type: meta['Type'] || 'text',
+          dropdownOptions: meta['Dropdown Options'] ? meta['Dropdown Options'].split(',').filter(Boolean) : undefined,
+          formula: meta['Formula'] || undefined,
+          width: isNaN(parsedWidth as any) ? undefined : parsedWidth,
+          summary: meta['Summary'] || undefined
+        };
+      }
+    }
+    
+    if (!resolved) {
+      resolved = resolveColumnType(h, bestTemplate, sampleValues);
+    }
+    
     return {
       name: h || `Column ${i + 1}`,
       type: resolved.type,
       dropdownOptions: resolved.dropdownOptions,
       formula: resolved.formula,
+      width: resolved.width,
+      summary: resolved.summary,
     };
   });
 
-  const createdReg = await createRegister({ businessId, folderId, name, columns }) as RegisterDetail;
+  const createdReg = await createRegister({ businessId, folderId, name, columns: columns as any }) as RegisterDetail;
 
   // Clear the 3 default empty rows that createRegister adds, then populate from Excel data.
   // Work with the cached copy directly — no redundant getRegDoc round-trip needed.
   createdReg.entries = [];
 
+  // Identify if there is an S.No column to preserve row numbering
+  const sNoHeader = headers.find((h, i) => i === 0 && (h.toLowerCase() === 's.no.' || h.toLowerCase() === 's.no' || h.toLowerCase() === 'sr.no' || h.toLowerCase() === 'sr.no.'));
+
   data.forEach((row, rowIndex) => {
     const cells: Record<string, string> = {};
-    headers.forEach((h, colIndex) => {
-      let val = row[h];
+    createdReg.columns.forEach((col) => {
+      let val = row[col.name];
       if (val !== undefined && val !== null && val !== '') {
-        // Convert Excel serial dates to human-readable DD-MM-YYYY
-        const colType = createdReg.columns[colIndex]?.type;
-        if (colType === 'date' && typeof val === 'number' && looksLikeExcelSerial(val)) {
-          val = excelSerialToDateStr(val);
+        // Use unified date formatter for consistency across import, display, and storage
+        if (col.type === 'date') {
+          val = formatDateToDDMMYYYY(val);
         }
-        cells[createdReg.columns[colIndex].id.toString()] = String(val);
+        cells[col.id.toString()] = String(val);
       }
     });
+
+    let rowNumber = rowIndex + 1;
+    if (sNoHeader && row[sNoHeader]) {
+      const parsed = parseInt(String(row[sNoHeader]));
+      if (!isNaN(parsed)) rowNumber = parsed;
+    }
 
     // Stable ID: use offset to avoid Number.MAX_SAFE_INTEGER precision loss.
     createdReg.entries.push({
       id: createdReg.id + 10000 + rowIndex,
       registerId: createdReg.id,
-      rowNumber: rowIndex + 1,
+      rowNumber,
       cells,
       createdAt: new Date().toISOString(),
       pageIndex: 0,
@@ -1195,6 +1465,78 @@ export async function hideColumn(registerId: number, columnId: number, hidden: b
   });
 }
 
+export async function setColumnMandatory(registerId: number, columnId: number, mandatory: boolean): Promise<RegisterDetail> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const col = reg.columns.find(c => c.id.toString() === columnId.toString());
+    if (col) {
+      col.mandatory = mandatory;
+      await saveRegDocImmediate(reg);
+    }
+    return reg;
+  });
+}
+
+export async function setColumnUnique(registerId: number, columnId: number, unique: boolean): Promise<RegisterDetail> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const col = reg.columns.find(c => c.id.toString() === columnId.toString());
+    if (col) {
+      col.unique = unique;
+      await saveRegDocImmediate(reg);
+    }
+    return reg;
+  });
+}
+
+export async function setColumnLinkedTo(registerId: number, columnId: number, linkedTo?: string): Promise<RegisterDetail> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const col = reg.columns.find(c => c.id.toString() === columnId.toString());
+    if (col) {
+      col.linkedTo = linkedTo;
+      await saveRegDocImmediate(reg);
+    }
+    return reg;
+  });
+}
+
+export async function setColumnLinkedColumn(registerId: number, columnId: number, linkedColumn?: string): Promise<RegisterDetail> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const col = reg.columns.find(c => c.id.toString() === columnId.toString());
+    if (col) {
+      col.linkedColumn = linkedColumn;
+      await saveRegDocImmediate(reg);
+    }
+    return reg;
+  });
+}
+
+export async function setColumnLinkedSync(registerId: number, columnId: number, linkedSync?: boolean): Promise<RegisterDetail> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const col = reg.columns.find(c => c.id.toString() === columnId.toString());
+    if (col) {
+      col.linkedSync = linkedSync;
+      await saveRegDocImmediate(reg);
+    }
+    return reg;
+  });
+}
+
+export async function setColumnLinkedFormula(registerId: number, columnId: number, linkedFormula?: string): Promise<RegisterDetail> {
+  return runQueuedMutation(registerId, async () => {
+    const reg = await getRegDoc(registerId);
+    const col = reg.columns.find(c => c.id.toString() === columnId.toString());
+    if (col) {
+      col.linkedFormula = linkedFormula;
+      await saveRegDocImmediate(reg);
+    }
+    return reg;
+  });
+}
+
 // ─── Entry Operations ────────────────────────────────────────────────────────
 
 export async function addEntry(registerId: number, cells: Record<string, string> = {}, pageIndex: number = 0): Promise<Entry> {
@@ -1263,6 +1605,7 @@ export async function deleteEntry(registerId: number, entryId: number): Promise<
     const reg = await getRegDoc(registerId);
     reg.entries = reg.entries.filter((e) => e.id !== entryId);
     reg.entryCount = reg.entries.length;
+    renumberRows(reg);
     await saveRegDocImmediate(reg);
     await logAction(reg.businessId, 'Delete Row', `Deleted a row from "${reg.name}"`, { registerId, registerName: reg.name });
   });
@@ -1331,6 +1674,7 @@ export async function bulkDeleteEntries(registerId: number, entryIds: number[]):
     const reg = await getRegDoc(registerId);
     reg.entries = reg.entries.filter((e) => !entryIds.includes(e.id));
     reg.entryCount = reg.entries.length;
+    renumberRows(reg);
     await saveRegDocImmediate(reg);
   });
 }

@@ -20,11 +20,14 @@ import {
 import { useExport } from '../hooks/useExport';
 import { useColumnStats } from '../hooks/useColumnStats';
 import {
-  Plus, ChevronDown, Calendar,
-  Hash, FlaskConical, Pin, IndianRupee,
-  Mail, Phone, Globe, Star, CheckSquare, Image as ImageIcon, ArrowLeft,
-  Search, FileText, Download, ListOrdered, Maximize2, AlertCircle,
-  X, Link as LinkIcon, Info, AlertTriangle, Trash2, ZoomIn, ZoomOut, Bell
+  Plus, ChevronDown, 
+  Pin, 
+  ArrowLeft,
+  Search, FileText, Download, Maximize2, AlertCircle,
+  X, Link as LinkIcon, Info, AlertTriangle, Trash2, ZoomIn, ZoomOut, Bell,
+  CheckSquare, FlaskConical, Image as ImageIcon, ListOrdered
+
+
 } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { RegisterHeader } from '../components/register/RegisterHeader';
@@ -41,6 +44,8 @@ import { RegisterSummaryRow } from '../components/register/RegisterSummaryRow';
 import { AddRecordModal } from '../components/register/modals/AddRecordModal';
 import { COL_TYPES } from '../lib/constants';
 import { useNotifications } from '../lib/NotificationContext';
+import { ColumnIcon } from '../components/register/ColumnIcon';
+
 
 type CalcType = 'sum' | 'average' | 'count' | 'min' | 'max' | 'filled' | 'empty' | 'distinct' | 'none';
 
@@ -2823,23 +2828,8 @@ export default function RegisterPage() {
                   const vc = el.vc!;
                   const col = visibleColumns[vc.index];
                   if (!col) return null;
-                  const IconComponent = (() => {
-                    switch (col.type) {
-                      case 'number':         return <Hash size={12} />;
-                      case 'auto_increment': return <ListOrdered size={12} />;
-                      case 'currency':       return <IndianRupee size={12} />;
-                      case 'date':           return <Calendar size={12} />;
-                      case 'dropdown':       return <ChevronDown size={12} />;
-                      case 'formula':        return <FlaskConical size={12} />;
-                      case 'phone':          return <Phone size={12} />;
-                      case 'email':          return <Mail size={12} />;
-                      case 'url':            return <Globe size={12} />;
-                      case 'rating':         return <Star size={12} />;
-                      case 'checkbox':       return <CheckSquare size={12} />;
-                      case 'image':          return <ImageIcon size={12} />;
-                      default:               return <span className="col-type-text-icon">T</span>;
-                    }
-                  })();
+                  const IconComponent = <ColumnIcon type={col.type} size={12} />;
+
 
                   const isFrozen = frozenColumns.has(col.id);
                   const stickyLeft = isFrozen ? frozenLeftOffsets[col.id] : undefined;

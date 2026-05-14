@@ -4,11 +4,12 @@ import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { listBusinesses, createBusiness, createRegister, type RegisterSummary } from '../lib/api';
 import { CATEGORIES, TEMPLATES, type Template, DEFAULT_BLANK_COLUMNS } from '../lib/templates';
 import {
-  ArrowLeft, FileText, Hash, Calendar, ChevronDown, FlaskConical, Type,
-  Building, GraduationCap, Store, Bus, Warehouse, Package, CalendarIcon, HeartPulse,
-  Utensils, Dumbbell, Building2, User, ShieldCheck, Leaf, Plane,
-  Phone, Mail, Globe, Star, CheckSquare, Image, Plus
+  ArrowLeft, FileText,
+  Building, GraduationCap, Store, Bus, Warehouse, Package, Calendar as CalendarIcon, HeartPulse,
+  Utensils, Dumbbell, Building2, User, ShieldCheck, Leaf, Plane, Plus
 } from 'lucide-react';
+import { ColumnIcon } from '../components/register/ColumnIcon';
+
 import { useEffect } from 'react';
 
 import { CategoryCard } from '../components/templates/CategoryCard';
@@ -22,19 +23,7 @@ const ICON_MAP: Record<string, any> = {
 };
 
 function getColTypeIcon(type: string) {
-  switch (type) {
-    case 'number':   return <Hash size={10} />;
-    case 'date':     return <Calendar size={10} />;
-    case 'dropdown': return <ChevronDown size={10} />;
-    case 'formula':  return <FlaskConical size={10} />;
-    case 'phone':    return <Phone size={10} />;
-    case 'email':    return <Mail size={10} />;
-    case 'url':      return <Globe size={10} />;
-    case 'rating':   return <Star size={10} />;
-    case 'checkbox': return <CheckSquare size={10} />;
-    case 'image':    return <Image size={10} />;
-    default:         return <Type size={10} />;
-  }
+  return <ColumnIcon type={type} size={10} />;
 }
 
 export default function TemplatesPage() {
